@@ -111,7 +111,7 @@ class PopupWindow:
                 tag_frame,
                 text=tag_name,
                 bg=color_code,
-                fg=BUTTON_TEXT_COLOR,
+                fg=TEXT_COLOR,
                 activebackground=ACCENT_COLOR,
                 relief="flat",
                 width=10,
