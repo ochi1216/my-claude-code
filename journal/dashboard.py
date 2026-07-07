@@ -18,9 +18,11 @@ from storage import EXCEL_PATH, ENTRIES_SHEET, TAGMASTER_SHEET
 # UI設定（ダークテーマ）
 # ============================================================
 BG_COLOR = "#1a1a2e"
-ACCENT_COLOR = "#e94560"
+ACCENT_COLOR = "#f4a6b8"
 TEXT_COLOR = "#ffffff"
 PANEL_BG = "#0f3460"
+BUTTON_TEXT_COLOR = "#2b2b40"
+PERIOD_BTN_BG = "#dfeaf5"
 
 PERIODS = ["日次", "週次", "月次", "四半期", "年次"]
 
@@ -158,8 +160,8 @@ class DashboardWindow:
             btn = tk.Button(
                 period_frame,
                 text=period,
-                bg=PANEL_BG,
-                fg=TEXT_COLOR,
+                bg=PERIOD_BTN_BG,
+                fg=BUTTON_TEXT_COLOR,
                 activebackground=ACCENT_COLOR,
                 relief="flat",
                 width=8,
@@ -205,9 +207,9 @@ class DashboardWindow:
     def _highlight_period_button(self) -> None:
         for period, btn in self.period_buttons.items():
             if period == self.current_period:
-                btn.config(bg=ACCENT_COLOR)
+                btn.config(bg=ACCENT_COLOR, fg=BUTTON_TEXT_COLOR)
             else:
-                btn.config(bg=PANEL_BG)
+                btn.config(bg=PERIOD_BTN_BG, fg=BUTTON_TEXT_COLOR)
 
     def _on_period_change(self, period: str) -> None:
         self.current_period = period

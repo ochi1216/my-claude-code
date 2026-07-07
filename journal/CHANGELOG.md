@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## v0.5.3 - ボタン配色をパステルカラーに変更
+- `storage.py`: `DEFAULT_TAGS`の色コードをパステルトーンに変更
+  - R19 `#c96a7c`→`#f6b8c8` / JP Site `#3d6d99`→`#aed4ec` /
+    NPI `#4d8b7c`→`#b9e3c6` / その他 `#7a5c99`→`#d7c6ea`
+  - 注意: 既存のjournal_data.xlsxには自動反映されないため、
+    TagMasterシートの「色コード」列を手動更新する必要あり（v0.1.1と同様）
+- `popup_ui.py` / `dashboard.py`: `ACCENT_COLOR`をパステルローズ`#f4a6b8`に変更
+  - パステル背景に白文字では視認性が落ちるため、ボタン文字色として
+    濃紺の`BUTTON_TEXT_COLOR`(`#2b2b40`)を新設し、タグボタン・キャンセル
+    ボタン・期間切替ボタンに適用
+  - `popup_ui.py`のキャンセルボタン背景は`BG_COLOR`（背景に同化）から
+    パステルグレーの`CANCEL_BTN_BG`(`#d8d8e6`)に変更し、ボタンとして
+    視認できるようにした
+  - `dashboard.py`の期間切替ボタン（未選択時）の背景は`PANEL_BG`（濃紺）から
+    パステルブルーの`PERIOD_BTN_BG`(`#dfeaf5`)に変更
+- ウィンドウ背景・入力欄・一覧表示（ダークテーマ）は変更なし
+
 ## v0.5.2 - scheduler.py 新機能（スタートアップフォルダ方式）
 - 症状: `register_startup_task()`（schtasks方式）が「アクセスが拒否されました」で失敗
 - 原因: 社内ポリシーによりコマンドラインからのタスクスケジューラ登録がブロックされていると推測

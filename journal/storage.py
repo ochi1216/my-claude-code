@@ -27,10 +27,10 @@ ENTRIES_HEADER = ["日付", "タグ", "メモ"]
 TAGMASTER_HEADER = ["タグ名", "色コード"]
 
 DEFAULT_TAGS = [
-    ("R19", "#c96a7c"),
-    ("JP Site", "#3d6d99"),
-    ("NPI", "#4d8b7c"),
-    ("その他", "#7a5c99"),
+    ("R19", "#f6b8c8"),
+    ("JP Site", "#aed4ec"),
+    ("NPI", "#b9e3c6"),
+    ("その他", "#d7c6ea"),
 ]
 
 MAX_RETRIES = 3

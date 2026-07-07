@@ -18,9 +18,11 @@ from storage import append_entry, get_tag_master
 # UI設定（ダークテーマ）
 # ============================================================
 BG_COLOR = "#1a1a2e"
-ACCENT_COLOR = "#e94560"
+ACCENT_COLOR = "#f4a6b8"
 TEXT_COLOR = "#ffffff"
 ENTRY_BG = "#0f3460"
+BUTTON_TEXT_COLOR = "#2b2b40"
+CANCEL_BTN_BG = "#d8d8e6"
 
 HOTKEY = "ctrl+shift+j"
 VERSION = "0.2.5"
@@ -109,7 +111,7 @@ class PopupWindow:
                 tag_frame,
                 text=tag_name,
                 bg=color_code,
-                fg=TEXT_COLOR,
+                fg=BUTTON_TEXT_COLOR,
                 activebackground=ACCENT_COLOR,
                 relief="flat",
                 width=10,
@@ -142,8 +144,9 @@ class PopupWindow:
         cancel_btn = tk.Button(
             btn_frame,
             text="❌ キャンセル",
-            bg=BG_COLOR,
-            fg=TEXT_COLOR,
+            bg=CANCEL_BTN_BG,
+            fg=BUTTON_TEXT_COLOR,
+            activebackground=ACCENT_COLOR,
             relief="flat",
             width=14,
             command=self._cancel,
