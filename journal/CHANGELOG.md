@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## v0.6.0 - popup_ui.py ホットキー実装をWindows RegisterHotKey APIへ全面置き換え
+- 症状: `Ctrl+Shift+J`によるポップアップ起動が、スタートアップ経由(pythonw.exe)の
+  常駐プロセスでは機能しない。コンソールで手動実行した場合のみ動作していた
+- 調査: 定時リマインド(scheduler.py、root.after()ベース)は問題なく動き続けており、
+  keyboardライブラリの監視スレッドのみが機能していないと推測される状況だった。
+  同一PCで動いていた別のAutoHotkeyスクリプト(`launch_launcher.ahk`)も確認したが、
+  そちらは`Ctrl+Shift+L`で別スクリプトを起動するものであり、無関係と判明
+- 対応: `keyboard`ライブラリへの依存を廃止し、Windows標準の`RegisterHotKey` API
+  (`ctypes`経由)に置き換えた
+  - `_hotkey_listener_loop()`: 専用スレッドで`RegisterHotKey`を登録し、
+    `GetMessageW`でWM_HOTKEYメッセージを待ち受ける
+  - `_parse_hotkey()`: `"ctrl+shift+j"`形式の文字列を修飾キーフラグと
+    仮想キーコードに変換する簡易パーサーを追加
+  - 登録に失敗した場合（他アプリが同じキーの組み合わせを登録済み等）は
+    エラーコードを明示的にログ出力するようにした（従来は無言で失敗していた）
+  - トリガーをキューに入れてTkinterメインスレッドでポーリングする既存の
+    設計(`_trigger_queue` / `poll_trigger_queue`)はそのまま維持
+- 依存削除: `keyboard`（`pip install keyboard`は不要になった）
+
 ## v0.5.4 - タグ配色を彩度の高いトーンに再調整
 - `storage.py`: `DEFAULT_TAGS`をv0.5.3のパステルトーンから、指定の色見本
   （マゼンタ/ゴールド/グリーン/オレンジ）に近い、より発色の良い配色へ変更

@@ -2,15 +2,16 @@
 """
 popup_ui.py
 学びジャーナル - ホットキー起動の入力ポップアップUI
-Version: 0.2.0
+Version: 0.6.0
 """
 
+import ctypes
 import queue
+import threading
 import tkinter as tk
+from ctypes import wintypes
 from tkinter import font as tkfont
 from datetime import datetime
-
-import keyboard  # pip install keyboard
 
 from storage import append_entry, get_tag_master
 
@@ -25,18 +26,42 @@ BUTTON_TEXT_COLOR = "#2b2b40"
 CANCEL_BTN_BG = "#d8d8e6"
 
 HOTKEY = "ctrl+shift+j"
-VERSION = "0.2.5"
+VERSION = "0.6.0"
 
 _trigger_queue = queue.Queue()
 
+# ============================================================
+# グローバルホットキー（Windows RegisterHotKey API）
+# ------------------------------------------------------------
+# keyboardライブラリの低レベルフックは、長時間稼働中に監視スレッドが
+# 静かに停止してしまう不具合が疑われたため、OS標準のRegisterHotKey APIに
+# 置き換えた。他アプリが同じ組み合わせを登録済みの場合は明示的に
+# 失敗が分かるため、原因切り分けもしやすくなる。
+# ============================================================
+_MOD_ALT = 0x0001
+_MOD_CONTROL = 0x0002
+_MOD_SHIFT = 0x0004
+_MOD_WIN = 0x0008
+_MOD_NOREPEAT = 0x4000  # キー押しっぱなしでの連続発火を防ぐ
+_WM_HOTKEY = 0x0312
+_HOTKEY_ID = 1
+_ERROR_HOTKEY_ALREADY_REGISTERED = 1409
 
-def _hotkey_callback() -> None:
-    """
-    ホットキー押下時に呼ばれるコールバック（keyboardライブラリの
-    別スレッドから呼ばれるため、Tkinter操作は行わずキューに通知するのみ）。
-    """
-    _trigger_queue.put(True)
-    print("⌨️ ホットキーを検知しました。")
+_MODIFIER_FLAGS = {
+    "ctrl": _MOD_CONTROL,
+    "alt": _MOD_ALT,
+    "shift": _MOD_SHIFT,
+    "win": _MOD_WIN,
+}
+
+
+def _parse_hotkey(hotkey: str) -> tuple:
+    """"ctrl+shift+j"のような文字列を(修飾キーフラグ, 仮想キーコード)に変換する。"""
+    *modifier_names, key = [part.strip().lower() for part in hotkey.split("+")]
+    modifiers = 0
+    for name in modifier_names:
+        modifiers |= _MODIFIER_FLAGS[name]
+    return modifiers, ord(key.upper())
 
 
 def queue_popup_trigger() -> None:
@@ -47,10 +72,41 @@ def queue_popup_trigger() -> None:
     _trigger_queue.put(True)
 
 
-def register_global_hotkey(hotkey: str = HOTKEY) -> None:
-    """グローバルホットキーを登録する。"""
-    keyboard.add_hotkey(hotkey, _hotkey_callback)
+def _hotkey_listener_loop(hotkey: str) -> None:
+    """
+    専用スレッドでRegisterHotKeyを登録し、WM_HOTKEYメッセージを待ち受ける。
+    hWnd=NoneでRegisterHotKeyを呼ぶ場合、登録した同一スレッドでGetMessage
+    ループを回す必要があるため、登録とメッセージ待受を同じ関数内で行う。
+    """
+    user32 = ctypes.windll.user32
+    modifiers, vk = _parse_hotkey(hotkey)
+
+    if not user32.RegisterHotKey(None, _HOTKEY_ID, modifiers | _MOD_NOREPEAT, vk):
+        error_code = ctypes.GetLastError()
+        hint = (
+            "（他のアプリが同じキーの組み合わせを登録済みの可能性があります）"
+            if error_code == _ERROR_HOTKEY_ALREADY_REGISTERED
+            else ""
+        )
+        print(f"❌ ホットキー登録に失敗しました({hotkey})。エラーコード: {error_code} {hint}")
+        return
+
     print(f"🔗 グローバルホットキーを登録しました: {hotkey}")
+
+    msg = wintypes.MSG()
+    try:
+        while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
+            if msg.message == _WM_HOTKEY:
+                _trigger_queue.put(True)
+                print("⌨️ ホットキーを検知しました。")
+    finally:
+        user32.UnregisterHotKey(None, _HOTKEY_ID)
+
+
+def register_global_hotkey(hotkey: str = HOTKEY) -> None:
+    """グローバルホットキーを登録する（専用スレッドでメッセージループを待受）。"""
+    thread = threading.Thread(target=_hotkey_listener_loop, args=(hotkey,), daemon=True)
+    thread.start()
 
 
 class PopupWindow:
