@@ -2,7 +2,7 @@
 """
 popup_ui.py
 学びジャーナル - ホットキー起動の入力ポップアップUI
-Version: 0.7.2
+Version: 0.7.3
 """
 
 import ctypes
@@ -38,7 +38,7 @@ def _lighten_color(hex_color: str, factor: float = 0.78) -> str:
 
 
 HOTKEY = "ctrl+shift+j"
-VERSION = "0.7.2"
+VERSION = "0.7.3"
 
 _trigger_queue = queue.Queue()
 
@@ -187,7 +187,8 @@ class PopupWindow:
         x = screen_w - width - 20
         y = screen_h - height - 80
         self.window.geometry(f"{width}x{height}+{x}+{y}")
-        self.window.minsize(width, height)
+        min_width = int(width * 2 / 3)
+        self.window.minsize(min_width, height)
 
         title_font = tkfont.Font(family="Yu Gothic UI", size=12, weight="bold")
         label = tk.Label(
