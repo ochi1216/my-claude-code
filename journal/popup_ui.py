@@ -2,7 +2,7 @@
 """
 popup_ui.py
 学びジャーナル - ホットキー起動の入力ポップアップUI
-Version: 0.7.0
+Version: 0.7.1
 """
 
 import ctypes
@@ -38,7 +38,7 @@ def _lighten_color(hex_color: str, factor: float = 0.78) -> str:
 
 
 HOTKEY = "ctrl+shift+j"
-VERSION = "0.7.0"
+VERSION = "0.7.1"
 
 _trigger_queue = queue.Queue()
 
@@ -172,7 +172,7 @@ class PopupWindow:
         self.window.title("今日の学び")
         self.window.configure(bg=BG_COLOR)
         self.window.attributes("-topmost", True)
-        self.window.resizable(False, False)
+        self.window.resizable(True, True)
         self._register_themed(self.window)
 
         row_height = 34
@@ -185,6 +185,7 @@ class PopupWindow:
         x = screen_w - width - 20
         y = screen_h - height - 80
         self.window.geometry(f"{width}x{height}+{x}+{y}")
+        self.window.minsize(width, height)
 
         title_font = tkfont.Font(family="Yu Gothic UI", size=12, weight="bold")
         label = tk.Label(
@@ -198,7 +199,7 @@ class PopupWindow:
         self._register_themed(label, bg=True, fg=True)
 
         tag_frame = tk.Frame(self.window, bg=BG_COLOR)
-        tag_frame.pack(pady=4, fill="x", padx=20)
+        tag_frame.pack(pady=4, fill="both", expand=True, padx=20)
         self._register_themed(tag_frame)
 
         dot_font = tkfont.Font(family="Yu Gothic UI", size=12)
@@ -227,22 +228,24 @@ class PopupWindow:
 
             self.tag_rows[tag_name] = row
 
+        selected_font = tkfont.Font(family="Yu Gothic UI", size=13, weight="bold")
         self.selected_label = tk.Label(
             self.window, text="タグ未選択", bg=BG_COLOR, fg=ACCENT_COLOR,
+            font=selected_font, padx=14, pady=6,
         )
-        self.selected_label.pack(pady=(6, 2))
-        self._register_themed(self.selected_label, bg=True, fg=True)
+        self.selected_label.pack(pady=(10, 8))
+        # 選択中バッジは一括テーマ切替(_apply_theme)の対象外にし、_select_tag内で
+        # タグの生の色を直接背景に当てて目立たせる（意図的に_register_themedを呼ばない）
 
         entry = tk.Entry(
             self.window,
-            textvariable=self.memo_var,
-            width=38,
             bg=ENTRY_BG,
             fg=TEXT_COLOR,
             insertbackground=TEXT_COLOR,
             relief="flat",
+            textvariable=self.memo_var,
         )
-        entry.pack(pady=8, ipady=4)
+        entry.pack(pady=8, ipady=4, padx=20, fill="x")
         entry.focus_set()
         entry.bind("<Return>", lambda e: self._submit())
 
@@ -289,9 +292,10 @@ class PopupWindow:
 
     def _select_tag(self, tag_name: str, color_code: str) -> None:
         self.selected_tag = tag_name
-        self.selected_label.config(text=f"選択中: {tag_name}")
+        color_code = str(color_code).strip()
+        self.selected_label.config(text=f"選択中: {tag_name}", bg=color_code, fg=TEXT_COLOR)
         try:
-            pale_bg = _lighten_color(str(color_code).strip(), 0.78)
+            pale_bg = _lighten_color(color_code, 0.78)
         except (ValueError, IndexError):
             pale_bg = "#3a3a55"
         self._apply_theme(pale_bg, BUTTON_TEXT_COLOR)
