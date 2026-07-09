@@ -2,7 +2,7 @@
 """
 popup_ui.py
 学びジャーナル - ホットキー起動の入力ポップアップUI
-Version: 0.7.1
+Version: 0.7.2
 """
 
 import ctypes
@@ -38,7 +38,7 @@ def _lighten_color(hex_color: str, factor: float = 0.78) -> str:
 
 
 HOTKEY = "ctrl+shift+j"
-VERSION = "0.7.1"
+VERSION = "0.7.2"
 
 _trigger_queue = queue.Queue()
 
@@ -176,9 +176,11 @@ class PopupWindow:
         self._register_themed(self.window)
 
         row_height = 34
-        chrome_height = 170  # タイトル・selected_label・entry・キャンセルボタン・余白の合計目安
+        # タイトル・selected_label(太字バッジ化で縦に大きくなった分を加味)・entry・
+        # キャンセルボタン・余白の合計目安
+        chrome_height = 210
         width = 300
-        height = max(220, chrome_height + row_height * len(tags))
+        height = max(260, chrome_height + row_height * len(tags))
         screen_w = self.window.winfo_screenwidth()
         screen_h = self.window.winfo_screenheight()
         height = min(height, screen_h - 100)
