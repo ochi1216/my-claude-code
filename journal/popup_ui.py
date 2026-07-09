@@ -2,7 +2,7 @@
 """
 popup_ui.py
 学びジャーナル - ホットキー起動の入力ポップアップUI
-Version: 0.6.0
+Version: 0.7.0
 """
 
 import ctypes
@@ -25,8 +25,20 @@ ENTRY_BG = "#0f3460"
 BUTTON_TEXT_COLOR = "#2b2b40"
 CANCEL_BTN_BG = "#d8d8e6"
 
+
+def _lighten_color(hex_color: str, factor: float = 0.78) -> str:
+    """hex_colorを白方向にfactor(0〜1)だけ明るくした16進色を返す。"""
+    hex_color = hex_color.lstrip("#")
+    if len(hex_color) == 3:
+        hex_color = "".join(c * 2 for c in hex_color)
+    factor = max(0.0, min(1.0, factor))
+    r, g, b = (int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
+    r, g, b = (round(c + (255 - c) * factor) for c in (r, g, b))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
 HOTKEY = "ctrl+shift+j"
-VERSION = "0.6.0"
+VERSION = "0.7.0"
 
 _trigger_queue = queue.Queue()
 
@@ -117,8 +129,24 @@ class PopupWindow:
         self.window = None
         self.selected_tag = None
         self.memo_var = tk.StringVar()
-        self.tag_buttons = {}
+        self.tag_rows = {}
         self.selected_label = None
+        self._themed_bg_widgets = []
+        self._themed_fg_widgets = []
+
+    def _register_themed(self, widget, bg: bool = True, fg: bool = False) -> None:
+        """タグ選択時の背景/文字色切替に追従させるウィジェットを登録する。"""
+        if bg:
+            self._themed_bg_widgets.append(widget)
+        if fg:
+            self._themed_fg_widgets.append(widget)
+
+    def _apply_theme(self, bg: str, fg: str) -> None:
+        """登録済みウィジェットの背景色・文字色をまとめて切り替える。"""
+        for widget in self._themed_bg_widgets:
+            widget.configure(bg=bg)
+        for widget in self._themed_fg_widgets:
+            widget.configure(fg=fg)
 
     def show(self) -> None:
         """ポップアップを表示する。既に表示中の場合は前面化のみ行う。"""
@@ -130,16 +158,30 @@ class PopupWindow:
 
         self.selected_tag = None
         self.memo_var.set("")
+        self.tag_rows = {}
+        self._themed_bg_widgets = []
+        self._themed_fg_widgets = []
+
+        try:
+            tags = get_tag_master()
+        except Exception as e:
+            print(f"❌ タグ取得に失敗しました（Excelロック等の可能性）: {e}")
+            tags = []
 
         self.window = tk.Toplevel(self.root)
         self.window.title("今日の学び")
         self.window.configure(bg=BG_COLOR)
         self.window.attributes("-topmost", True)
         self.window.resizable(False, False)
+        self._register_themed(self.window)
 
-        width, height = 360, 220
+        row_height = 34
+        chrome_height = 170  # タイトル・selected_label・entry・キャンセルボタン・余白の合計目安
+        width = 300
+        height = max(220, chrome_height + row_height * len(tags))
         screen_w = self.window.winfo_screenwidth()
         screen_h = self.window.winfo_screenheight()
+        height = min(height, screen_h - 100)
         x = screen_w - width - 20
         y = screen_h - height - 80
         self.window.geometry(f"{width}x{height}+{x}+{y}")
@@ -147,39 +189,49 @@ class PopupWindow:
         title_font = tkfont.Font(family="Yu Gothic UI", size=12, weight="bold")
         label = tk.Label(
             self.window,
-            text="📝 今日の気づき・学び",
+            text="📝 今日の学び",
             bg=BG_COLOR,
             fg=TEXT_COLOR,
             font=title_font,
         )
         label.pack(pady=(12, 6))
+        self._register_themed(label, bg=True, fg=True)
 
         tag_frame = tk.Frame(self.window, bg=BG_COLOR)
-        tag_frame.pack(pady=4)
+        tag_frame.pack(pady=4, fill="x", padx=20)
+        self._register_themed(tag_frame)
 
-        try:
-            tags = get_tag_master()
-        except Exception as e:
-            print(f"❌ タグ取得に失敗しました（Excelロック等の可能性）: {e}")
-            tags = []
+        dot_font = tkfont.Font(family="Yu Gothic UI", size=12)
+        name_font = tkfont.Font(family="Yu Gothic UI", size=10)
+
         for tag_name, color_code in tags:
-            btn = tk.Button(
-                tag_frame,
-                text=tag_name,
-                bg=color_code,
-                fg=TEXT_COLOR,
-                activebackground=ACCENT_COLOR,
-                relief="flat",
-                width=10,
-                command=lambda t=tag_name: self._select_tag(t),
+            row = tk.Frame(tag_frame, bg=BG_COLOR, cursor="hand2")
+            row.pack(fill="x", pady=3)
+            self._register_themed(row)
+
+            dot = tk.Label(row, text="●", font=dot_font, fg=color_code, bg=BG_COLOR)
+            dot.pack(side="left", padx=(4, 8))
+            self._register_themed(dot)  # fgはタグ固有色のため常に固定、bgのみ追従
+
+            name_label = tk.Label(
+                row, text=tag_name, font=name_font, bg=BG_COLOR, fg=TEXT_COLOR, anchor="w",
             )
-            btn.pack(side="left", padx=4)
-            self.tag_buttons[tag_name] = btn
+            name_label.pack(side="left", fill="x", expand=True)
+            self._register_themed(name_label, bg=True, fg=True)
+
+            for widget in (row, dot, name_label):
+                widget.bind(
+                    "<Button-1>",
+                    lambda e, t=tag_name, c=color_code: self._select_tag(t, c),
+                )
+
+            self.tag_rows[tag_name] = row
 
         self.selected_label = tk.Label(
             self.window, text="タグ未選択", bg=BG_COLOR, fg=ACCENT_COLOR,
         )
         self.selected_label.pack(pady=(6, 2))
+        self._register_themed(self.selected_label, bg=True, fg=True)
 
         entry = tk.Entry(
             self.window,
@@ -196,6 +248,7 @@ class PopupWindow:
 
         btn_frame = tk.Frame(self.window, bg=BG_COLOR)
         btn_frame.pack(pady=6)
+        self._register_themed(btn_frame)
 
         cancel_btn = tk.Button(
             btn_frame,
@@ -234,9 +287,14 @@ class PopupWindow:
         except tk.TclError as e:
             print(f"⚠️ 前面表示に失敗しました: {e}")
 
-    def _select_tag(self, tag_name: str) -> None:
+    def _select_tag(self, tag_name: str, color_code: str) -> None:
         self.selected_tag = tag_name
         self.selected_label.config(text=f"選択中: {tag_name}")
+        try:
+            pale_bg = _lighten_color(str(color_code).strip(), 0.78)
+        except (ValueError, IndexError):
+            pale_bg = "#3a3a55"
+        self._apply_theme(pale_bg, BUTTON_TEXT_COLOR)
         print(f"🏷️ タグ選択: {tag_name}")
 
     def _submit(self) -> None:
