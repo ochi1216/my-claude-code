@@ -28,7 +28,7 @@ BBT「大前研一ライブ」のRTOCSコーナーの講義動画を自動取得
    setx GEMINI_API_KEY "your-api-key-here"
    ```
 
-4. `BASE_DIR`（`rtocs_organizer_202060517_01.py` 内で `C:\Users\nx023836\Documents\PythonScripts\bbt\RTOCS_organizer` にハードコードされている）配下の `data\category_map.json` に、年度とbbt757のカテゴリID(`subCatId`)の対応表を用意する。このファイルが無いと、import修正後は起動時のGUI (`RTOCSConfigGUI`) が `category_map.json` の読み込みで `FileNotFoundError` を起こす。
+4. `BASE_DIR`（`rtocs_organizer_20260711_01.py` 内で `C:\Users\nx023836\Documents\PythonScripts\bbt\RTOCS_organizer` にハードコードされている）配下の `data\category_map.json` に、年度とbbt757のカテゴリID(`subCatId`)の対応表を用意する。このファイルが無いと、import修正後は起動時のGUI (`RTOCSConfigGUI`) が `category_map.json` の読み込みで `FileNotFoundError` を起こす。
 
    ```json
    {
@@ -40,7 +40,7 @@ BBT「大前研一ライブ」のRTOCSコーナーの講義動画を自動取得
 5. スクリプトを実行する。
 
    ```
-   python rtocs_organizer_202060517_01.py
+   python rtocs_organizer_20260711_01.py
    ```
 
 ## 既知の制限（今回のスコープ外）
