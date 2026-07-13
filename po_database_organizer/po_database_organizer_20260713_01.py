@@ -370,6 +370,8 @@ class POScanner:
                                 "project_name":        project_name,
                                 "vendor_id":           vendor_id,
                                 "vendor_name":         vendor_name,
+                                "po_folder_name":      f["po_folder_name"],
+                                "po_folder_web_url":   f["po_folder_web_url"],
                                 "representative_file": f["name"],
                                 "web_url":             f["web_url"],
                                 "last_modified":       f["last_modified"],
@@ -382,20 +384,24 @@ class POScanner:
                             po_rec["last_modified"]       = f["last_modified"]
                             po_rec["representative_file"] = f["name"]
                             po_rec["web_url"]              = f["web_url"]
+                            po_rec["po_folder_name"]       = f["po_folder_name"]
+                            po_rec["po_folder_web_url"]    = f["po_folder_web_url"]
 
                     documents.append({
-                        "doc_id":         doc_id,
-                        "po_id":          po_id,
-                        "project_id":     project_id,
-                        "project_name":   project_name,
-                        "vendor_id":      vendor_id,
-                        "vendor_name":    vendor_name,
-                        "filename":       f["name"],
-                        "relative_path":  f["relative_path"],
-                        "web_url":        f["web_url"],
-                        "last_modified":  f["last_modified"],
-                        "size":           f["size"],
-                        "doc_type":       doc_type,
+                        "doc_id":            doc_id,
+                        "po_id":             po_id,
+                        "project_id":        project_id,
+                        "project_name":      project_name,
+                        "vendor_id":         vendor_id,
+                        "vendor_name":       vendor_name,
+                        "po_folder_name":    f["po_folder_name"],
+                        "po_folder_web_url": f["po_folder_web_url"],
+                        "filename":          f["name"],
+                        "relative_path":     f["relative_path"],
+                        "web_url":           f["web_url"],
+                        "last_modified":     f["last_modified"],
+                        "size":              f["size"],
+                        "doc_type":          doc_type,
                     })
 
                 state["count"] += 1
@@ -415,8 +421,14 @@ class POScanner:
         }
 
     def _collect_files(self, drive_id: str, folder_id: str,
-                        rel_path: str, depth: int) -> list:
-        """Vendorフォルダ配下を再帰的に走査し、ファイル一覧をフラットに集める。"""
+                        rel_path: str, depth: int,
+                        po_folder_name: str = "", po_folder_web_url: str = "") -> list:
+        """
+        Vendorフォルダ配下を再帰的に走査し、ファイル一覧をフラットに集める。
+        depth==0（Vendorフォルダ直下）で見つかったサブフォルダを「PO関連フォルダ」
+        （Project > Vendor > PO関連フォルダ > 書類 の3階層目）とみなし、
+        その名前とURLを配下の全ファイルに伝播させる。
+        """
         if depth >= MAX_DEPTH:
             return []
         children    = self.client.fetch_all_children(drive_id, folder_id)
@@ -428,17 +440,28 @@ class POScanner:
 
         result = [
             {
-                "name":          f.get("name", ""),
-                "web_url":       f.get("webUrl", ""),
-                "size":          f.get("size", 0),
-                "last_modified": f.get("lastModifiedDateTime", ""),
-                "relative_path": rel_path,
+                "name":              f.get("name", ""),
+                "web_url":           f.get("webUrl", ""),
+                "size":              f.get("size", 0),
+                "last_modified":     f.get("lastModifiedDateTime", ""),
+                "relative_path":     rel_path,
+                "po_folder_name":    po_folder_name,
+                "po_folder_web_url": po_folder_web_url,
             }
             for f in files_raw
         ]
         for sub in folders_raw:
             sub_rel = f"{rel_path}/{sub.get('name', '')}" if rel_path else sub.get("name", "")
-            result.extend(self._collect_files(drive_id, sub["id"], sub_rel, depth + 1))
+            if depth == 0:
+                sub_po_folder_name    = sub.get("name", "")
+                sub_po_folder_web_url = sub.get("webUrl", "")
+            else:
+                sub_po_folder_name    = po_folder_name
+                sub_po_folder_web_url = po_folder_web_url
+            result.extend(self._collect_files(
+                drive_id, sub["id"], sub_rel, depth + 1,
+                sub_po_folder_name, sub_po_folder_web_url,
+            ))
         return result
 
 
@@ -484,11 +507,12 @@ def export_excel(result: dict, out_path: Path) -> None:
     ws1.title = "PO一覧"
     _sheet(
         ws1,
-        ["Project", "Vendor", "PO番号", "代表ファイル", "関連書類数",
+        ["Project", "Vendor", "PO関連フォルダ", "PO番号", "代表ファイル", "関連書類数",
          "最終更新日", "Status(未定義)"],
         [
             [(po["project_name"], project_web_url.get(po["project_id"])),
              (po["vendor_name"], vendor_web_url.get(po["vendor_id"])),
+             (po["po_folder_name"], po["po_folder_web_url"]),
              po["po_number"],
              (po["representative_file"], po["web_url"]),
              po["doc_count"], po["last_modified"], ""]
@@ -499,10 +523,11 @@ def export_excel(result: dict, out_path: Path) -> None:
     ws2 = wb.create_sheet("関連書類")
     _sheet(
         ws2,
-        ["Project", "Vendor", "PO番号", "ファイル名", "最終更新日"],
+        ["Project", "Vendor", "PO関連フォルダ", "PO番号", "ファイル名", "最終更新日"],
         [
             [(d["project_name"], project_web_url.get(d["project_id"])),
              (d["vendor_name"], vendor_web_url.get(d["vendor_id"])),
+             (d["po_folder_name"], d["po_folder_web_url"]),
              po_number_by_id.get(d["po_id"], ""),
              (d["filename"], d["web_url"]), d["last_modified"]]
             for d in result["documents"] if d["po_id"]
@@ -512,10 +537,11 @@ def export_excel(result: dict, out_path: Path) -> None:
     ws3 = wb.create_sheet("未分類書類")
     _sheet(
         ws3,
-        ["Project", "Vendor", "サブフォルダ", "ファイル名", "最終更新日"],
+        ["Project", "Vendor", "PO関連フォルダ", "サブフォルダ(詳細)", "ファイル名", "最終更新日"],
         [
             [(d["project_name"], project_web_url.get(d["project_id"])),
              (d["vendor_name"], vendor_web_url.get(d["vendor_id"])),
+             (d["po_folder_name"], d["po_folder_web_url"]),
              d["relative_path"],
              (d["filename"], d["web_url"]), d["last_modified"]]
             for d in result["documents"] if not d["po_id"]
