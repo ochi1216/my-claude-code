@@ -2,37 +2,37 @@
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
-rem â”€â”€ åŒã˜ãƒ•ã‚©ãƒ«ãƒ€å†…ã® po_database_organizer_*.py ã®ã†ã¡ã€
-rem    ãƒ•ã‚¡ã‚¤ãƒ«åã®ä¸¦ã³é †ã§æœ€æ–°ï¼ˆæ—¥ä»˜_é€£ç•ªãŒæœ€å¤§ï¼‰ã®ã‚‚ã®ã‚’è‡ªå‹•é¸æŠžã™ã‚‹ â”€â”€
+rem „Ÿ„Ÿ “¯‚¶ƒtƒHƒ‹ƒ_“à‚Ì po_database_organizer_*.py ‚Ì‚¤‚¿A
+rem    ƒtƒ@ƒCƒ‹–¼‚Ì•À‚Ñ‡‚ÅÅVi“ú•t_˜A”Ô‚ªÅ‘åj‚Ì‚à‚Ì‚ðŽ©“®‘I‘ð‚·‚é „Ÿ„Ÿ
 set "LATEST="
 for /f "delims=" %%F in ('dir /b /a-d /o-n "po_database_organizer_*.py" 2^>nul') do (
     if not defined LATEST set "LATEST=%%F"
 )
 
 if not defined LATEST (
-    echo [ã‚¨ãƒ©ãƒ¼] po_database_organizer_*.py ãŒè¦‹ã¤ã‹ã‚Šã¾ã›ã‚“ã€‚
-    echo          ã“ã®ãƒãƒƒãƒãƒ•ã‚¡ã‚¤ãƒ«ã‚’ã‚¹ã‚¯ãƒªãƒ—ãƒˆã¨åŒã˜ãƒ•ã‚©ãƒ«ãƒ€ã«ç½®ã„ã¦ãã ã•ã„ã€‚
+    echo [ƒGƒ‰[] po_database_organizer_*.py ‚ªŒ©‚Â‚©‚è‚Ü‚¹‚ñB
+    echo          ‚±‚Ìƒoƒbƒ`ƒtƒ@ƒCƒ‹‚ðƒXƒNƒŠƒvƒg‚Æ“¯‚¶ƒtƒHƒ‹ƒ_‚É’u‚¢‚Ä‚­‚¾‚³‚¢B
     pause
     exit /b 1
 )
 
 echo ============================================================
-echo  PO Database Organizer ã‚’èµ·å‹•ã—ã¾ã™
-echo  å®Ÿè¡Œãƒ•ã‚¡ã‚¤ãƒ«: %LATEST%
+echo  PO Database Organizer ‚ð‹N“®‚µ‚Ü‚·
+echo  ŽÀsƒtƒ@ƒCƒ‹: %LATEST%
 echo ============================================================
 echo.
 
 if not exist config.json (
-    echo [è­¦å‘Š] config.json ãŒè¦‹ã¤ã‹ã‚Šã¾ã›ã‚“ã€‚
-    echo          config.example.json ã‚’ã‚³ãƒ”ãƒ¼ã—ã¦ config.json ã‚’ä½œæˆã—ã€
-    echo          tenant_id / client_id / site_host / site_path ç­‰ã‚’
-    echo          ç’°å¢ƒã«åˆã‚ã›ã¦è¨­å®šã—ã¦ã‹ã‚‰å†å®Ÿè¡Œã—ã¦ãã ã•ã„ã€‚
+    echo [Œx] config.json ‚ªŒ©‚Â‚©‚è‚Ü‚¹‚ñB
+    echo          config.example.json ‚ðƒRƒs[‚µ‚Ä config.json ‚ðì¬‚µA
+    echo          tenant_id / client_id / site_host / site_path “™‚ð
+    echo          ŠÂ‹«‚É‡‚í‚¹‚ÄÝ’è‚µ‚Ä‚©‚çÄŽÀs‚µ‚Ä‚­‚¾‚³‚¢B
     echo.
     pause
     exit /b 1
 )
 
-rem â”€â”€ python ã‚³ãƒžãƒ³ãƒ‰ã®å­˜åœ¨ç¢ºèªï¼ˆpython ãŒç„¡ã‘ã‚Œã° py ãƒ©ãƒ³ãƒãƒ£ãƒ¼ã‚’è©¦ã™ï¼‰ â”€â”€
+rem „Ÿ„Ÿ python ƒRƒ}ƒ“ƒh‚Ì‘¶ÝŠm”Fipython ‚ª–³‚¯‚ê‚Î py ƒ‰ƒ“ƒ`ƒƒ[‚ðŽŽ‚·j „Ÿ„Ÿ
 set "PYCMD="
 where python >nul 2>nul
 if not errorlevel 1 set "PYCMD=python"
@@ -41,15 +41,15 @@ if not defined PYCMD (
     if not errorlevel 1 set "PYCMD=py"
 )
 if not defined PYCMD (
-    echo [ã‚¨ãƒ©ãƒ¼] python ãŒè¦‹ã¤ã‹ã‚Šã¾ã›ã‚“ã€‚Python ã‚’ã‚¤ãƒ³ã‚¹ãƒˆãƒ¼ãƒ«ã—ã€PATHã‚’é€šã—ã¦ãã ã•ã„ã€‚
+    echo [ƒGƒ‰[] python ‚ªŒ©‚Â‚©‚è‚Ü‚¹‚ñBPython ‚ðƒCƒ“ƒXƒg[ƒ‹‚µAPATH‚ð’Ê‚µ‚Ä‚­‚¾‚³‚¢B
     pause
     exit /b 1
 )
 
-rem â”€â”€ å¿…è¦ãƒ©ã‚¤ãƒ–ãƒ©ãƒªãŒæœªã‚¤ãƒ³ã‚¹ãƒˆãƒ¼ãƒ«ãªã‚‰ requirements.txt ã‹ã‚‰è‡ªå‹•ã‚¤ãƒ³ã‚¹ãƒˆãƒ¼ãƒ« â”€â”€
+rem „Ÿ„Ÿ •K—vƒ‰ƒCƒuƒ‰ƒŠ‚ª–¢ƒCƒ“ƒXƒg[ƒ‹‚È‚ç requirements.txt ‚©‚çŽ©“®ƒCƒ“ƒXƒg[ƒ‹ „Ÿ„Ÿ
 %PYCMD% -m pip show msal >nul 2>nul
 if errorlevel 1 (
-    echo [åˆå›žã‚»ãƒƒãƒˆã‚¢ãƒƒãƒ—] å¿…è¦ãªãƒ©ã‚¤ãƒ–ãƒ©ãƒªã‚’ã‚¤ãƒ³ã‚¹ãƒˆãƒ¼ãƒ«ã—ã¾ã™...
+    echo [‰‰ñƒZƒbƒgƒAƒbƒv] •K—v‚Èƒ‰ƒCƒuƒ‰ƒŠ‚ðƒCƒ“ƒXƒg[ƒ‹‚µ‚Ü‚·...
     %PYCMD% -m pip install -r requirements.txt
     echo.
 )
@@ -57,5 +57,5 @@ if errorlevel 1 (
 %PYCMD% "%LATEST%"
 
 echo.
-echo çµ‚äº†ã—ã¾ã—ãŸã€‚ã‚¦ã‚£ãƒ³ãƒ‰ã‚¦ã‚’é–‰ã˜ã‚‹ã«ã¯ä½•ã‹ã‚­ãƒ¼ã‚’æŠ¼ã—ã¦ãã ã•ã„ã€‚
+echo I—¹‚µ‚Ü‚µ‚½BƒEƒBƒ“ƒhƒE‚ð•Â‚¶‚é‚É‚Í‰½‚©ƒL[‚ð‰Ÿ‚µ‚Ä‚­‚¾‚³‚¢B
 pause >nul
