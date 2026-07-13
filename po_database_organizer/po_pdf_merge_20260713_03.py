@@ -3,7 +3,7 @@
 """
 PO PDF Merge Integrator
 
-version : 20260713_02
+version : 20260713_03
 purpose : po_database_organizer が出力した「PO一覧」シート付きのExcelを読み込み、
           各行のPO本体PDFをSharePointから直接ダウンロードして
           （ヘッダーPO番号・発注金額・明細行）を抽出し、
@@ -34,11 +34,17 @@ purpose : po_database_organizer が出力した「PO一覧」シート付きのE
     1. config.json を用意する（po_database_organizer と同じもので良い。
        tenant_id/client_id/site_host/site_path/library_name が必要）
     2. pip install -r requirements.txt
-    3. python po_pdf_merge_20260713_02.py [PO一覧Excelファイル] [-o output.xlsx]
+    3. python po_pdf_merge_20260713_03.py [PO一覧Excelファイル] [-o output.xlsx]
        入力ファイルを引数で指定しない場合は、起動時にファイル選択ダイアログが
        開くのでExcelファイルを選ぶ。
        出力先を省略した場合は "<入力ファイル名>_detail.xlsx" に保存する
        （元のExcelは上書きしない）。
+
+v03での修正:
+    - 「PDFヘッダーPO番号」が数字部分のみになっていたのを、国コード+拠点コード
+      （例 HK64, CN69, JP68）を別列「ヘッダー接頭辞」として復活。
+    - Vendor列とPO関連フォルダ列が同名になっている行でファイルが見つからない
+      場合、フォルダの重複セグメントを1つ省いたパスでも再試行するフォールバックを追加。
 """
 
 import argparse
@@ -500,7 +506,7 @@ def main():
         print(f"[エラー] 想定する列が見つかりません: {e}")
         sys.exit(1)
 
-    new_cols = ["PDFヘッダーPO番号", "PO番号一致", "発注金額", "通貨", "明細行数", "抽出エラー"]
+    new_cols = ["PDFヘッダーPO番号", "ヘッダー接頭辞", "PO番号一致", "発注金額", "通貨", "明細行数", "抽出エラー"]
     existing_new_col_start = len(header)
     for offset, name in enumerate(new_cols):
         ws.cell(row=1, column=existing_new_col_start + 1 + offset, value=name)
@@ -528,7 +534,16 @@ def main():
             if not po_folder or not rep_file:
                 raise ValueError("PO関連フォルダ または 代表ファイル が空欄です")
             relative_path = f"{project_name}/{vendor_name}/{po_folder}/{rep_file}"
-            pdf_bytes = client.download_by_path(drive_id, relative_path)
+            try:
+                pdf_bytes = client.download_by_path(drive_id, relative_path)
+            except FileNotFoundError:
+                # Vendorフォルダ＝PO関連フォルダで、実際にはPOフォルダの階層が
+                # もう一段少ないケースへのフォールバック（重複セグメントを1つ省く）
+                if po_folder and po_folder == vendor_name:
+                    fallback_path = f"{project_name}/{vendor_name}/{rep_file}"
+                    pdf_bytes = client.download_by_path(drive_id, fallback_path)
+                else:
+                    raise
             extracted = extract_from_bytes(pdf_bytes, rep_file)
             if extracted["errors"]:
                 error_msg = "; ".join(extracted["errors"])
@@ -540,13 +555,14 @@ def main():
             if extracted["header_po_number"]:
                 match = "OK" if str(po_number) == extracted["header_po_number"] else "NG"
             ws.cell(row=row_num, column=existing_new_col_start + 1, value=extracted["header_po_number"])
-            ws.cell(row=row_num, column=existing_new_col_start + 2, value=match)
-            ws.cell(row=row_num, column=existing_new_col_start + 3, value=extracted["order_amount"])
-            ws.cell(row=row_num, column=existing_new_col_start + 4, value=extracted["order_amount_currency"])
-            ws.cell(row=row_num, column=existing_new_col_start + 5, value=len(extracted["line_items"]))
+            ws.cell(row=row_num, column=existing_new_col_start + 2, value=extracted["header_po_prefix"])
+            ws.cell(row=row_num, column=existing_new_col_start + 3, value=match)
+            ws.cell(row=row_num, column=existing_new_col_start + 4, value=extracted["order_amount"])
+            ws.cell(row=row_num, column=existing_new_col_start + 5, value=extracted["order_amount_currency"])
+            ws.cell(row=row_num, column=existing_new_col_start + 6, value=len(extracted["line_items"]))
             for it in extracted["line_items"]:
                 all_line_items.append((po_number, it))
-        ws.cell(row=row_num, column=existing_new_col_start + 6, value=error_msg)
+        ws.cell(row=row_num, column=existing_new_col_start + 7, value=error_msg)
 
         if error_msg:
             print(f"    [要確認] {error_msg}")
