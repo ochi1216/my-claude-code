@@ -3,7 +3,7 @@
 """
 PO Database Organizer
 
-version : 20260713_01
+version : 20260713_02
 purpose : SharePoint上のPOフォルダ（Project > Vendor > 書類）をスキャンし、
           PO番号を軸にしたカタログをExcel/JSONで出力する。
 
@@ -19,7 +19,7 @@ Phase 1のスコープ:
     1. config.example.json を config.json にコピーし、tenant_id/client_id/
        site_host/site_path/library_name を環境に合わせて設定する
     2. pip install -r requirements.txt
-    3. python po_database_organizer_20260713_01.py
+    3. python po_database_organizer_20260713_02.py
     4. 初回はターミナルにDevice Code Flowの認証コードが表示されるので、
        表示されたURLをブラウザで開いてサインインする
     5. http://127.0.0.1:5010 が自動で開くので、「スキャン開始」を押す
@@ -537,12 +537,11 @@ def export_excel(result: dict, out_path: Path) -> None:
     ws3 = wb.create_sheet("未分類書類")
     _sheet(
         ws3,
-        ["Project", "Vendor", "PO関連フォルダ", "サブフォルダ(詳細)", "ファイル名", "最終更新日"],
+        ["Project", "Vendor", "PO関連フォルダ", "ファイル名", "最終更新日"],
         [
             [(d["project_name"], project_web_url.get(d["project_id"])),
              (d["vendor_name"], vendor_web_url.get(d["vendor_id"])),
              (d["po_folder_name"], d["po_folder_web_url"]),
-             d["relative_path"],
              (d["filename"], d["web_url"]), d["last_modified"]]
             for d in result["documents"] if not d["po_id"]
         ],
