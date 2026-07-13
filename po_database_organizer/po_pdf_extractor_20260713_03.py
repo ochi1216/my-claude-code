@@ -3,7 +3,7 @@
 """
 PO PDF Extractor（調査/プロトタイプ版）
 
-version : 20260713_02
+version : 20260713_03
 purpose : PO本体PDF（SAPが発行するPurchase Order）を開き、
           1) 1ページ目冒頭の「PO番号」（国コード+拠点コード+PO番号、例 HK648210235980）
           2) 明細テーブル（Line / Material no.(12NC) / Order quantity / Unit /
@@ -22,10 +22,13 @@ purpose : PO本体PDF（SAPが発行するPurchase Order）を開き、
       その後に数量/単位/単価/通貨/金額が続き、以降の複数行がDescription（自由記述）になる。
     - 明細が多い場合、テーブルが複数ページにまたがる（例: 4行目以降が次ページに続く）。
       全ページを走査して連結することで対応済み（v02で修正）。
+    - 1ページ目冒頭が "Purchase Order" ではなく "Changed Purchase Order"
+      （変更発注書）の場合にも対応（v03で修正）。実際のタイトル文字列は
+      「PDF種別」列に記録する。
 
 使い方:
     pip install -r requirements.txt
-    python po_pdf_extractor_20260713_02.py <PDFが入ったフォルダ> [-o summary.xlsx]
+    python po_pdf_extractor_20260713_03.py <PDFが入ったフォルダ> [-o summary.xlsx]
 """
 
 import argparse
@@ -156,6 +159,7 @@ def extract(pdf_path: Path) -> dict:
         "filename_po_number":  "",
         "header_po_number":    "",
         "header_po_prefix":    "",
+        "document_type":       "",
         "po_number_match":     None,
         "order_amount":        "",
         "order_amount_currency": "",
@@ -173,7 +177,9 @@ def extract(pdf_path: Path) -> dict:
                 else pdf.pages[0].extract_text() or ""
             lines = [l.strip() for l in page1_text.split("\n") if l.strip()]
 
-            if len(lines) >= 2 and lines[0].lower() == "purchase order":
+            # "Purchase Order" のほか、変更発注書 "Changed Purchase Order" にも対応する
+            if len(lines) >= 2 and "purchase order" in lines[0].lower():
+                result["document_type"] = lines[0]
                 header_line = lines[1]
                 hm = HEADER_PO_RE.match(header_line)
                 if hm:
@@ -185,7 +191,7 @@ def extract(pdf_path: Path) -> dict:
                     )
             else:
                 result["errors"].append(
-                    "1ページ目冒頭が 'Purchase Order' で始まっていない"
+                    "1ページ目冒頭が 'Purchase Order' 系のタイトルで始まっていない"
                 )
 
             if result["filename_po_number"] and result["header_po_number"]:
@@ -265,13 +271,13 @@ def build_summary_workbook(results: list, out_path: Path) -> None:
     ws1 = wb.active
     ws1.title = "サマリー"
     _header(ws1, [
-        "ファイル名", "ファイル名PO番号", "ヘッダーPO番号", "ヘッダー接頭辞",
+        "ファイル名", "ファイル名PO番号", "ヘッダーPO番号", "ヘッダー接頭辞", "PDF種別",
         "番号一致", "発注金額", "通貨", "明細行数", "エラー",
     ])
     for r in results:
         ws1.append([
             r["filename"], r["filename_po_number"], r["header_po_number"],
-            r["header_po_prefix"],
+            r["header_po_prefix"], r["document_type"],
             "" if r["po_number_match"] is None else ("OK" if r["po_number_match"] else "NG"),
             r["order_amount"], r["order_amount_currency"],
             len(r["line_items"]), "; ".join(r["errors"]),

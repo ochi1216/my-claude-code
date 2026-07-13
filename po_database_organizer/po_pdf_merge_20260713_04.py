@@ -3,7 +3,7 @@
 """
 PO PDF Merge Integrator
 
-version : 20260713_03
+version : 20260713_04
 purpose : po_database_organizer が出力した「PO一覧」シート付きのExcelを読み込み、
           各行のPO本体PDFをSharePointから直接ダウンロードして
           （ヘッダーPO番号・発注金額・明細行）を抽出し、
@@ -34,7 +34,7 @@ purpose : po_database_organizer が出力した「PO一覧」シート付きのE
     1. config.json を用意する（po_database_organizer と同じもので良い。
        tenant_id/client_id/site_host/site_path/library_name が必要）
     2. pip install -r requirements.txt
-    3. python po_pdf_merge_20260713_03.py [PO一覧Excelファイル] [-o output.xlsx]
+    3. python po_pdf_merge_20260713_04.py [PO一覧Excelファイル] [-o output.xlsx]
        入力ファイルを引数で指定しない場合は、起動時にファイル選択ダイアログが
        開くのでExcelファイルを選ぶ。
        出力先を省略した場合は "<入力ファイル名>_detail.xlsx" に保存する
@@ -45,6 +45,11 @@ v03での修正:
       （例 HK64, CN69, JP68）を別列「ヘッダー接頭辞」として復活。
     - Vendor列とPO関連フォルダ列が同名になっている行でファイルが見つからない
       場合、フォルダの重複セグメントを1つ省いたパスでも再試行するフォールバックを追加。
+
+v04での修正:
+    - 1ページ目冒頭が "Purchase Order" ではなく "Changed Purchase Order"
+      （変更発注書）の場合でも処理できるよう対応。実際に見つかったタイトル文字列を
+      「PDF種別」列・「PO明細(PDF抽出)」シートの「ヘッダー接頭辞」列として記録する。
 """
 
 import argparse
@@ -245,7 +250,7 @@ class SharePointDownloadClient:
 
 
 # ─────────────────────────────────────────────────────────────
-# PDF抽出ロジック（po_pdf_extractor_20260713_02.py と同一のロジックを移植）
+# PDF抽出ロジック（po_pdf_extractor_20260713_03.py と同一のロジックを移植）
 # ─────────────────────────────────────────────────────────────
 HEADER_PO_RE = re.compile(r"^([A-Z]{2})(\d{2})(\d+)$")
 LINE_ITEM_START_RE = re.compile(r"^(\d{5})\s+(.*)$")
@@ -328,6 +333,7 @@ def extract_from_bytes(pdf_bytes: bytes, display_filename: str) -> dict:
     """ダウンロード済みPDFのバイト列からヘッダーPO番号・発注金額・明細行を抽出する。"""
     result = {
         "header_po_number": "", "header_po_prefix": "",
+        "document_type": "",
         "order_amount": "", "order_amount_currency": "",
         "line_items": [], "errors": [],
     }
@@ -336,7 +342,9 @@ def extract_from_bytes(pdf_bytes: bytes, display_filename: str) -> dict:
             page1_text = pdf.pages[0].extract_text() or ""
             lines = [l.strip() for l in page1_text.split("\n") if l.strip()]
 
-            if len(lines) >= 2 and lines[0].lower() == "purchase order":
+            # "Purchase Order" のほか、変更発注書 "Changed Purchase Order" にも対応する
+            if len(lines) >= 2 and "purchase order" in lines[0].lower():
+                result["document_type"] = lines[0]
                 hm = HEADER_PO_RE.match(lines[1])
                 if hm:
                     result["header_po_prefix"] = hm.group(1) + hm.group(2)
@@ -344,7 +352,7 @@ def extract_from_bytes(pdf_bytes: bytes, display_filename: str) -> dict:
                 else:
                     result["errors"].append(f"ヘッダーPO番号のパターン不一致: {lines[1]!r}")
             else:
-                result["errors"].append("1ページ目冒頭が 'Purchase Order' で始まっていない")
+                result["errors"].append("1ページ目冒頭が 'Purchase Order' 系のタイトルで始まっていない")
 
             for i, line in enumerate(lines):
                 if not line.lower().startswith("order amount:"):
@@ -506,7 +514,7 @@ def main():
         print(f"[エラー] 想定する列が見つかりません: {e}")
         sys.exit(1)
 
-    new_cols = ["PDFヘッダーPO番号", "ヘッダー接頭辞", "PO番号一致", "発注金額", "通貨", "明細行数", "抽出エラー"]
+    new_cols = ["PDFヘッダーPO番号", "ヘッダー接頭辞", "PDF種別", "PO番号一致", "発注金額", "通貨", "明細行数", "抽出エラー"]
     existing_new_col_start = len(header)
     for offset, name in enumerate(new_cols):
         ws.cell(row=1, column=existing_new_col_start + 1 + offset, value=name)
@@ -556,13 +564,14 @@ def main():
                 match = "OK" if str(po_number) == extracted["header_po_number"] else "NG"
             ws.cell(row=row_num, column=existing_new_col_start + 1, value=extracted["header_po_number"])
             ws.cell(row=row_num, column=existing_new_col_start + 2, value=extracted["header_po_prefix"])
-            ws.cell(row=row_num, column=existing_new_col_start + 3, value=match)
-            ws.cell(row=row_num, column=existing_new_col_start + 4, value=extracted["order_amount"])
-            ws.cell(row=row_num, column=existing_new_col_start + 5, value=extracted["order_amount_currency"])
-            ws.cell(row=row_num, column=existing_new_col_start + 6, value=len(extracted["line_items"]))
+            ws.cell(row=row_num, column=existing_new_col_start + 3, value=extracted["document_type"])
+            ws.cell(row=row_num, column=existing_new_col_start + 4, value=match)
+            ws.cell(row=row_num, column=existing_new_col_start + 5, value=extracted["order_amount"])
+            ws.cell(row=row_num, column=existing_new_col_start + 6, value=extracted["order_amount_currency"])
+            ws.cell(row=row_num, column=existing_new_col_start + 7, value=len(extracted["line_items"]))
             for it in extracted["line_items"]:
-                all_line_items.append((po_number, it))
-        ws.cell(row=row_num, column=existing_new_col_start + 7, value=error_msg)
+                all_line_items.append((po_number, extracted["header_po_prefix"], it))
+        ws.cell(row=row_num, column=existing_new_col_start + 8, value=error_msg)
 
         if error_msg:
             print(f"    [要確認] {error_msg}")
@@ -580,12 +589,12 @@ def main():
     if all_line_items:
         ws_detail = wb.create_sheet("PO明細(PDF抽出)")
         ws_detail.append([
-            "PO番号", "Line", "Material No.", "Order Qty", "Unit",
+            "PO番号", "ヘッダー接頭辞", "Line", "Material No.", "Order Qty", "Unit",
             "Unit Price", "通貨", "Total Price", "通貨", "Description",
         ])
-        for po_number, it in all_line_items:
+        for po_number, header_prefix, it in all_line_items:
             ws_detail.append([
-                po_number, it["line_no"], it["material_no"],
+                po_number, header_prefix, it["line_no"], it["material_no"],
                 it["order_qty"], it["order_unit"],
                 it["unit_price"], it["unit_price_currency"],
                 it["total_price"], it["total_price_currency"],
