@@ -3,7 +3,7 @@
 """
 PO PDF Merge Integrator
 
-version : 20260713_04
+version : 20260713_05
 purpose : po_database_organizer が出力した「PO一覧」シート付きのExcelを読み込み、
           各行のPO本体PDFをSharePointから直接ダウンロードして
           （ヘッダーPO番号・発注金額・明細行）を抽出し、
@@ -15,7 +15,7 @@ purpose : po_database_organizer が出力した「PO一覧」シート付きのE
     毎回はさまり、Chromeでは手動でボタンを押す必要がある。
     本スクリプトは po_database_organizer と同じ Graph API（MSAL認証・Bearerトークン）
     でファイル本体をAPI経由で直接取得するため、ブラウザもMCASの確認画面も経由しない。
-    「PO一覧」シートの Project / Vendor / PO関連フォルダ / 代表ファイル 列（プレーンテキスト）
+    「PO一覧」シートの Project / Vendor / PO関連フォルダ / ファイル名 列（プレーンテキスト）
     から相対パスを組み立て、Graph APIのパス指定ダウンロード
     （/drives/{drive-id}/root:/{path}:/content）でPDFを取得する。
 
@@ -34,7 +34,7 @@ purpose : po_database_organizer が出力した「PO一覧」シート付きのE
     1. config.json を用意する（po_database_organizer と同じもので良い。
        tenant_id/client_id/site_host/site_path/library_name が必要）
     2. pip install -r requirements.txt
-    3. python po_pdf_merge_20260713_04.py [PO一覧Excelファイル] [-o output.xlsx]
+    3. python po_pdf_merge_20260713_05.py [PO一覧Excelファイル] [-o output.xlsx]
        入力ファイルを引数で指定しない場合は、起動時にファイル選択ダイアログが
        開くのでExcelファイルを選ぶ。
        出力先を省略した場合は "<入力ファイル名>_detail.xlsx" に保存する
@@ -50,6 +50,15 @@ v04での修正:
     - 1ページ目冒頭が "Purchase Order" ではなく "Changed Purchase Order"
       （変更発注書）の場合でも処理できるよう対応。実際に見つかったタイトル文字列を
       「PDF種別」列・「PO明細(PDF抽出)」シートの「ヘッダー接頭辞」列として記録する。
+
+v05での修正:
+    - po_database_organizer v03でのExcelフォーマット変更（PO一覧が1書類=1行、
+      列名「代表ファイル」→「ファイル名」）に対応。
+    - 「PO一覧」の新規列の並びを ヘッダー接頭辞 → PDFヘッダーPO番号 の順に変更。
+    - 「PO一覧」のPDFヘッダーPO番号セルから「PO明細(PDF抽出)」の該当PO番号・
+      Line 00010行のA列へジャンプするハイパーリンクを追加。
+    - 「PO明細(PDF抽出)」のPO番号セルから「PO一覧」の該当行のPDFヘッダーPO番号
+      セルへジャンプするハイパーリンクを追加（双方向ジャンプ）。
 """
 
 import argparse
@@ -68,6 +77,8 @@ try:
     import requests as http_req
     import pdfplumber
     from openpyxl import load_workbook
+    from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
 except ModuleNotFoundError as e:
     print(f"\n[エラー] 必要なライブラリ '{e.name}' が見つかりません。\n"
           "次のコマンドを実行してから再度実行してください:\n\n"
@@ -509,20 +520,25 @@ def main():
         col_vendor  = header.index("Vendor")
         col_pofolder = header.index("PO関連フォルダ")
         col_ponumber = header.index("PO番号")
-        col_repfile  = header.index("代表ファイル")
+        col_repfile  = header.index("ファイル名") if "ファイル名" in header else header.index("代表ファイル")
     except ValueError as e:
         print(f"[エラー] 想定する列が見つかりません: {e}")
         sys.exit(1)
 
-    new_cols = ["PDFヘッダーPO番号", "ヘッダー接頭辞", "PDF種別", "PO番号一致", "発注金額", "通貨", "明細行数", "抽出エラー"]
+    hyperlink_font = Font(color="0563C1", underline="single")
+
+    # ヘッダー接頭辞を先頭に、その隣にPDFヘッダーPO番号を配置する
+    new_cols = ["ヘッダー接頭辞", "PDFヘッダーPO番号", "PDF種別", "PO番号一致", "発注金額", "通貨", "明細行数", "抽出エラー"]
     existing_new_col_start = len(header)
+    col_header_prefix = existing_new_col_start + 1
+    col_header_ponumber = existing_new_col_start + 2
     for offset, name in enumerate(new_cols):
         ws.cell(row=1, column=existing_new_col_start + 1 + offset, value=name)
 
     total = ws.max_row - 1
     print(f"[開始] PO一覧 全 {total} 件を処理します。\n")
 
-    all_line_items = []  # (row_num, po_number, line_item dict)
+    all_line_items = []  # (po一覧のrow_num, ヘッダーPO番号, ヘッダー接頭辞, line_item dict)
     auto_continue = False
     processed = 0
 
@@ -540,7 +556,7 @@ def main():
         extracted = None
         try:
             if not po_folder or not rep_file:
-                raise ValueError("PO関連フォルダ または 代表ファイル が空欄です")
+                raise ValueError("PO関連フォルダ または ファイル名 が空欄です")
             relative_path = f"{project_name}/{vendor_name}/{po_folder}/{rep_file}"
             try:
                 pdf_bytes = client.download_by_path(drive_id, relative_path)
@@ -562,15 +578,16 @@ def main():
             match = ""
             if extracted["header_po_number"]:
                 match = "OK" if str(po_number) == extracted["header_po_number"] else "NG"
-            ws.cell(row=row_num, column=existing_new_col_start + 1, value=extracted["header_po_number"])
-            ws.cell(row=row_num, column=existing_new_col_start + 2, value=extracted["header_po_prefix"])
+            ws.cell(row=row_num, column=col_header_prefix, value=extracted["header_po_prefix"])
+            ws.cell(row=row_num, column=col_header_ponumber, value=extracted["header_po_number"])
             ws.cell(row=row_num, column=existing_new_col_start + 3, value=extracted["document_type"])
             ws.cell(row=row_num, column=existing_new_col_start + 4, value=match)
             ws.cell(row=row_num, column=existing_new_col_start + 5, value=extracted["order_amount"])
             ws.cell(row=row_num, column=existing_new_col_start + 6, value=extracted["order_amount_currency"])
             ws.cell(row=row_num, column=existing_new_col_start + 7, value=len(extracted["line_items"]))
             for it in extracted["line_items"]:
-                all_line_items.append((po_number, extracted["header_po_prefix"], it))
+                all_line_items.append((row_num, extracted["header_po_number"],
+                                        extracted["header_po_prefix"], it))
         ws.cell(row=row_num, column=existing_new_col_start + 8, value=error_msg)
 
         if error_msg:
@@ -587,19 +604,38 @@ def main():
                 break
 
     if all_line_items:
-        ws_detail = wb.create_sheet("PO明細(PDF抽出)")
+        detail_sheet_name = "PO明細(PDF抽出)"
+        ws_detail = wb.create_sheet(detail_sheet_name)
         ws_detail.append([
             "PO番号", "ヘッダー接頭辞", "Line", "Material No.", "Order Qty", "Unit",
             "Unit Price", "通貨", "Total Price", "通貨", "Description",
         ])
-        for po_number, header_prefix, it in all_line_items:
+
+        po_ponumber_letter = get_column_letter(col_header_ponumber)
+        first_line_detail_row = {}  # PO一覧のrow_num -> PO明細でLine=00010が入った行番号
+
+        for src_row_num, header_po_number, header_prefix, it in all_line_items:
             ws_detail.append([
-                po_number, header_prefix, it["line_no"], it["material_no"],
+                header_po_number, header_prefix, it["line_no"], it["material_no"],
                 it["order_qty"], it["order_unit"],
                 it["unit_price"], it["unit_price_currency"],
                 it["total_price"], it["total_price_currency"],
                 it["description"],
             ])
+            detail_row = ws_detail.max_row
+            if it["line_no"] == "00010" and src_row_num not in first_line_detail_row:
+                first_line_detail_row[src_row_num] = detail_row
+
+            # 逆リンク: PO明細のPO番号セル → PO一覧の該当行のPDFヘッダーPO番号セル
+            back_cell = ws_detail.cell(row=detail_row, column=1)
+            back_cell.hyperlink = f"#'PO一覧'!{po_ponumber_letter}{src_row_num}"
+            back_cell.font = hyperlink_font
+
+        # 順リンク: PO一覧のPDFヘッダーPO番号セル → PO明細の該当Line 00010行のA列
+        for src_row_num, detail_row in first_line_detail_row.items():
+            fwd_cell = ws.cell(row=src_row_num, column=col_header_ponumber)
+            fwd_cell.hyperlink = f"#'{detail_sheet_name}'!A{detail_row}"
+            fwd_cell.font = hyperlink_font
 
     wb.save(output_path)
     print(f"\n[完了] {processed}/{total} 件処理し、結果を保存しました: {output_path}")

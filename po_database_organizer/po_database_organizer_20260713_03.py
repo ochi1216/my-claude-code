@@ -3,7 +3,7 @@
 """
 PO Database Organizer
 
-version : 20260713_02
+version : 20260713_03
 purpose : SharePoint上のPOフォルダ（Project > Vendor > 書類）をスキャンし、
           PO番号を軸にしたカタログをExcel/JSONで出力する。
 
@@ -15,11 +15,18 @@ Phase 1のスコープ:
     - 発注/検収/請求などのステータス判定はここでは行わない。Excel出力の「PO一覧」シートに
       空の Status 列を用意し、他の管理Excelと PO番号 キーで結合して後付けできるようにする
 
+v03での変更:
+    - Excel出力を「PO一覧」「未分類書類」の2シートに整理（従来の「関連書類」は
+      「PO一覧」に統合、「Projects」「Vendors」マスタシートは廃止）。
+      「PO一覧」は1PO=1行から1書類=1行に変更し、同一PO番号に複数の関連ファイル
+      （改訂版等）がある場合はその分だけ行が並ぶ。
+    - 「PO一覧」「未分類書類」の先頭列に Project ID を追加。
+
 使い方:
     1. config.example.json を config.json にコピーし、tenant_id/client_id/
        site_host/site_path/library_name を環境に合わせて設定する
     2. pip install -r requirements.txt
-    3. python po_database_organizer_20260713_02.py
+    3. python po_database_organizer_20260713_03.py
     4. 初回はターミナルにDevice Code Flowの認証コードが表示されるので、
        表示されたURLをブラウザで開いてサインインする
     5. http://127.0.0.1:5010 が自動で開くので、「スキャン開始」を押す
@@ -507,57 +514,31 @@ def export_excel(result: dict, out_path: Path) -> None:
     ws1.title = "PO一覧"
     _sheet(
         ws1,
-        ["Project", "Vendor", "PO関連フォルダ", "PO番号", "代表ファイル", "関連書類数",
+        ["Project ID", "Project", "Vendor", "PO関連フォルダ", "PO番号", "ファイル名",
          "最終更新日", "Status(未定義)"],
         [
-            [(po["project_name"], project_web_url.get(po["project_id"])),
-             (po["vendor_name"], vendor_web_url.get(po["vendor_id"])),
-             (po["po_folder_name"], po["po_folder_web_url"]),
-             po["po_number"],
-             (po["representative_file"], po["web_url"]),
-             po["doc_count"], po["last_modified"], ""]
-            for po in result["pos"]
-        ],
-    )
-
-    ws2 = wb.create_sheet("関連書類")
-    _sheet(
-        ws2,
-        ["Project", "Vendor", "PO関連フォルダ", "PO番号", "ファイル名", "最終更新日"],
-        [
-            [(d["project_name"], project_web_url.get(d["project_id"])),
+            [d["project_id"],
+             (d["project_name"], project_web_url.get(d["project_id"])),
              (d["vendor_name"], vendor_web_url.get(d["vendor_id"])),
              (d["po_folder_name"], d["po_folder_web_url"]),
              po_number_by_id.get(d["po_id"], ""),
-             (d["filename"], d["web_url"]), d["last_modified"]]
+             (d["filename"], d["web_url"]), d["last_modified"], ""]
             for d in result["documents"] if d["po_id"]
         ],
     )
 
-    ws3 = wb.create_sheet("未分類書類")
+    ws2 = wb.create_sheet("未分類書類")
     _sheet(
-        ws3,
-        ["Project", "Vendor", "PO関連フォルダ", "ファイル名", "最終更新日"],
+        ws2,
+        ["Project ID", "Project", "Vendor", "PO関連フォルダ", "ファイル名", "最終更新日"],
         [
-            [(d["project_name"], project_web_url.get(d["project_id"])),
+            [d["project_id"],
+             (d["project_name"], project_web_url.get(d["project_id"])),
              (d["vendor_name"], vendor_web_url.get(d["vendor_id"])),
              (d["po_folder_name"], d["po_folder_web_url"]),
              (d["filename"], d["web_url"]), d["last_modified"]]
             for d in result["documents"] if not d["po_id"]
         ],
-    )
-
-    ws4 = wb.create_sheet("Projects")
-    _sheet(
-        ws4, ["Project ID", "Project名"],
-        [[p["project_id"], (p["project_name"], p["web_url"])] for p in result["projects"]],
-    )
-
-    ws5 = wb.create_sheet("Vendors")
-    _sheet(
-        ws5, ["Vendor ID", "Vendor名", "Project ID"],
-        [[v["vendor_id"], (v["vendor_name"], v["web_url"]), v["project_id"]]
-         for v in result["vendors"]],
     )
 
     wb.save(out_path)

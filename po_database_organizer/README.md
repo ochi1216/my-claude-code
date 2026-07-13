@@ -90,15 +90,15 @@ SharePoint上でプロジェクトごと・業者ごとにフォルダ管理さ�
 
 | シート | 内容 |
 |---|---|
-| PO一覧 | Project / Vendor / PO関連フォルダ / PO番号 / 代表ファイル / 関連書類数 / 最終更新日 / Status(空列) |
-| 関連書類 | PO番号ごとに紐付いたファイルの明細（同一PO番号で複数リビジョンがある場合は全件） |
-| 未分類書類 | PO番号を特定できなかったファイル一覧（Project/Vendor/PO関連フォルダ単位） |
-| Projects / Vendors | 名寄せ用マスタ（他Excelとの結合キーとして利用） |
+| PO一覧 | Project ID / Project / Vendor / PO関連フォルダ / PO番号 / ファイル名 / 最終更新日 / Status(空列)。1書類=1行で、同一PO番号に複数の関連ファイル（改訂版等）がある場合はその数だけ行が並ぶ |
+| 未分類書類 | PO番号を特定できなかったファイル一覧（Project ID/Project/Vendor/PO関連フォルダ単位） |
 
-`Project` / `Vendor` / `PO関連フォルダ` / 代表ファイル・ファイル名 の各セルには、対応する
-SharePoint上のフォルダ・ファイルへのハイパーリンクが直接埋め込まれている（別列の「リンク」は
-廃止）。「PO関連フォルダ」は Project > Vendor > **PO関連フォルダ** > 書類群 という3階層目の
-フォルダで、PO本体だけでなく関連書類全体をまとめて確認したい場合の起点として使う。
+`Project` / `Vendor` / `PO関連フォルダ` / ファイル名 の各セルには、対応するSharePoint上の
+フォルダ・ファイルへのハイパーリンクが直接埋め込まれている（別列の「リンク」は廃止）。
+「PO関連フォルダ」は Project > Vendor > **PO関連フォルダ** > 書類群 という3階層目のフォルダで、
+PO本体だけでなく関連書類全体をまとめて確認したい場合の起点として使う。
+「Project ID」は各行の先頭列にあり、他Excelとの結合キーとしても利用できる
+（v03でマスタ用の「Projects」「Vendors」シートは廃止）。
 
 `PO番号` 列をキーに、契約管理表・検収管理表など他の管理Excelと VLOOKUP / Power Query で
 結合できる構成にしている。
@@ -130,10 +130,13 @@ PO一覧はフォルダ構造からの一次情報（Project/Vendor/PO番号/リ
   `python po_pdf_extractor_YYYYMMDD_NN.py <PDFフォルダ> [-o summary.xlsx]`
 - **`po_pdf_merge_YYYYMMDD_NN.py`**（および `run_po_pdf_merge.bat`）：
   po_database_organizer が出力した「PO一覧」Excelを読み込み、各行のPO本体PDFを
-  SharePointから直接ダウンロードして本文を解析し、`PDFヘッダーPO番号` `PO番号一致`
-  `発注金額` `通貨` `明細行数` `抽出エラー` の列と「PO明細(PDF抽出)」シートを追加した
-  `<入力ファイル名>_detail.xlsx` を生成する。ブラウザ（Chrome/Edge）は使わず、
-  po_database_organizer と同じGraph API認証でファイル本体を取得するため、SharePointの
-  MCAS確認画面は経由しない。バッチファイル起動時、またはExcelファイルを引数なしで実行すると
-  ファイル選択ダイアログが開く。処理は10件ごとに一時停止し、次の10件へ進む/最後まで
-  自動で進める/中断して保存する、を選べる。
+  SharePointから直接ダウンロードして本文を解析し、`ヘッダー接頭辞` `PDFヘッダーPO番号`
+  `PDF種別` `PO番号一致` `発注金額` `通貨` `明細行数` `抽出エラー` の列と
+  「PO明細(PDF抽出)」シートを追加した `<入力ファイル名>_detail.xlsx` を生成する。
+  ブラウザ（Chrome/Edge）は使わず、po_database_organizer と同じGraph API認証で
+  ファイル本体を取得するため、SharePointのMCAS確認画面は経由しない。バッチファイル起動時、
+  またはExcelファイルを引数なしで実行するとファイル選択ダイアログが開く。処理は10件ごとに
+  一時停止し、次の10件へ進む/最後まで自動で進める/中断して保存する、を選べる。
+  「PO一覧」の `PDFヘッダーPO番号` セルと「PO明細(PDF抽出)」の該当PO番号・Line 00010行は
+  相互にハイパーリンクでジャンプできる（同一PO番号で複数行ある場合も、行ごとに正しく
+  対応する明細へリンクする）。「Changed Purchase Order」（変更発注書）にも対応。
