@@ -449,33 +449,49 @@ def export_excel(result: dict, out_path: Path) -> None:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill
 
-    wb          = Workbook()
-    header_font = Font(bold=True, color="FFFFFF")
-    header_fill = PatternFill("solid", fgColor="1E3A5F")
+    wb             = Workbook()
+    header_font    = Font(bold=True, color="FFFFFF")
+    header_fill    = PatternFill("solid", fgColor="1E3A5F")
+    hyperlink_font = Font(color="0563C1", underline="single")
 
     def _sheet(ws, headers, rows):
+        """
+        rows の各セルは通常の値、または (表示値, リンク先URL) のタプルを渡せる。
+        タプルの場合はハイパーリンクを設定し、下線付きの青字にする。
+        """
         ws.append(headers)
         for cell in ws[1]:
             cell.font = header_font
             cell.fill = header_fill
         for row in rows:
-            ws.append(row)
+            values = [item[0] if isinstance(item, tuple) else item for item in row]
+            ws.append(values)
+            r = ws.max_row
+            for col_idx, item in enumerate(row, start=1):
+                if isinstance(item, tuple) and item[1]:
+                    cell = ws.cell(row=r, column=col_idx)
+                    cell.hyperlink = item[1]
+                    cell.font = hyperlink_font
         for col in ws.columns:
             length = max((len(str(c.value)) for c in col if c.value is not None), default=8)
             ws.column_dimensions[col[0].column_letter].width = min(length + 2, 60)
 
-    po_number_by_id = {p["po_id"]: p["po_number"] for p in result["pos"]}
+    po_number_by_id  = {p["po_id"]: p["po_number"] for p in result["pos"]}
+    project_web_url  = {p["project_id"]: p["web_url"] for p in result["projects"]}
+    vendor_web_url   = {v["vendor_id"]: v["web_url"] for v in result["vendors"]}
 
     ws1 = wb.active
     ws1.title = "PO一覧"
     _sheet(
         ws1,
         ["Project", "Vendor", "PO番号", "代表ファイル", "関連書類数",
-         "最終更新日", "リンク", "Status(未定義)"],
+         "最終更新日", "Status(未定義)"],
         [
-            [po["project_name"], po["vendor_name"], po["po_number"],
-             po["representative_file"], po["doc_count"], po["last_modified"],
-             po["web_url"], ""]
+            [(po["project_name"], project_web_url.get(po["project_id"])),
+             (po["vendor_name"], vendor_web_url.get(po["vendor_id"])),
+             po["po_number"],
+             (po["representative_file"], po["web_url"]),
+             po["doc_count"], po["last_modified"], ""]
             for po in result["pos"]
         ],
     )
@@ -483,10 +499,12 @@ def export_excel(result: dict, out_path: Path) -> None:
     ws2 = wb.create_sheet("関連書類")
     _sheet(
         ws2,
-        ["Project", "Vendor", "PO番号", "ファイル名", "最終更新日", "リンク"],
+        ["Project", "Vendor", "PO番号", "ファイル名", "最終更新日"],
         [
-            [d["project_name"], d["vendor_name"], po_number_by_id.get(d["po_id"], ""),
-             d["filename"], d["last_modified"], d["web_url"]]
+            [(d["project_name"], project_web_url.get(d["project_id"])),
+             (d["vendor_name"], vendor_web_url.get(d["vendor_id"])),
+             po_number_by_id.get(d["po_id"], ""),
+             (d["filename"], d["web_url"]), d["last_modified"]]
             for d in result["documents"] if d["po_id"]
         ],
     )
@@ -494,24 +512,26 @@ def export_excel(result: dict, out_path: Path) -> None:
     ws3 = wb.create_sheet("未分類書類")
     _sheet(
         ws3,
-        ["Project", "Vendor", "サブフォルダ", "ファイル名", "最終更新日", "リンク"],
+        ["Project", "Vendor", "サブフォルダ", "ファイル名", "最終更新日"],
         [
-            [d["project_name"], d["vendor_name"], d["relative_path"],
-             d["filename"], d["last_modified"], d["web_url"]]
+            [(d["project_name"], project_web_url.get(d["project_id"])),
+             (d["vendor_name"], vendor_web_url.get(d["vendor_id"])),
+             d["relative_path"],
+             (d["filename"], d["web_url"]), d["last_modified"]]
             for d in result["documents"] if not d["po_id"]
         ],
     )
 
     ws4 = wb.create_sheet("Projects")
     _sheet(
-        ws4, ["Project ID", "Project名", "リンク"],
-        [[p["project_id"], p["project_name"], p["web_url"]] for p in result["projects"]],
+        ws4, ["Project ID", "Project名"],
+        [[p["project_id"], (p["project_name"], p["web_url"])] for p in result["projects"]],
     )
 
     ws5 = wb.create_sheet("Vendors")
     _sheet(
-        ws5, ["Vendor ID", "Vendor名", "Project ID", "リンク"],
-        [[v["vendor_id"], v["vendor_name"], v["project_id"], v["web_url"]]
+        ws5, ["Vendor ID", "Vendor名", "Project ID"],
+        [[v["vendor_id"], (v["vendor_name"], v["web_url"]), v["project_id"]]
          for v in result["vendors"]],
     )
 
