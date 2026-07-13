@@ -57,6 +57,16 @@ SharePoint上でプロジェクトごと・業者ごとにフォルダ管理さ�
 
 3. スクリプトを実行する。
 
+   Windowsの場合は `run_po_database_organizer.bat` をダブルクリックする。同じフォルダ内の
+   `po_database_organizer_*.py` のうち最新版（ファイル名の日付_連番が一番大きいもの）を
+   自動選択して起動する。バージョンアップ時は新しい `po_database_organizer_YYYYMMDD_NN.py`
+   をこのフォルダに追加するだけでよく、バッチファイル自体の修正は不要。
+   `config.json` が無い場合や `python` が見つからない場合はエラーメッセージを表示して
+   終了する。初回は依存ライブラリ（`msal`）の有無を確認し、無ければ自動で
+   `pip install -r requirements.txt` を実行する。
+
+   コマンドラインから直接実行する場合は次の通り。
+
    ```
    python po_database_organizer_20260713_01.py
    ```
