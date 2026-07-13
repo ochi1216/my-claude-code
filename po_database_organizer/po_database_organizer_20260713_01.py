@@ -64,9 +64,20 @@ def _load_config(path: str = "config.json") -> dict:
         return json.load(f)
 
 
+def _check_placeholder(value: str, key: str) -> None:
+    """config.json の値がexample由来のプレースホルダーのままでないか確認する。"""
+    if not value or value.startswith("<") or value.endswith(">"):
+        print(f"[エラー] config.json の \"{key}\" がプレースホルダーのままです"
+              f"（現在の値: {value!r}）。")
+        print(f"         実際の {key} の値に書き換えてから再実行してください。")
+        raise SystemExit(1)
+
+
 _CFG              = _load_config()
 TENANT_ID         = _CFG["tenant_id"]
 CLIENT_ID         = _CFG["client_id"]
+_check_placeholder(TENANT_ID, "tenant_id")
+_check_placeholder(CLIENT_ID, "client_id")
 TOKEN_CACHE_PATH  = _CFG.get("token_cache_path", "token_cache.json")
 SITE_HOST         = _CFG["site_host"]
 SITE_PATH         = _CFG["site_path"]
