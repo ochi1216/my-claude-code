@@ -130,7 +130,7 @@ PO一覧はフォルダ構造からの一次情報（Project/Vendor/PO番号/リ
   `python po_pdf_extractor_YYYYMMDD_NN.py <PDFフォルダ> [-o summary.xlsx]`
 - **`po_pdf_merge_YYYYMMDD_NN.py`**（および `run_po_pdf_merge.bat`）：
   po_database_organizer が出力した「PO一覧」Excelを読み込み、各行のPO本体PDFを
-  SharePointから直接ダウンロードして本文を解析し、`ヘッダー接頭辞` `PDFヘッダーPO番号`
+  SharePointから直接ダウンロードして本文を解析し、`PDFヘッダーPO番号` `ヘッダー接頭辞`
   `PDF種別` `PO番号一致` `発注金額` `通貨` `明細行数` `抽出エラー` の列と
   「PO明細(PDF抽出)」シートを追加した `<入力ファイル名>_detail.xlsx` を生成する。
   ブラウザ（Chrome/Edge）は使わず、po_database_organizer と同じGraph API認証で

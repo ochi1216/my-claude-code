@@ -3,7 +3,7 @@
 """
 PO PDF Merge Integrator
 
-version : 20260713_05
+version : 20260713_06
 purpose : po_database_organizer が出力した「PO一覧」シート付きのExcelを読み込み、
           各行のPO本体PDFをSharePointから直接ダウンロードして
           （ヘッダーPO番号・発注金額・明細行）を抽出し、
@@ -34,7 +34,7 @@ purpose : po_database_organizer が出力した「PO一覧」シート付きのE
     1. config.json を用意する（po_database_organizer と同じもので良い。
        tenant_id/client_id/site_host/site_path/library_name が必要）
     2. pip install -r requirements.txt
-    3. python po_pdf_merge_20260713_05.py [PO一覧Excelファイル] [-o output.xlsx]
+    3. python po_pdf_merge_20260713_06.py [PO一覧Excelファイル] [-o output.xlsx]
        入力ファイルを引数で指定しない場合は、起動時にファイル選択ダイアログが
        開くのでExcelファイルを選ぶ。
        出力先を省略した場合は "<入力ファイル名>_detail.xlsx" に保存する
@@ -59,6 +59,15 @@ v05での修正:
       Line 00010行のA列へジャンプするハイパーリンクを追加。
     - 「PO明細(PDF抽出)」のPO番号セルから「PO一覧」の該当行のPDFヘッダーPO番号
       セルへジャンプするハイパーリンクを追加（双方向ジャンプ）。
+
+v06での修正:
+    - 処理速度の改善。入力Excelの「未分類書類」等、本ツールが触れない他シート
+      （数千行規模になりがち）を読み込み直後に破棄するようにした。従来は10件ごとの
+      中間保存のたびにファイル全体（未分類書類を含む）を書き直しており、行数が
+      多いとこれが処理時間の大半を占めていた（実測でシート有無により保存1回あたり
+      約18倍の差）。ハイパーリンク自体は軽い処理で速度への影響はごく僅か。
+    - 「PO一覧」の新規列の並びを v05以前の PDFヘッダーPO番号 → ヘッダー接頭辞 の順に戻した
+      （v05でヘッダー接頭辞を先頭にしたが、視認性の観点から差し戻し）。
 """
 
 import argparse
@@ -514,6 +523,13 @@ def main():
         sys.exit(1)
     ws = wb["PO一覧"]
 
+    # 「未分類書類」等、本ツールが触れない他シートは巨大なことが多く（数千行）、
+    # 10件ごとの中間保存のたびにファイル全体を書き直すコストが跳ね上がるため、
+    # 処理対象外のシートは出力から除外する（元のExcelは別ファイルなので情報は失われない）。
+    for name in list(wb.sheetnames):
+        if name != "PO一覧":
+            del wb[name]
+
     header = [c.value for c in ws[1]]
     try:
         col_project = header.index("Project")
@@ -527,11 +543,11 @@ def main():
 
     hyperlink_font = Font(color="0563C1", underline="single")
 
-    # ヘッダー接頭辞を先頭に、その隣にPDFヘッダーPO番号を配置する
-    new_cols = ["ヘッダー接頭辞", "PDFヘッダーPO番号", "PDF種別", "PO番号一致", "発注金額", "通貨", "明細行数", "抽出エラー"]
+    # PDFヘッダーPO番号を先頭に、その隣にヘッダー接頭辞を配置する
+    new_cols = ["PDFヘッダーPO番号", "ヘッダー接頭辞", "PDF種別", "PO番号一致", "発注金額", "通貨", "明細行数", "抽出エラー"]
     existing_new_col_start = len(header)
-    col_header_prefix = existing_new_col_start + 1
-    col_header_ponumber = existing_new_col_start + 2
+    col_header_ponumber = existing_new_col_start + 1
+    col_header_prefix = existing_new_col_start + 2
     for offset, name in enumerate(new_cols):
         ws.cell(row=1, column=existing_new_col_start + 1 + offset, value=name)
 
@@ -578,8 +594,8 @@ def main():
             match = ""
             if extracted["header_po_number"]:
                 match = "OK" if str(po_number) == extracted["header_po_number"] else "NG"
-            ws.cell(row=row_num, column=col_header_prefix, value=extracted["header_po_prefix"])
             ws.cell(row=row_num, column=col_header_ponumber, value=extracted["header_po_number"])
+            ws.cell(row=row_num, column=col_header_prefix, value=extracted["header_po_prefix"])
             ws.cell(row=row_num, column=existing_new_col_start + 3, value=extracted["document_type"])
             ws.cell(row=row_num, column=existing_new_col_start + 4, value=match)
             ws.cell(row=row_num, column=existing_new_col_start + 5, value=extracted["order_amount"])
