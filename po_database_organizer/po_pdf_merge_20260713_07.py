@@ -3,7 +3,7 @@
 """
 PO PDF Merge Integrator
 
-version : 20260713_06
+version : 20260713_07
 purpose : po_database_organizer が出力した「PO一覧」シート付きのExcelを読み込み、
           各行のPO本体PDFをSharePointから直接ダウンロードして
           （ヘッダーPO番号・発注金額・明細行）を抽出し、
@@ -34,7 +34,7 @@ purpose : po_database_organizer が出力した「PO一覧」シート付きのE
     1. config.json を用意する（po_database_organizer と同じもので良い。
        tenant_id/client_id/site_host/site_path/library_name が必要）
     2. pip install -r requirements.txt
-    3. python po_pdf_merge_20260713_06.py [PO一覧Excelファイル] [-o output.xlsx]
+    3. python po_pdf_merge_20260713_07.py [PO一覧Excelファイル] [-o output.xlsx] [--start-row N]
        入力ファイルを引数で指定しない場合は、起動時にファイル選択ダイアログが
        開くのでExcelファイルを選ぶ。
        出力先を省略した場合は "<入力ファイル名>_detail.xlsx" に保存する
@@ -68,6 +68,18 @@ v06での修正:
       約18倍の差）。ハイパーリンク自体は軽い処理で速度への影響はごく僅か。
     - 「PO一覧」の新規列の並びを v05以前の PDFヘッダーPO番号 → ヘッダー接頭辞 の順に戻した
       （v05でヘッダー接頭辞を先頭にしたが、視認性の観点から差し戻し）。
+
+v07での修正:
+    - アクセストークンを起動時に1回だけ取得して使い回していたのを、リクエストの
+      たびに取得し直すよう修正（MSALはキャッシュが有効なら即座に返すため速度への
+      影響はない）。処理に時間がかかりトークンの有効期限（通常1時間程度）が切れた
+      場合、"401 Unauthorized" でダウンロードが失敗していた問題への対応。
+    - 途中から再開できる機能を追加。
+        - "--start-row N" で開始行を明示的に指定できる（例: --start-row 107）。
+        - 既に「PDFヘッダーPO番号」が入力済みの行（前回成功した行）は自動的に
+          スキップする。前回出力した "_detail.xlsx" をそのまま入力に指定すれば、
+          エラーで止まった行や未処理の行だけ再処理できる。
+        - 「PO明細(PDF抽出)」シートが既にある場合は前回分を保持したまま追記する。
 """
 
 import argparse
@@ -182,19 +194,28 @@ class GraphAuthManager:
 # Class: SharePointDownloadClient
 # ─────────────────────────────────────────────────────────────
 class SharePointDownloadClient:
-    """Graph API 経由でサイト・ドライブを特定し、パス指定でファイル本体を取得する"""
+    """
+    Graph API 経由でサイト・ドライブを特定し、パス指定でファイル本体を取得する。
+    アクセストークンは有効期限が切れる（通常1時間程度）ため、リクエストのたびに
+    auth.get_token() を呼び直して最新のトークンを使う。MSALは有効なキャッシュが
+    あればネットワーク通信なしで即座に返すため、毎回呼び出しても速度への影響はない。
+    """
 
-    def __init__(self, token: str, site_host: str, site_path: str):
-        self.headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    def __init__(self, auth: "GraphAuthManager", site_host: str, site_path: str):
+        self.auth = auth
         self.site_host = site_host
         self.site_path = site_path
+
+    def _headers(self) -> dict:
+        token = self.auth.get_token(SCOPES)
+        return {"Authorization": f"Bearer {token}", "Accept": "application/json"}
 
     def _request_json(self, url: str) -> dict:
         MAX_RETRY = 3
         last_error = None
         for attempt in range(1, MAX_RETRY + 1):
             try:
-                resp = http_req.get(url, headers=self.headers, timeout=30)
+                resp = http_req.get(url, headers=self._headers(), timeout=30)
                 if resp.status_code == 403:
                     raise PermissionError("403 Forbidden: Sites.Read.All の Admin Consent を確認してください。")
                 resp.raise_for_status()
@@ -245,7 +266,7 @@ class SharePointDownloadClient:
         for attempt in range(1, MAX_RETRY + 1):
             try:
                 resp = http_req.get(
-                    url, headers=self.headers,
+                    url, headers=self._headers(),
                     allow_redirects=False, timeout=30, stream=True,
                 )
                 if resp.status_code in (301, 302, 303, 307, 308):
@@ -483,6 +504,11 @@ def main():
                               "（省略時はファイル選択ダイアログが開く）")
     parser.add_argument("-o", "--output",
                          help="出力Excelファイル（省略時は '<入力ファイル名>_detail.xlsx'。元ファイルは上書きしない）")
+    parser.add_argument("--start-row", type=int, default=None,
+                         help="処理を開始するExcelの行番号（例: 107 なら107行目から）。"
+                              "省略時は2行目（先頭データ行）から開始する。"
+                              "入力に '_detail.xlsx' 等、既にPDFヘッダーPO番号が入っている行が"
+                              "あれば、start-rowの指定に関わらず自動的にスキップして再開する。")
     args = parser.parse_args()
 
     input_arg = args.input_xlsx
@@ -509,10 +535,10 @@ def main():
 
     auth = GraphAuthManager(TENANT_ID, CLIENT_ID, TOKEN_CACHE_PATH)
     print("[認証] トークンを取得しています...")
-    token = auth.get_token(SCOPES)
+    auth.get_token(SCOPES)
     print("[OK] 認証完了\n")
 
-    client = SharePointDownloadClient(token, SITE_HOST, SITE_PATH)
+    client = SharePointDownloadClient(auth, SITE_HOST, SITE_PATH)
     site_id = client.get_site_id()
     drive_id = client.get_drive_id(site_id, LIBRARY_NAME)
     print(f"[OK] drive_id 取得完了\n")
@@ -523,11 +549,15 @@ def main():
         sys.exit(1)
     ws = wb["PO一覧"]
 
+    DETAIL_SHEET_NAME = "PO明細(PDF抽出)"
+    resume_detail_sheet = DETAIL_SHEET_NAME in wb.sheetnames
+
     # 「未分類書類」等、本ツールが触れない他シートは巨大なことが多く（数千行）、
     # 10件ごとの中間保存のたびにファイル全体を書き直すコストが跳ね上がるため、
     # 処理対象外のシートは出力から除外する（元のExcelは別ファイルなので情報は失われない）。
+    # 既に「PO明細(PDF抽出)」がある場合（前回の続きから再開する場合）はそのまま保持する。
     for name in list(wb.sheetnames):
-        if name != "PO一覧":
+        if name not in ("PO一覧", DETAIL_SHEET_NAME):
             del wb[name]
 
     header = [c.value for c in ws[1]]
@@ -544,27 +574,52 @@ def main():
     hyperlink_font = Font(color="0563C1", underline="single")
 
     # PDFヘッダーPO番号を先頭に、その隣にヘッダー接頭辞を配置する
-    new_cols = ["PDFヘッダーPO番号", "ヘッダー接頭辞", "PDF種別", "PO番号一致", "発注金額", "通貨", "明細行数", "抽出エラー"]
-    existing_new_col_start = len(header)
-    col_header_ponumber = existing_new_col_start + 1
-    col_header_prefix = existing_new_col_start + 2
-    for offset, name in enumerate(new_cols):
-        ws.cell(row=1, column=existing_new_col_start + 1 + offset, value=name)
+    new_col_names = ["PDFヘッダーPO番号", "ヘッダー接頭辞", "PDF種別", "PO番号一致", "発注金額", "通貨", "明細行数", "抽出エラー"]
+    if new_col_names[0] in header:
+        # 再開: 前回付与された列をそのまま使う（新規に列を追加しない）
+        col_header_ponumber = header.index("PDFヘッダーPO番号") + 1
+        col_header_prefix   = header.index("ヘッダー接頭辞") + 1
+        col_doctype         = header.index("PDF種別") + 1
+        col_match           = header.index("PO番号一致") + 1
+        col_amount          = header.index("発注金額") + 1
+        col_currency        = header.index("通貨") + 1
+        col_linecount       = header.index("明細行数") + 1
+        col_error           = header.index("抽出エラー") + 1
+    else:
+        base = len(header)
+        (col_header_ponumber, col_header_prefix, col_doctype, col_match,
+         col_amount, col_currency, col_linecount, col_error) = range(base + 1, base + 9)
+        for offset, name in enumerate(new_col_names):
+            ws.cell(row=1, column=base + 1 + offset, value=name)
 
-    total = ws.max_row - 1
-    print(f"[開始] PO一覧 全 {total} 件を処理します。\n")
+    start_row = args.start_row if args.start_row and args.start_row >= 2 else 2
+    if start_row > ws.max_row:
+        print(f"[エラー] --start-row {start_row} がデータ範囲を超えています（最終行: {ws.max_row}）。")
+        sys.exit(1)
+
+    total = ws.max_row - start_row + 1
+    if start_row > 2:
+        print(f"[開始] PO一覧 {start_row}行目〜{ws.max_row}行目（{total}件）を処理します。\n")
+    else:
+        print(f"[開始] PO一覧 全 {total} 件を処理します。\n")
+    print("      （PDFヘッダーPO番号が既に入っている行は自動的にスキップします）\n")
 
     all_line_items = []  # (po一覧のrow_num, ヘッダーPO番号, ヘッダー接頭辞, line_item dict)
     auto_continue = False
     processed = 0
+    attempted = 0  # スキップした行を除く、実際に処理を試みた件数（チェックポイント判定用）
 
-    for row_num in range(2, ws.max_row + 1):
+    for row_num in range(start_row, ws.max_row + 1):
         processed += 1
         project_name = ws.cell(row=row_num, column=col_project + 1).value or ""
         vendor_name  = ws.cell(row=row_num, column=col_vendor + 1).value or ""
         po_folder    = ws.cell(row=row_num, column=col_pofolder + 1).value or ""
         po_number    = ws.cell(row=row_num, column=col_ponumber + 1).value or ""
         rep_file     = ws.cell(row=row_num, column=col_repfile + 1).value or ""
+
+        if ws.cell(row=row_num, column=col_header_ponumber).value:
+            print(f"[{processed}/{total}] スキップ（処理済み）: PO{po_number} ({vendor_name} / {rep_file})")
+            continue
 
         print(f"[{processed}/{total}] 処理中: PO{po_number} ({vendor_name} / {rep_file})")
 
@@ -596,20 +651,21 @@ def main():
                 match = "OK" if str(po_number) == extracted["header_po_number"] else "NG"
             ws.cell(row=row_num, column=col_header_ponumber, value=extracted["header_po_number"])
             ws.cell(row=row_num, column=col_header_prefix, value=extracted["header_po_prefix"])
-            ws.cell(row=row_num, column=existing_new_col_start + 3, value=extracted["document_type"])
-            ws.cell(row=row_num, column=existing_new_col_start + 4, value=match)
-            ws.cell(row=row_num, column=existing_new_col_start + 5, value=extracted["order_amount"])
-            ws.cell(row=row_num, column=existing_new_col_start + 6, value=extracted["order_amount_currency"])
-            ws.cell(row=row_num, column=existing_new_col_start + 7, value=len(extracted["line_items"]))
+            ws.cell(row=row_num, column=col_doctype, value=extracted["document_type"])
+            ws.cell(row=row_num, column=col_match, value=match)
+            ws.cell(row=row_num, column=col_amount, value=extracted["order_amount"])
+            ws.cell(row=row_num, column=col_currency, value=extracted["order_amount_currency"])
+            ws.cell(row=row_num, column=col_linecount, value=len(extracted["line_items"]))
             for it in extracted["line_items"]:
                 all_line_items.append((row_num, extracted["header_po_number"],
                                         extracted["header_po_prefix"], it))
-        ws.cell(row=row_num, column=existing_new_col_start + 8, value=error_msg)
+        ws.cell(row=row_num, column=col_error, value=error_msg)
 
         if error_msg:
             print(f"    [要確認] {error_msg}")
 
-        if (processed % CHECKPOINT_INTERVAL == 0) and processed != total and not auto_continue:
+        attempted += 1
+        if (attempted % CHECKPOINT_INTERVAL == 0) and processed != total and not auto_continue:
             wb.save(output_path)
             print(f"  [中間保存] {output_path}")
             action = _prompt_checkpoint(processed, total)
@@ -620,12 +676,15 @@ def main():
                 break
 
     if all_line_items:
-        detail_sheet_name = "PO明細(PDF抽出)"
-        ws_detail = wb.create_sheet(detail_sheet_name)
-        ws_detail.append([
-            "PO番号", "ヘッダー接頭辞", "Line", "Material No.", "Order Qty", "Unit",
-            "Unit Price", "通貨", "Total Price", "通貨", "Description",
-        ])
+        if resume_detail_sheet:
+            # 再開時: 前回の内容を保持したまま追記する（ヘッダー行は追加しない）
+            ws_detail = wb[DETAIL_SHEET_NAME]
+        else:
+            ws_detail = wb.create_sheet(DETAIL_SHEET_NAME)
+            ws_detail.append([
+                "PO番号", "ヘッダー接頭辞", "Line", "Material No.", "Order Qty", "Unit",
+                "Unit Price", "通貨", "Total Price", "通貨", "Description",
+            ])
 
         po_ponumber_letter = get_column_letter(col_header_ponumber)
         first_line_detail_row = {}  # PO一覧のrow_num -> PO明細でLine=00010が入った行番号
@@ -650,7 +709,7 @@ def main():
         # 順リンク: PO一覧のPDFヘッダーPO番号セル → PO明細の該当Line 00010行のA列
         for src_row_num, detail_row in first_line_detail_row.items():
             fwd_cell = ws.cell(row=src_row_num, column=col_header_ponumber)
-            fwd_cell.hyperlink = f"#'{detail_sheet_name}'!A{detail_row}"
+            fwd_cell.hyperlink = f"#'{DETAIL_SHEET_NAME}'!A{detail_row}"
             fwd_cell.font = hyperlink_font
 
     wb.save(output_path)
