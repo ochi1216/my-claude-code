@@ -3,7 +3,7 @@
 """
 PO PDF Extractor（調査/プロトタイプ版）
 
-version : 20260713_01
+version : 20260713_02
 purpose : PO本体PDF（SAPが発行するPurchase Order）を開き、
           1) 1ページ目冒頭の「PO番号」（国コード+拠点コード+PO番号、例 HK648210235980）
           2) 明細テーブル（Line / Material no.(12NC) / Order quantity / Unit /
@@ -11,18 +11,21 @@ purpose : PO本体PDF（SAPが発行するPurchase Order）を開き、
           を抽出する。フォルダ内のPDFを一括処理し、抽出結果をExcelサマリーに
           まとめる調査用ツール。
 
-前提（3件のサンプルPDFから確認した書式）:
-    - SAPが生成するネイティブテキストPDF（画像スキャンではない）で、地域（HK/CN/JP等）が
+前提（実PO 12件（JP/HK/CN/US）で確認した書式）:
+    - SAPが生成するネイティブテキストPDF（画像スキャンではない）で、地域（HK/CN/JP/US等）が
       違っても完全に同一レイアウト。
     - PO番号は1ページ目の2行目（"Purchase Order"の次の行）に単独で記載されており、
-      末尾の数字部分がファイル名の"PO<番号>"と一致する。
+      末尾の数字部分がファイル名の"PO<番号>"と一致する（一致しない場合はファイル名の
+      誤り・付け間違いの可能性があるため要確認）。
     - 明細テーブルは罫線があり、pdfplumberのテーブル検出で「見出し行」と「明細ブロック」を
       分離できる。明細ブロックは各行が5桁のLine番号（00010, 00020...）で始まり、
       その後に数量/単位/単価/通貨/金額が続き、以降の複数行がDescription（自由記述）になる。
+    - 明細が多い場合、テーブルが複数ページにまたがる（例: 4行目以降が次ページに続く）。
+      全ページを走査して連結することで対応済み（v02で修正）。
 
 使い方:
     pip install -r requirements.txt
-    python po_pdf_extractor_20260713_01.py <PDFが入ったフォルダ> [-o summary.xlsx]
+    python po_pdf_extractor_20260713_02.py <PDFが入ったフォルダ> [-o summary.xlsx]
 """
 
 import argparse
@@ -208,7 +211,9 @@ def extract(pdf_path: Path) -> dict:
                     )
                 break
 
-            item_block_text = None
+            # 明細テーブルは複数ページにまたがる場合がある（例: 4行目以降が次ページに
+            # 続く）ため、最初に見つかったページで打ち切らず全ページを走査して連結する。
+            item_block_texts = []
             for page in pdf.pages:
                 tables = page.find_tables()
                 for t in tables:
@@ -226,16 +231,13 @@ def extract(pdf_path: Path) -> dict:
                         if cell0 == "" and cell1 == "Description":
                             continue
                         if cell0 and LINE_ITEM_START_RE.match(cell0.split("\n")[0].strip()):
-                            item_block_text = cell0
-                            break
+                            item_block_texts.append(cell0)
+                            continue
                         joined = " ".join(str(c) for c in row if c)
                         if LINE_ITEM_START_RE.match(joined.split("\n")[0].strip()):
-                            item_block_text = joined
-                            break
-                    if item_block_text:
-                        break
-                if item_block_text:
-                    break
+                            item_block_texts.append(joined)
+
+            item_block_text = "\n".join(item_block_texts) if item_block_texts else None
 
             if item_block_text:
                 result["line_items"] = extract_line_items(item_block_text)
