@@ -117,3 +117,23 @@ SharePoint上のフォルダ・ファイルへのハイパーリンクが直接�
   結果をもとに、Phase 2でルールを設計する。
 - Vendorフォルダ配下の再帰探索は `config.json` の `max_depth`（デフォルト6階層）で
   打ち切る。極端に深いフォルダ構成では取りこぼしが発生し得る。
+
+## 関連ツール（PO本体PDFの中身を読み取る）
+
+PO一覧はフォルダ構造からの一次情報（Project/Vendor/PO番号/リンク等）のみで、PDFの中身
+（発注金額・明細行）までは読み取っていない。これを追加するのが以下の2ツール（同じフォルダに
+同梱、config.jsonも共用）。
+
+- **`po_pdf_extractor_YYYYMMDD_NN.py`**：ローカルに保存済みのPO PDFが入ったフォルダを
+  指定すると、各PDFのヘッダーPO番号・発注金額・明細行（Line/数量/単価/金額/Description）を
+  読み取り、Excelサマリー（サマリー/明細の2シート）にまとめる調査用ツール。
+  `python po_pdf_extractor_YYYYMMDD_NN.py <PDFフォルダ> [-o summary.xlsx]`
+- **`po_pdf_merge_YYYYMMDD_NN.py`**（および `run_po_pdf_merge.bat`）：
+  po_database_organizer が出力した「PO一覧」Excelを読み込み、各行のPO本体PDFを
+  SharePointから直接ダウンロードして本文を解析し、`PDFヘッダーPO番号` `PO番号一致`
+  `発注金額` `通貨` `明細行数` `抽出エラー` の列と「PO明細(PDF抽出)」シートを追加した
+  `<入力ファイル名>_detail.xlsx` を生成する。ブラウザ（Chrome/Edge）は使わず、
+  po_database_organizer と同じGraph API認証でファイル本体を取得するため、SharePointの
+  MCAS確認画面は経由しない。バッチファイル起動時、またはExcelファイルを引数なしで実行すると
+  ファイル選択ダイアログが開く。処理は10件ごとに一時停止し、次の10件へ進む/最後まで
+  自動で進める/中断して保存する、を選べる。

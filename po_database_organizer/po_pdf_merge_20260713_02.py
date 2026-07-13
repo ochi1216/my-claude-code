@@ -3,7 +3,7 @@
 """
 PO PDF Merge Integrator
 
-version : 20260713_01
+version : 20260713_02
 purpose : po_database_organizer が出力した「PO一覧」シート付きのExcelを読み込み、
           各行のPO本体PDFをSharePointから直接ダウンロードして
           （ヘッダーPO番号・発注金額・明細行）を抽出し、
@@ -34,8 +34,10 @@ purpose : po_database_organizer が出力した「PO一覧」シート付きのE
     1. config.json を用意する（po_database_organizer と同じもので良い。
        tenant_id/client_id/site_host/site_path/library_name が必要）
     2. pip install -r requirements.txt
-    3. python po_pdf_merge_20260713_01.py <PO一覧Excelファイル> [-o output.xlsx]
-       出力先を省略した場合は "<入力ファイル名>_merged.xlsx" に保存する
+    3. python po_pdf_merge_20260713_02.py [PO一覧Excelファイル] [-o output.xlsx]
+       入力ファイルを引数で指定しない場合は、起動時にファイル選択ダイアログが
+       開くのでExcelファイルを選ぶ。
+       出力先を省略した場合は "<入力ファイル名>_detail.xlsx" に保存する
        （元のExcelは上書きしない）。
 """
 
@@ -43,6 +45,7 @@ import argparse
 import io
 import json
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -404,20 +407,63 @@ def _prompt_checkpoint(done: int, total: int) -> str:
         print("  1〜3のいずれかを入力してください。")
 
 
+def _pick_excel_file() -> Optional[str]:
+    """
+    サブプロセスでtkinterのファイル選択ダイアログを起動し、選択されたパスを返す。
+    tkinterはpipでインストールできない標準ライブラリのため、サブプロセス側だけで
+    importすることでメインスクリプトの依存関係チェックに影響させない
+    （po_database_organizer の route_pick_folder と同じ方式）。
+    """
+    # サブプロセスのstdoutをUTF-8に固定する（パスに日本語が含まれる場合の文字化け防止）
+    script = (
+        "import sys,tkinter as tk; from tkinter import filedialog; "
+        "root=tk.Tk(); root.withdraw(); root.lift(); "
+        "root.attributes('-topmost',True); "
+        "chosen=filedialog.askopenfilename("
+        "title='PO一覧シートがある"
+        "Excelファイルを選択して"
+        "ください',"
+        "filetypes=[('Excel ファイル','*.xlsx'),"
+        "('すべてのファイル','*.*')]); "
+        "sys.stdout.reconfigure(encoding='utf-8'); "
+        "print(chosen if chosen else '',end='')"
+    )
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True, text=True, encoding="utf-8", timeout=120,
+        )
+    except Exception as e:
+        print(f"[エラー] ファイル選択ダイアログの起動に失敗しました: {e}")
+        return None
+    chosen = result.stdout.strip()
+    return chosen or None
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="PO一覧Excelの各行のPDFをSharePointから取得し、抽出結果を統合する"
     )
-    parser.add_argument("input_xlsx", help="po_database_organizer が出力したExcelファイル")
+    parser.add_argument("input_xlsx", nargs="?", default=None,
+                         help="po_database_organizer が出力したExcelファイル"
+                              "（省略時はファイル選択ダイアログが開く）")
     parser.add_argument("-o", "--output",
-                         help="出力Excelファイル（省略時は '<入力ファイル名>_merged.xlsx'。元ファイルは上書きしない）")
+                         help="出力Excelファイル（省略時は '<入力ファイル名>_detail.xlsx'。元ファイルは上書きしない）")
     args = parser.parse_args()
 
-    input_path = Path(args.input_xlsx)
+    input_arg = args.input_xlsx
+    if not input_arg:
+        print("[選択] ファイル選択ダイアログを開いています...")
+        input_arg = _pick_excel_file()
+        if not input_arg:
+            print("[中止] ファイルが選択されませんでした。")
+            sys.exit(1)
+
+    input_path = Path(input_arg)
     if not input_path.exists():
         print(f"[エラー] ファイルが見つかりません: {input_path}")
         sys.exit(1)
-    output_path = Path(args.output) if args.output else input_path.with_name(input_path.stem + "_merged.xlsx")
+    output_path = Path(args.output) if args.output else input_path.with_name(input_path.stem + "_detail.xlsx")
 
     print("=" * 60)
     print(" PO PDF Merge Integrator")
