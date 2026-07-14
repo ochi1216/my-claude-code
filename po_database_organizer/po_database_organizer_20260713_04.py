@@ -3,7 +3,7 @@
 """
 PO Database Organizer
 
-version : 20260713_03
+version : 20260713_04
 purpose : SharePoint上のPOフォルダ（Project > Vendor > 書類）をスキャンし、
           PO番号を軸にしたカタログをExcel/JSONで出力する。
 
@@ -22,11 +22,19 @@ v03での変更:
       （改訂版等）がある場合はその分だけ行が並ぶ。
     - 「PO一覧」「未分類書類」の先頭列に Project ID を追加。
 
+v04での修正:
+    - アクセストークンをスキャン開始時に1回だけ取得して使い回していたのを、
+      Graph APIリクエストのたびに取得し直すよう修正（MSALはキャッシュが有効なら
+      即座に返すため速度への影響はない）。大規模サイトのスキャンが1時間を超えると
+      トークンの有効期限切れで401 Unauthorizedになり、残りのProject/Vendorが
+      一切取得できなくなる（かつ失敗時は結果を保存しないため、古いスキャン結果が
+      そのまま残ってしまう）問題への対応。
+
 使い方:
     1. config.example.json を config.json にコピーし、tenant_id/client_id/
        site_host/site_path/library_name を環境に合わせて設定する
     2. pip install -r requirements.txt
-    3. python po_database_organizer_20260713_03.py
+    3. python po_database_organizer_20260713_04.py
     4. 初回はターミナルにDevice Code Flowの認証コードが表示されるので、
        表示されたURLをブラウザで開いてサインインする
     5. http://127.0.0.1:5010 が自動で開くので、「スキャン開始」を押す
@@ -169,15 +177,25 @@ class GraphAuthManager:
 # Class: SharePointClient
 # ─────────────────────────────────────────────────────────────
 class SharePointClient:
-    """Graph API 経由でサイト・ドライブ・フォルダ内容を取得するクラス"""
+    """
+    Graph API 経由でサイト・ドライブ・フォルダ内容を取得するクラス。
+    アクセストークンは有効期限が切れる（通常1時間程度）ため、リクエストのたびに
+    auth.get_token() を呼び直して最新のトークンを使う。大規模サイトのスキャンは
+    1時間を超えることがあり、固定トークンのままだと途中から401 Unauthorizedで
+    失敗し、残りのProject/Vendorが一切取得できなくなる（かつ失敗時は結果を保存
+    しないため、古いスキャン結果がそのまま残ってしまう）。MSALは有効なキャッシュが
+    あればネットワーク通信なしで即座に返すため、毎回呼び出しても速度への影響はない。
+    """
 
-    def __init__(self, token: str, site_host: str, site_path: str):
-        self.headers = {
-            "Authorization": f"Bearer {token}",
-            "Accept":        "application/json",
-        }
+    def __init__(self, auth: "GraphAuthManager", site_host: str, site_path: str):
+        self.auth = auth
         self.site_host = site_host
         self.site_path = site_path
+
+    def _headers(self) -> dict:
+        with _lock:
+            token = self.auth.get_token(SCOPES)
+        return {"Authorization": f"Bearer {token}", "Accept": "application/json"}
 
     def _request(self, url: str) -> dict:
         """GETリクエストを実行する。403は即raise、400/404は_not_found、他は3回リトライ。"""
@@ -185,7 +203,7 @@ class SharePointClient:
         last_error = None
         for attempt in range(1, MAX_RETRY + 1):
             try:
-                resp = http_req.get(url, headers=self.headers, timeout=30)
+                resp = http_req.get(url, headers=self._headers(), timeout=30)
                 if resp.status_code == 403:
                     raise PermissionError(
                         "403 Forbidden: Sites.Read.All の"
@@ -595,8 +613,8 @@ def route_scan():
                 cache.reset()
 
             with _lock:
-                token = _auth.get_token(SCOPES)
-            client   = SharePointClient(token, SITE_HOST, SITE_PATH)
+                _auth.get_token(SCOPES)
+            client   = SharePointClient(_auth, SITE_HOST, SITE_PATH)
             site_id  = client.get_site_id()
             drive_id = client.get_drive_id(site_id, LIBRARY_NAME)
 
