@@ -3,7 +3,7 @@
 """
 PO Database Organizer
 
-version : 20260713_04
+version : 20260713_05
 purpose : SharePoint上のPOフォルダ（Project > Vendor > 書類）をスキャンし、
           PO番号を軸にしたカタログをExcel/JSONで出力する。
 
@@ -30,11 +30,18 @@ v04での修正:
       一切取得できなくなる（かつ失敗時は結果を保存しないため、古いスキャン結果が
       そのまま残ってしまう）問題への対応。
 
+v05での修正:
+    - v04より前のバージョンで作成された `cache/scan_cache.json`（"po_folder_name"
+      フィールドが無い旧形式）を読み込むと `[エラー] 'po_folder_name'` で
+      スキャンが即座に失敗していたのを修正。キャッシュされたVendorのファイル一覧が
+      旧形式だった場合は、そのVendorだけ自動的にキャッシュを無効化して再取得する
+      （他のVendorのキャッシュはそのまま活用されるので、全件の再スキャンは不要）。
+
 使い方:
     1. config.example.json を config.json にコピーし、tenant_id/client_id/
        site_host/site_path/library_name を環境に合わせて設定する
     2. pip install -r requirements.txt
-    3. python po_database_organizer_20260713_04.py
+    3. python po_database_organizer_20260713_05.py
     4. 初回はターミナルにDevice Code Flowの認証コードが表示されるので、
        表示されたURLをブラウザで開いてサインインする
     5. http://127.0.0.1:5010 が自動で開くので、「スキャン開始」を押す
@@ -374,6 +381,9 @@ class POScanner:
 
                 vendor_path = f"{project_name}/{vendor_name}"
                 files = self.cache.get_vendor(vendor_path)
+                if files is not None and files and "po_folder_name" not in files[0]:
+                    # 「PO関連フォルダ」対応前の古い形式のキャッシュは無効化して再取得する
+                    files = None
                 if files is None:
                     files = self._collect_files(drive_id, vf["id"], "", 0)
                     self.cache.set_vendor(vendor_path, files)

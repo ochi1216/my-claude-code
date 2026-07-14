@@ -1,6 +1,10 @@
 # Changelog - po_database_organizer
 
-バージョン番号はファイル名の日付_連番（例 `po_database_organizer_20260713_04.py`）に対応。
+バージョン番号はファイル名の日付_連番（例 `po_database_organizer_20260713_05.py`）に対応。
+
+## v05 (20260713_05)
+
+- v04より前のバージョンで作成された `cache/scan_cache.json`（"po_folder_name"フィールドが無い旧形式）を読み込むと `[エラー] 'po_folder_name'` でスキャンが即座に失敗していた不具合を修正。キャッシュされたVendorのファイル一覧が旧形式だった場合は、そのVendorだけ自動的にキャッシュを無効化して再取得する（他のVendorのキャッシュはそのまま活用されるので、全件の再スキャンは不要）。
 
 ## v04 (20260713_04)
 

@@ -69,7 +69,7 @@ SharePoint上でプロジェクトごと・業者ごとにフォルダ管理さ�
    （更新のたびにファイル名の連番が上がるため、実際に存在するファイル名に読み替える）。
 
    ```
-   python po_database_organizer_20260713_04.py
+   python po_database_organizer_20260713_05.py
    ```
 
    初回はターミナルにDevice Code Flowの認証コード（URLとコード）が表示されるので、
