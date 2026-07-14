@@ -169,4 +169,8 @@ PO一覧はフォルダ構造からの一次情報（Project/Vendor/PO番号/リ
   カウントに現れない（ライブスキャンとの差異が生じ得るが、カタログの内容自体には
   影響しない）。
   `python po_query_import_YYYYMMDD_NN.py <クエリExcel> [-o output.xlsx]`
-  （引数なしで実行するとファイル選択ダイアログが開く）
+  （引数なしで実行するとファイル選択ダイアログが開く）。Windowsの場合は
+  `run_po_query_import.bat` から起動できる（同じフォルダ内の最新版を自動選択）。
+  SharePointに接続しないため `config.json` の `tenant_id`/`client_id` は不要だが、
+  `site_host`/`site_path`/`library_name`/`po_number_pattern` は使用するので
+  `config.json` 自体は用意しておく必要がある。
