@@ -291,7 +291,7 @@ class SharePointDownloadClient:
 
 
 # ─────────────────────────────────────────────────────────────
-# PDF抽出ロジック（po_pdf_extractor_20260713_03.py と同一のロジックを移植）
+# PDF抽出ロジック（po_pdf_extractor_20260713_04.py と同一のロジックを移植）
 # ─────────────────────────────────────────────────────────────
 HEADER_PO_RE = re.compile(r"^([A-Z]{2})(\d{2})(\d+)$")
 LINE_ITEM_START_RE = re.compile(r"^(\d{5})\s+(.*)$")

@@ -3,7 +3,7 @@
 """
 PO Database Organizer
 
-version : 20260713_05
+version : 20260713_07
 purpose : SharePoint上のPOフォルダ（Project > Vendor > 書類）をスキャンし、
           PO番号を軸にしたカタログをExcel/JSONで出力する。
 
@@ -37,11 +37,28 @@ v05での修正:
       旧形式だった場合は、そのVendorだけ自動的にキャッシュを無効化して再取得する
       （他のVendorのキャッシュはそのまま活用されるので、全件の再スキャンは不要）。
 
+v06での修正:
+    - Vendorフォルダを介さず、プロジェクト直下に直接置かれているファイルを
+      完全に無視していた不具合を修正。実サイトとの突き合わせ調査で発覚（サイト全体
+      5,172ファイル中18件が該当）。このようなファイルは Vendor欄 "(プロジェクト直下)"
+      として「PO一覧」「未分類書類」に取り込まれる。
+
+v07での修正（重要）:
+    - PO番号抽出の正規表現が "PO12345.pdf" 形式にしか対応しておらず、
+      "PO#12345_説明.pdf"（#区切り）・"PO 12345.pdf"（半角スペース区切り）
+      形式のファイルを全て「未分類」に落としていた不具合を修正。
+      実サイトとの突き合わせ調査で発覚し、対象ファイル数は 210件 → 599件
+      （サイト全体5,172ファイル中）に増加した。
+      デフォルトパターンを `^PO[-_]?(\d{3,})` から `^PO[-_# ]?(\d{3,})` に変更。
+      ※ 既に config.json を作成済みで `po_number_pattern` を明示的に設定して
+      いる場合は、コードのデフォルト値ではなくconfig.jsonの値が優先されるため、
+      config.example.json を参考に手動で更新すること。
+
 使い方:
     1. config.example.json を config.json にコピーし、tenant_id/client_id/
        site_host/site_path/library_name を環境に合わせて設定する
     2. pip install -r requirements.txt
-    3. python po_database_organizer_20260713_05.py
+    3. python po_database_organizer_20260713_07.py
     4. 初回はターミナルにDevice Code Flowの認証コードが表示されるので、
        表示されたURLをブラウザで開いてサインインする
     5. http://127.0.0.1:5010 が自動で開くので、「スキャン開始」を押す
@@ -104,7 +121,7 @@ TOKEN_CACHE_PATH  = _CFG.get("token_cache_path", "token_cache.json")
 SITE_HOST         = _CFG["site_host"]
 SITE_PATH         = _CFG["site_path"]
 LIBRARY_NAME      = _CFG.get("library_name", "")
-PO_NUMBER_PATTERN = _CFG.get("po_number_pattern", r"^PO[-_]?(\d{3,})")
+PO_NUMBER_PATTERN = _CFG.get("po_number_pattern", r"^PO[-_# ]?(\d{3,})")
 MAX_DEPTH         = _CFG.get("max_depth", 6)
 MAX_ITEMS         = _CFG.get("max_items_per_folder", 1000)
 SKIP_FOLDER_NAMES = {n.lower() for n in _CFG.get("skip_folder_names", ["old"])}
@@ -342,6 +359,61 @@ class POScanner:
         self.client = client
         self.cache  = cache
 
+    def _ingest_files(self, files: list, project_id: str, project_name: str,
+                       vendor_id: str, vendor_name: str,
+                       pos: list, documents: list, po_index: dict) -> None:
+        """ファイル一覧をPO/未分類のdocuments・posレコードに変換して追記する。"""
+        for f in files:
+            doc_type, po_number = classify_filename(f["name"])
+            doc_id = f"{vendor_id}-D{len(documents) + 1:04d}"
+            po_id  = None
+
+            if po_number:
+                key = (vendor_id, po_number)
+                if key not in po_index:
+                    po_id = f"{vendor_id}-PO{len(pos) + 1:04d}"
+                    po_index[key] = po_id
+                    pos.append({
+                        "po_id":               po_id,
+                        "po_number":           po_number,
+                        "project_id":          project_id,
+                        "project_name":        project_name,
+                        "vendor_id":           vendor_id,
+                        "vendor_name":         vendor_name,
+                        "po_folder_name":      f["po_folder_name"],
+                        "po_folder_web_url":   f["po_folder_web_url"],
+                        "representative_file": f["name"],
+                        "web_url":             f["web_url"],
+                        "last_modified":       f["last_modified"],
+                        "doc_count":           0,
+                    })
+                po_id = po_index[key]
+                po_rec = next(p for p in pos if p["po_id"] == po_id)
+                po_rec["doc_count"] += 1
+                if f["last_modified"] > po_rec["last_modified"]:
+                    po_rec["last_modified"]       = f["last_modified"]
+                    po_rec["representative_file"] = f["name"]
+                    po_rec["web_url"]              = f["web_url"]
+                    po_rec["po_folder_name"]       = f["po_folder_name"]
+                    po_rec["po_folder_web_url"]    = f["po_folder_web_url"]
+
+            documents.append({
+                "doc_id":            doc_id,
+                "po_id":             po_id,
+                "project_id":        project_id,
+                "project_name":      project_name,
+                "vendor_id":         vendor_id,
+                "vendor_name":       vendor_name,
+                "po_folder_name":    f["po_folder_name"],
+                "po_folder_web_url": f["po_folder_web_url"],
+                "filename":          f["name"],
+                "relative_path":     f["relative_path"],
+                "web_url":           f["web_url"],
+                "last_modified":     f["last_modified"],
+                "size":              f["size"],
+                "doc_type":          doc_type,
+            })
+
     def scan(self, drive_id: str, event_q: "queue.Queue", state: dict) -> dict:
         projects, vendors, pos, documents = [], [], [], []
         po_index: dict = {}  # (vendor_id, po_number) -> po_id
@@ -361,11 +433,32 @@ class POScanner:
             })
             event_q.put({"type": "exploring", "path": project_name})
 
-            vendor_children = self.client.fetch_all_children(drive_id, pf["id"])
-            vendor_folders  = [
-                c for c in vendor_children
+            project_children = self.client.fetch_all_children(drive_id, pf["id"])
+            vendor_folders    = [
+                c for c in project_children
                 if "folder" in c and c.get("name", "").lower() not in SKIP_FOLDER_NAMES
             ]
+            # Vendorフォルダを介さず、プロジェクト直下に直接置かれているファイル。
+            # 従来は「Vendorフォルダの中身しか見ない」設計だったため無視されていた。
+            project_root_files_raw = [c for c in project_children if "file" in c]
+            if project_root_files_raw:
+                root_vendor_id   = f"{project_id}-ROOT"
+                root_vendor_name = "(プロジェクト直下)"
+                root_files = [
+                    {
+                        "name":              f.get("name", ""),
+                        "web_url":           f.get("webUrl", ""),
+                        "size":              f.get("size", 0),
+                        "last_modified":     f.get("lastModifiedDateTime", ""),
+                        "relative_path":     "",
+                        "po_folder_name":    "",
+                        "po_folder_web_url": "",
+                    }
+                    for f in project_root_files_raw
+                ]
+                self._ingest_files(root_files, project_id, project_name,
+                                    root_vendor_id, root_vendor_name,
+                                    pos, documents, po_index)
 
             for v_idx, vf in enumerate(vendor_folders):
                 if state.get("cancelled"):
@@ -388,56 +481,9 @@ class POScanner:
                     files = self._collect_files(drive_id, vf["id"], "", 0)
                     self.cache.set_vendor(vendor_path, files)
 
-                for f in files:
-                    doc_type, po_number = classify_filename(f["name"])
-                    doc_id = f"{vendor_id}-D{len(documents) + 1:04d}"
-                    po_id  = None
-
-                    if po_number:
-                        key = (vendor_id, po_number)
-                        if key not in po_index:
-                            po_id = f"{vendor_id}-PO{len(pos) + 1:04d}"
-                            po_index[key] = po_id
-                            pos.append({
-                                "po_id":               po_id,
-                                "po_number":           po_number,
-                                "project_id":          project_id,
-                                "project_name":        project_name,
-                                "vendor_id":           vendor_id,
-                                "vendor_name":         vendor_name,
-                                "po_folder_name":      f["po_folder_name"],
-                                "po_folder_web_url":   f["po_folder_web_url"],
-                                "representative_file": f["name"],
-                                "web_url":             f["web_url"],
-                                "last_modified":       f["last_modified"],
-                                "doc_count":           0,
-                            })
-                        po_id = po_index[key]
-                        po_rec = next(p for p in pos if p["po_id"] == po_id)
-                        po_rec["doc_count"] += 1
-                        if f["last_modified"] > po_rec["last_modified"]:
-                            po_rec["last_modified"]       = f["last_modified"]
-                            po_rec["representative_file"] = f["name"]
-                            po_rec["web_url"]              = f["web_url"]
-                            po_rec["po_folder_name"]       = f["po_folder_name"]
-                            po_rec["po_folder_web_url"]    = f["po_folder_web_url"]
-
-                    documents.append({
-                        "doc_id":            doc_id,
-                        "po_id":             po_id,
-                        "project_id":        project_id,
-                        "project_name":      project_name,
-                        "vendor_id":         vendor_id,
-                        "vendor_name":       vendor_name,
-                        "po_folder_name":    f["po_folder_name"],
-                        "po_folder_web_url": f["po_folder_web_url"],
-                        "filename":          f["name"],
-                        "relative_path":     f["relative_path"],
-                        "web_url":           f["web_url"],
-                        "last_modified":     f["last_modified"],
-                        "size":              f["size"],
-                        "doc_type":          doc_type,
-                    })
+                self._ingest_files(files, project_id, project_name,
+                                    vendor_id, vendor_name,
+                                    pos, documents, po_index)
 
                 state["count"] += 1
                 event_q.put({

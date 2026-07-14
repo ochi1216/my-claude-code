@@ -5,7 +5,7 @@
   "site_host": "nexperia.sharepoint.com",
   "site_path": "/sites/JapanDesign",
   "library_name": "PO",
-  "po_number_pattern": "^PO[-_]?(\\d{3,})",
+  "po_number_pattern": "^PO[-_# ]?(\\d{3,})",
   "max_depth": 6,
   "max_items_per_folder": 1000,
   "skip_folder_names": ["old"]

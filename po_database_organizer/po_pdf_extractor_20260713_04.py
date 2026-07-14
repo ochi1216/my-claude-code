@@ -3,7 +3,7 @@
 """
 PO PDF Extractor（調査/プロトタイプ版）
 
-version : 20260713_03
+version : 20260713_04
 purpose : PO本体PDF（SAPが発行するPurchase Order）を開き、
           1) 1ページ目冒頭の「PO番号」（国コード+拠点コード+PO番号、例 HK648210235980）
           2) 明細テーブル（Line / Material no.(12NC) / Order quantity / Unit /
@@ -25,10 +25,13 @@ purpose : PO本体PDF（SAPが発行するPurchase Order）を開き、
     - 1ページ目冒頭が "Purchase Order" ではなく "Changed Purchase Order"
       （変更発注書）の場合にも対応（v03で修正）。実際のタイトル文字列は
       「PDF種別」列に記録する。
+    - ファイル名からのPO番号抽出（"ファイル名PO番号"列）が "PO12345.pdf" 形式にしか
+      対応しておらず、"PO#12345_説明.pdf"・"PO 12345.pdf" 形式を拾えていなかった
+      不具合を修正（v04）。po_database_organizerの実サイト調査で発覚。
 
 使い方:
     pip install -r requirements.txt
-    python po_pdf_extractor_20260713_03.py <PDFが入ったフォルダ> [-o summary.xlsx]
+    python po_pdf_extractor_20260713_04.py <PDFが入ったフォルダ> [-o summary.xlsx]
 """
 
 import argparse
@@ -167,7 +170,7 @@ def extract(pdf_path: Path) -> dict:
         "errors":              [],
     }
 
-    m = re.search(r"PO(\d+)", pdf_path.stem, re.IGNORECASE)
+    m = re.search(r"PO[-_# ]?(\d{3,})", pdf_path.stem, re.IGNORECASE)
     if m:
         result["filename_po_number"] = m.group(1)
 
