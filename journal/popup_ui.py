@@ -2,7 +2,7 @@
 """
 popup_ui.py
 学びジャーナル - ホットキー起動の入力ポップアップUI
-Version: 0.7.3
+Version: 0.8.0
 """
 
 import ctypes
@@ -11,9 +11,8 @@ import threading
 import tkinter as tk
 from ctypes import wintypes
 from tkinter import font as tkfont
-from datetime import datetime
 
-from storage import append_entry, get_tag_master
+from storage import get_tag_master, record_check_in
 
 # ============================================================
 # UI設定（ダークテーマ）
@@ -37,8 +36,16 @@ def _lighten_color(hex_color: str, factor: float = 0.78) -> str:
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
+def _format_duration(minutes: int) -> str:
+    """分数を"1h05m"形式の文字列に整形する。"""
+    hours, mins = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h{mins:02d}m"
+    return f"{mins}m"
+
+
 HOTKEY = "ctrl+shift+j"
-VERSION = "0.7.3"
+VERSION = "0.8.0"
 
 _trigger_queue = queue.Queue()
 
@@ -256,6 +263,18 @@ class PopupWindow:
         btn_frame.pack(pady=6)
         self._register_themed(btn_frame)
 
+        register_btn = tk.Button(
+            btn_frame,
+            text="✅ 登録",
+            bg=ACCENT_COLOR,
+            fg=BUTTON_TEXT_COLOR,
+            activebackground=ACCENT_COLOR,
+            relief="flat",
+            width=12,
+            command=self._submit,
+        )
+        register_btn.pack(side="left", padx=4)
+
         cancel_btn = tk.Button(
             btn_frame,
             text="❌ キャンセル",
@@ -263,12 +282,12 @@ class PopupWindow:
             fg=BUTTON_TEXT_COLOR,
             activebackground=ACCENT_COLOR,
             relief="flat",
-            width=14,
+            width=12,
             command=self._cancel,
         )
         cancel_btn.pack(side="left", padx=4)
 
-        self.window.bind("<Escape>", lambda e: self.window.destroy())
+        self.window.bind("<Escape>", lambda e: self._cancel())
         # Windowsが Alt キー解放をシステムメニュー呼び出しと誤認識し、
         # ウィンドウが一瞬で背面に回る不具合を防ぐための対策
         self.window.bind("<Alt-KeyPress>", lambda e: "break")
@@ -309,17 +328,21 @@ class PopupWindow:
         if not self.selected_tag:
             self.selected_label.config(text="⚠️ タグを選択してください")
             return
-        if not memo:
-            self.selected_label.config(text="⚠️ 1行メモを入力してください")
+
+        success, kind, minutes = record_check_in(self.selected_tag, memo)
+        if not success:
+            self.selected_label.config(text="⚠️ 記録に失敗しました（退避保存を確認してください）")
+            print("⚠️ 記録に失敗しました（退避保存を確認してください）。")
             return
 
-        date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-        success = append_entry(date_str, self.selected_tag, memo)
-        if success:
-            print("✅ 記録が完了しました。ポップアップを閉じます。")
+        if kind == "anchor":
+            feedback = "✅ 基準点を記録しました"
         else:
-            print("⚠️ 記録に失敗しました（退避保存を確認してください）。")
-        self.window.destroy()
+            feedback = f"✅ {self.selected_tag}として記録しました ({_format_duration(minutes)})"
+        self.selected_label.config(text=feedback)
+        print(f"{feedback}。ポップアップを閉じます。")
+        # 登録直後のフィードバックが見えるよう、少し待ってから閉じる
+        self.window.after(900, self.window.destroy)
 
     def _cancel(self) -> None:
         """今回の入力を保存せずにポップアップを閉じる。"""

@@ -2,7 +2,7 @@
 """
 dashboard.py
 学びジャーナル - 日次〜年次の集計ダッシュボード
-Version: 0.5.0
+Version: 0.6.0
 """
 
 import tkinter as tk
@@ -12,7 +12,7 @@ from collections import Counter
 
 from openpyxl import load_workbook
 
-from storage import EXCEL_PATH, ENTRIES_SHEET, TAGMASTER_SHEET
+from storage import EXCEL_PATH, ENTRIES_SHEET, TAGMASTER_SHEET, TIMELOG_SHEET
 
 # ============================================================
 # UI設定（ダークテーマ）
@@ -25,6 +25,15 @@ BUTTON_TEXT_COLOR = "#2b2b40"
 PERIOD_BTN_BG = "#dfeaf5"
 
 PERIODS = ["日次", "週次", "月次", "四半期", "年次"]
+MODES = ["学び", "時間"]
+
+
+def _format_duration(minutes: int) -> str:
+    """分数を"1h05m"形式の文字列に整形する。"""
+    hours, mins = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h{mins:02d}m"
+    return f"{mins}m"
 
 
 def load_entries(path: str = EXCEL_PATH) -> list:
@@ -65,6 +74,40 @@ def load_tag_colors(path: str = EXCEL_PATH) -> dict:
         if row[0]:
             colors[row[0]] = row[1] or "#888888"
     return colors
+
+
+def load_time_log_entries(path: str = EXCEL_PATH) -> list:
+    """
+    TimeLogシートから全記録を読み込み、開始・終了・タグ付きの辞書のリストとして返す。
+    "datetime"キーは終了時刻のエイリアスで、filter_entries_by_period()を
+    そのまま再利用できるようにするためのもの。
+    """
+    wb = load_workbook(path, data_only=True)
+    if TIMELOG_SHEET not in wb.sheetnames:
+        return []
+    ws = wb[TIMELOG_SHEET]
+
+    entries = []
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        start_value, end_value, tag = row[0], row[1], row[2]
+        if not start_value or not end_value:
+            continue
+        try:
+            start_dt = (
+                start_value if isinstance(start_value, datetime)
+                else datetime.strptime(str(start_value), "%Y-%m-%d %H:%M")
+            )
+            end_dt = (
+                end_value if isinstance(end_value, datetime)
+                else datetime.strptime(str(end_value), "%Y-%m-%d %H:%M")
+            )
+        except ValueError:
+            print(f"⚠️ 日時の解析に失敗した行をスキップしました: {start_value} - {end_value}")
+            continue
+        entries.append({"start": start_dt, "end": end_dt, "tag": tag, "datetime": end_dt})
+
+    print(f"⏱️ 作業記録を読み込みました（{len(entries)}件）")
+    return entries
 
 
 def _period_range(period: str, reference: datetime = None) -> tuple:
@@ -125,15 +168,32 @@ def aggregate_by_tag(entries: list) -> dict:
     return dict(counter)
 
 
+def aggregate_time_by_tag(entries: list) -> dict:
+    """
+    タグ別の作業時間合計（分）を集計する。所要時間0分の基準点マーカー行は
+    合計に寄与しないため、特別なフィルタは不要。
+    """
+    totals = {}
+    for e in entries:
+        minutes = int((e["end"] - e["start"]).total_seconds() // 60)
+        if minutes <= 0:
+            continue
+        totals[e["tag"]] = totals.get(e["tag"], 0) + minutes
+    return totals
+
+
 class DashboardWindow:
     """日次〜年次の集計ダッシュボードウィンドウ。"""
 
     def __init__(self, root: tk.Tk):
         self.root = root
         self.current_period = "日次"
+        self.current_mode = "学び"
         self.tag_colors = {}
         self.entries = []
+        self.time_entries = []
         self.period_buttons = {}
+        self.mode_buttons = {}
 
         self.root.title("学びダッシュボード")
         self.root.configure(bg=BG_COLOR)
@@ -152,6 +212,23 @@ class DashboardWindow:
             font=title_font,
         )
         title.pack(pady=(12, 6))
+
+        mode_frame = tk.Frame(self.root, bg=BG_COLOR)
+        mode_frame.pack(pady=(0, 4))
+
+        for mode in MODES:
+            btn = tk.Button(
+                mode_frame,
+                text=mode,
+                bg=PERIOD_BTN_BG,
+                fg=BUTTON_TEXT_COLOR,
+                activebackground=ACCENT_COLOR,
+                relief="flat",
+                width=8,
+                command=lambda m=mode: self._on_mode_change(m),
+            )
+            btn.pack(side="left", padx=3)
+            self.mode_buttons[mode] = btn
 
         period_frame = tk.Frame(self.root, bg=BG_COLOR)
         period_frame.pack(pady=4)
@@ -203,6 +280,7 @@ class DashboardWindow:
         scrollbar.config(command=self.listbox.yview)
 
         self._highlight_period_button()
+        self._highlight_mode_button()
 
     def _highlight_period_button(self) -> None:
         for period, btn in self.period_buttons.items():
@@ -210,6 +288,18 @@ class DashboardWindow:
                 btn.config(bg=ACCENT_COLOR, fg=BUTTON_TEXT_COLOR)
             else:
                 btn.config(bg=PERIOD_BTN_BG, fg=BUTTON_TEXT_COLOR)
+
+    def _highlight_mode_button(self) -> None:
+        for mode, btn in self.mode_buttons.items():
+            if mode == self.current_mode:
+                btn.config(bg=ACCENT_COLOR, fg=BUTTON_TEXT_COLOR)
+            else:
+                btn.config(bg=PERIOD_BTN_BG, fg=BUTTON_TEXT_COLOR)
+
+    def _on_mode_change(self, mode: str) -> None:
+        self.current_mode = mode
+        self._highlight_mode_button()
+        self.refresh()
 
     def _on_period_change(self, period: str) -> None:
         self.current_period = period
@@ -219,22 +309,35 @@ class DashboardWindow:
     def refresh(self) -> None:
         """Excelからデータを再読込し、グラフ・一覧を再描画する。"""
         try:
-            all_entries = load_entries()
             self.tag_colors = load_tag_colors()
+            if self.current_mode == "学び":
+                all_entries = load_entries()
+            else:
+                all_entries = load_time_log_entries()
         except Exception as e:
             self.summary_label.config(text=f"❌ 読込エラー: {e}")
             print(f"❌ ダッシュボードのデータ読込に失敗しました: {e}")
             return
 
         filtered = filter_entries_by_period(all_entries, self.current_period)
-        self.entries = sorted(filtered, key=lambda e: e["datetime"])
-        counts = aggregate_by_tag(self.entries)
 
-        self.summary_label.config(
-            text=f"{self.current_period}: 全{len(self.entries)}件"
-        )
-        self._draw_chart(counts)
-        self._update_list()
+        if self.current_mode == "学び":
+            self.entries = sorted(filtered, key=lambda e: e["datetime"])
+            counts = aggregate_by_tag(self.entries)
+            self.summary_label.config(
+                text=f"{self.current_period}: 全{len(self.entries)}件"
+            )
+            self._draw_chart(counts)
+            self._update_list()
+        else:
+            self.time_entries = sorted(filtered, key=lambda e: e["start"])
+            minutes_by_tag = aggregate_time_by_tag(self.time_entries)
+            total_minutes = sum(minutes_by_tag.values())
+            self.summary_label.config(
+                text=f"{self.current_period}: 合計 {_format_duration(total_minutes)}"
+            )
+            self._draw_time_charts(minutes_by_tag)
+            self._update_time_list()
 
     def _draw_chart(self, counts: dict) -> None:
         self.canvas.delete("all")
@@ -275,6 +378,71 @@ class DashboardWindow:
         for entry in self.entries:
             date_str = entry["datetime"].strftime("%Y-%m-%d %H:%M")
             line = f"[{date_str}] [{entry['tag']}] {entry['memo']}"
+            self.listbox.insert(tk.END, line)
+
+    def _draw_time_charts(self, minutes_by_tag: dict) -> None:
+        """同じCanvas領域を左右に分け、棒グラフ（左）と円グラフ（右）を描画する。"""
+        self.canvas.delete("all")
+        if not minutes_by_tag:
+            self.canvas.create_text(
+                300, 110, text="記録がありません", fill=TEXT_COLOR,
+            )
+            return
+
+        # 左半分: タグ別の作業時間の棒グラフ
+        max_minutes = max(minutes_by_tag.values())
+        bar_width = 46
+        gap = 18
+        base_y = 200
+        max_bar_height = 160
+        x = 30
+
+        for tag, minutes in minutes_by_tag.items():
+            color = self.tag_colors.get(tag, "#888888")
+            bar_height = (
+                int((minutes / max_minutes) * max_bar_height) if max_minutes else 0
+            )
+            self.canvas.create_rectangle(
+                x, base_y - bar_height, x + bar_width, base_y,
+                fill=color, outline="",
+            )
+            self.canvas.create_text(
+                x + bar_width / 2, base_y - bar_height - 12,
+                text=_format_duration(minutes), fill=TEXT_COLOR, font=("", 8),
+            )
+            self.canvas.create_text(
+                x + bar_width / 2, base_y + 14,
+                text=tag, fill=TEXT_COLOR, font=("", 8),
+            )
+            x += bar_width + gap
+
+        # 右半分: タグ別の構成比の円グラフ
+        total_minutes = sum(minutes_by_tag.values())
+        cx, cy, r = 480, 105, 85
+        start_angle = 90.0
+        for tag, minutes in minutes_by_tag.items():
+            color = self.tag_colors.get(tag, "#888888")
+            extent = -360.0 * (minutes / total_minutes) if total_minutes else 0
+            self.canvas.create_arc(
+                cx - r, cy - r, cx + r, cy + r,
+                start=start_angle, extent=extent, fill=color, outline=BG_COLOR,
+            )
+            start_angle += extent
+
+        self.canvas.create_text(
+            cx, cy + r + 20,
+            text=f"合計 {_format_duration(total_minutes)}", fill=TEXT_COLOR,
+        )
+
+    def _update_time_list(self) -> None:
+        self.listbox.delete(0, tk.END)
+        for entry in self.time_entries:
+            minutes = int((entry["end"] - entry["start"]).total_seconds() // 60)
+            if minutes <= 0:
+                continue  # 基準点マーカー行(所要時間0分)は一覧に表示しない
+            start_str = entry["start"].strftime("%Y-%m-%d %H:%M")
+            end_str = entry["end"].strftime("%H:%M")
+            line = f"[{start_str}-{end_str}] [{entry['tag']}] ({_format_duration(minutes)})"
             self.listbox.insert(tk.END, line)
 
 

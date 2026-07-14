@@ -2,13 +2,13 @@
 """
 storage.py
 学びジャーナル - Excel(SharePoint同期フォルダ)読み書きモジュール
-Version: 0.1.0
+Version: 0.8.0
 """
 
 import os
 import time
 import shutil
-from datetime import datetime
+from datetime import datetime, timedelta
 from openpyxl import Workbook, load_workbook
 
 # ============================================================
@@ -22,9 +22,14 @@ EXCEL_PATH = r"C:\Users\nx023836\Documents\PythonScripts\Journal\journal_data.xl
 
 ENTRIES_SHEET = "Entries"
 TAGMASTER_SHEET = "TagMaster"
+TIMELOG_SHEET = "TimeLog"
 
 ENTRIES_HEADER = ["日付", "タグ", "メモ"]
 TAGMASTER_HEADER = ["タグ名", "色コード"]
+TIMELOG_HEADER = ["開始", "終了", "タグ"]
+
+# 前回チェックポイントから長時間経過していた場合の安全弁（この時間で打ち切る）
+MAX_TIMELOG_GAP_HOURS = 2
 
 DEFAULT_TAGS = [
     ("R19", "#d9ae23"),
@@ -59,8 +64,22 @@ def ensure_workbook_exists(path: str = EXCEL_PATH) -> None:
     for tag_name, color_code in DEFAULT_TAGS:
         ws_tags.append([tag_name, color_code])
 
+    ws_timelog = wb.create_sheet(TIMELOG_SHEET)
+    ws_timelog.append(TIMELOG_HEADER)
+
     wb.save(path)
     print(f"✅ 新規ブックを作成しました: {path}")
+
+
+def _ensure_timelog_sheet(wb) -> None:
+    """
+    TimeLogシートが無ければ作成する（既存のjournal_data.xlsxには
+    自動で追加されないため、読み書き前にこの関数で自己修復する）。
+    """
+    if TIMELOG_SHEET not in wb.sheetnames:
+        ws = wb.create_sheet(TIMELOG_SHEET)
+        ws.append(TIMELOG_HEADER)
+        print(f"🔧 既存ブックに'{TIMELOG_SHEET}'シートを追加しました。")
 
 
 def _load_with_retry(path: str, max_retries: int = MAX_RETRIES,
@@ -147,6 +166,86 @@ def append_entry(date_str: str, tag: str, memo: str,
     if success:
         print(f"📝 記録しました → [{date_str}] [{tag}] {memo}")
     return success
+
+
+def record_check_in(tag: str, memo: str, path: str = EXCEL_PATH,
+                     now: datetime = None) -> tuple:
+    """
+    タイムログのチェックインを記録する。
+
+    本日まだTimeLogに記録が無ければ、これを「基準点」として
+    開始=終了=nowの0分行を記録するだけに留める（作業記録は作らない）。
+    2回目以降のチェックインでは、本日分の直近の終了時刻から今までを
+    1件の作業記録として記録する（経過がMAX_TIMELOG_GAP_HOURSを超える
+    場合は打ち切る）。
+    memoが空でなければ、既存のEntriesシートにも学びとして記録する。
+    TimeLog・Entriesへの追記は1回のload/saveにまとめ、部分成功を防ぐ。
+
+    Args:
+        tag: タグ名
+        memo: 1行メモ（空文字列可）
+        path: Excelファイルパス
+        now: 基準時刻（省略時はdatetime.now()）
+
+    Returns:
+        tuple[bool, str, int | None]:
+            (保存に成功したか, "anchor"（基準点のみ）または"interval"（作業記録あり）,
+             "interval"の場合の経過分数)
+    """
+    if now is None:
+        now = datetime.now()
+    now = now.replace(second=0, microsecond=0)
+
+    ensure_workbook_exists(path)
+    wb = _load_with_retry(path)
+    _ensure_timelog_sheet(wb)
+    ws_timelog = wb[TIMELOG_SHEET]
+
+    today = now.date()
+    last_checkpoint = None
+    for row in ws_timelog.iter_rows(min_row=2, values_only=True):
+        end_value = row[1]
+        if not end_value:
+            continue
+        end_dt = (
+            end_value if isinstance(end_value, datetime)
+            else datetime.strptime(str(end_value), "%Y-%m-%d %H:%M")
+        )
+        if end_dt.date() == today and (last_checkpoint is None or end_dt > last_checkpoint):
+            last_checkpoint = end_dt
+
+    if last_checkpoint is None:
+        ws_timelog.append([now, now, tag])
+        kind = "anchor"
+        minutes = None
+    else:
+        start = last_checkpoint
+        max_gap = timedelta(hours=MAX_TIMELOG_GAP_HOURS)
+        if now - start > max_gap:
+            start = now - max_gap
+        ws_timelog.append([start, now, tag])
+        kind = "interval"
+        minutes = int((now - start).total_seconds() // 60)
+
+    if memo:
+        if ENTRIES_SHEET not in wb.sheetnames:
+            print(f"❌ シート'{ENTRIES_SHEET}'が見つかりません。")
+        else:
+            ws_entries = wb[ENTRIES_SHEET]
+            ws_entries.append([now.strftime("%Y-%m-%d %H:%M"), tag, memo])
+
+    success = _save_with_retry(wb, path)
+    if success:
+        if kind == "anchor":
+            print(f"⏱️ 本日の基準点を記録しました → {now.strftime('%Y-%m-%d %H:%M')}")
+        else:
+            print(
+                f"⏱️ 作業記録: [{start.strftime('%H:%M')}-{now.strftime('%H:%M')}] "
+                f"{tag} ({minutes}分)"
+            )
+        if memo:
+            print(f"📝 記録しました → [{now.strftime('%Y-%m-%d %H:%M')}] [{tag}] {memo}")
+    return success, kind, minutes
 
 
 def undo_last_entry(path: str = EXCEL_PATH) -> bool:
