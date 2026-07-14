@@ -153,3 +153,20 @@ PO一覧はフォルダ構造からの一次情報（Project/Vendor/PO番号/リ
   出力された `_detail.xlsx` をそのまま入力に指定して再実行すれば、既に成功した行は
   自動的にスキップされ、失敗した行・未処理の行だけ再処理される
   （`--start-row N` で開始行を明示的に指定することもできる）。
+- **`po_query_import_YYYYMMDD_NN.py`**：SharePointの検索/クエリ機能から書き出した
+  Excel（列: `Name` / `Item Type` / `Path` 等）を読み込み、Graph APIでライブスキャンする
+  ことなく（オフラインで）po_database_organizer と同じ「PO一覧」「未分類書類」の2シート
+  構成のExcelを生成するツール。大規模サイトのライブスキャンは時間がかかる／API制限に
+  当たりやすいため、SharePointの検索結果（Query export）が既に手元にある場合はこちらの
+  方が高速。`Path` 列（サイトルートからの相対フォルダパス）からProject/Vendor/PO関連
+  フォルダの階層とPO番号を判定するロジックは po_database_organizer と共通で、
+  ファイル名の正規表現（`^PO[-_# ]?(\d{3,})`）もそのまま流用している。
+  クエリExcelには更新日時やSharePoint上のURLが含まれないため、「最終更新日」列は空欄になり、
+  各セルのハイパーリンクは `Path` + ファイル名からURLを再構築して埋め込んでいる
+  （実際のGraph API由来のURLと一致する形式で組み立てているが、フォルダ名に含まれる
+  記号の扱い等、稀に完全一致しないケースがあり得る点に留意）。またクエリExcelは
+  ファイル行のみが対象のため、ファイルが1件も無い空のVendorフォルダはVendor数の
+  カウントに現れない（ライブスキャンとの差異が生じ得るが、カタログの内容自体には
+  影響しない）。
+  `python po_query_import_YYYYMMDD_NN.py <クエリExcel> [-o output.xlsx]`
+  （引数なしで実行するとファイル選択ダイアログが開く）
