@@ -1,4 +1,4 @@
-# CLAUDE.md — 越智さん個人開発プロジェクト引継ぎ資料
+# CLAUDE.md — ユーザー個人開発プロジェクト引継ぎ資料
 
 > 本ファイルは Claude.ai（Web）での開発セッションから Claude Code への移管用引継ぎ資料である。
 > プロジェクトルートに `CLAUDE.md` として配置すること。Claude Code は起動時に本ファイルを自動で読み込む。
@@ -9,7 +9,7 @@
 
 ## 1. プロジェクト全体像
 
-越智さん（Nexperia Japan Site Manager）が個人の情報収集・学習効率化のために開発している Python ツール群。**3系統**ある。
+ユーザーが個人の情報収集・学習効率化のために開発している Python ツール群。**3系統**ある。
 
 | # | プロジェクト | 最新ファイル名 | 概要 |
 |---|---|---|---|
@@ -20,7 +20,7 @@
 ### ディレクトリ構成（Windows）
 
 ```
-C:\Users\nx023836\Documents\PythonScripts\RSS\
+C:\Users\<username>\Documents\PythonScripts\RSS\
   consolidated_html_summary_manager_YYYYMMDD_XX.py   ← ツール1
   rss_organizer_YYYYMMDD_XX_XX.py                    ← ツール2
   followed_note_authors.txt                          ← noteフォロー作者URLリスト
@@ -28,7 +28,7 @@ C:\Users\nx023836\Documents\PythonScripts\RSS\
   start_consolidated_HTML_summary_manager.bat
   start_rss_organizer.bat（最新版rss_organizer_*.pyを自動検出するランチャー）
 
-C:\Users\nx023836\Nexperia\My Private - Documents\Summary\
+C:\Users\<username>\OrgSync\My Private - Documents\Summary\
   _Consolidated_Manager.html    ← ツール1の生成物（成果物）
   summary_database.json         ← ツール1のDBキャッシュ（※重要：下記の落とし穴参照）
   summary_*.html                ← RSSオーガナイザー等が生成する個別サマリHTML（入力）
@@ -46,7 +46,7 @@ C:\Users\nx023836\Nexperia\My Private - Documents\Summary\
 
 ## 2. 開発ワークフロー（厳守・最重要）
 
-越智さんは**3フェーズ承認制**を一貫して要求する。**勝手にコードを書いてはならない。**
+ユーザーは**3フェーズ承認制**を一貫して要求する。**勝手にコードを書いてはならない。**
 
 ```
 Phase 1: Design Proposal（設計提案）
@@ -78,13 +78,13 @@ Phase 3: Implementation Patch（●３で発動）
 ### バージョニング規約
 
 - ファイル名: `{tool}_YYYYMMDD_XX.py` または `YYYYMMDD_XX_XX`
-- VERSIONは越智さんが指定する場合がある（指定されたらそれに従う）
+- VERSIONはユーザーが指定する場合がある（指定されたらそれに従う）
 - 却下されたVERSION番号は欠番にする（例: 20260620_01は却下・欠番）
 
 ### コミュニケーション上の注意
 
-- 常に日本語。「越智さん」と呼ぶ。結論→項目→詳細の順
-- 越智さんはプログラム初心者を自認しているが、**タイミング依存の曖昧なロジックを鋭く見抜く**。「それはタイミングで崩れないか？」という指摘が繰り返し的中してきた。設計段階で決定論的な解を出すこと
+- 常に日本語。「ユーザー」と呼ぶ。結論→項目→詳細の順
+- ユーザーはプログラム初心者を自認しているが、**タイミング依存の曖昧なロジックを鋭く見抜く**。「それはタイミングで崩れないか？」という指摘が繰り返し的中してきた。設計段階で決定論的な解を出すこと
 - 「どこを変えればいいのか」が伝わらないことが多発した。**行番号＋前後の文脈＋完全な置換ブロック**を必ずセットで示す
 - パッチ手動適用のミスが頻発したため、**確実を期す場合は Claude 側でファイルに直接パッチを当てて完成ファイルを渡す**方式が有効だった（Claude Code では直接編集できるのでこの問題は解消されるはず）
 
@@ -271,10 +271,10 @@ handlePartEnd()
 |---|---|---|
 | 1 | 「18番」→「おはこ/はちばん」誤読 | 保留。音声エンジンの非決定動作。読点挿入/漢数字化等の案は出たが未採用 |
 | 2 | タイトル→要旨の無音間隔の短縮 | 保留。原因は playCurrentPart 冒頭の cancel()。isAutoAdvance引数案は条件付き承認済みだが「今は放置」指示 |
-| 3 | followed_note_authors.txt の重複（/rssあり・なし） | sync_mode=full での手動同期で解消可能。越智さんの操作待ち |
+| 3 | followed_note_authors.txt の重複（/rssあり・なし） | sync_mode=full での手動同期で解消可能。ユーザーの操作待ち |
 | 4 | OneNote Report Generator batのパスエラー | 保留（別ツール） |
 | 5 | AI_FEED_URLS の外部JSON化（GUI管理） | 提案済み・未着手 |
-| 6 | 20260708_01（applyAutoSkipMode）の動作検証 | パッチ提示済み。越智さんのテスト結果待ちの可能性あり。Step1〜6のテスト手順参照 |
+| 6 | 20260708_01（applyAutoSkipMode）の動作検証 | パッチ提示済み。ユーザーのテスト結果待ちの可能性あり。Step1〜6のテスト手順参照 |
 
 ---
 
@@ -290,7 +290,7 @@ handlePartEnd()
 ## 8. Claude Code での作業開始チェックリスト
 
 1. 本ファイル（CLAUDE.md）をプロジェクトルートに配置
-2. 最新ファイルの確認: `consolidated_html_summary_manager_20260708_01.py` が最新か越智さんに確認（20260708_01パッチが手動適用済みかどうか要確認）
+2. 最新ファイルの確認: `consolidated_html_summary_manager_20260708_01.py` が最新かユーザーに確認（20260708_01パッチが手動適用済みかどうか要確認）
 3. 変更前に必ず該当関数をReadし、想定バージョンのコードと一致するか確認（パッチ積み忘れ検出）
 4. 3フェーズワークフローを厳守（●２/●３の承認キーワードを待つ）
 5. 修正後は必ず: `python -c "import ast; ast.parse(open('file.py', encoding='utf-8').read())"` 相当の構文チェック
