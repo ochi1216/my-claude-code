@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """一気通貫 企業戦略分析パイプライン。
 
-企業名1つを入力に、7ステージ（会社→株式市場→業界・競合→類似事例選定→
-他業種事例→課題→戦略策定）を順に実行し、結果dictを返す。
+企業名1つを入力に、8ステージ（会社→直近ニュース(英/日/中)→株式市場→業界・競合→
+類似事例選定→他業種事例→課題→戦略策定）を順に実行し、結果dictを返す。
 Streamlitには依存しない（ダッシュボードからもテストからも呼べる）。
 
 - 各ステージは失敗しても {"error": ...} を格納して続行する（部分レポート方針）
@@ -27,12 +27,13 @@ USD_JPY = 160
 
 STAGE_LABELS = [
     ("company", "① 会社分析"),
-    ("market", "② 株式市場分析"),
-    ("industry", "③ 業界・競合分析"),
-    ("retrieve", "④ 類似RTOCS事例の選定"),
-    ("cases", "⑤ 他業種事例分析"),
-    ("issues", "⑥ 課題分析"),
-    ("strategy", "⑦ 戦略策定"),
+    ("news", "② 直近ニュース収集（英/日/中）"),
+    ("market", "③ 株式市場分析"),
+    ("industry", "④ 業界・競合分析"),
+    ("retrieve", "⑤ 類似RTOCS事例の選定"),
+    ("cases", "⑥ 他業種事例分析"),
+    ("issues", "⑦ 課題分析"),
+    ("strategy", "⑧ 戦略策定"),
 ]
 
 
@@ -56,6 +57,7 @@ class GeminiClient:
         self.total_cost_usd = 0.0
         self.stage_costs_jpy = {}
         self._model = None
+        self._grounded_model = None
         if self.api_key:
             import google.generativeai as genai
             genai.configure(api_key=self.api_key)
@@ -92,6 +94,40 @@ class GeminiClient:
             except Exception as e:
                 last_err = e
         raise ValueError(f"Gemini呼び出し失敗: {last_err}")
+
+    def _get_grounded_model(self):
+        """Google Search Groundingツールを付けたモデルを遅延生成する。
+
+        google-generativeai(deprecated)のTool型はgoogle_search_retrievalのみを公開しており、
+        Gemini 2.x系での正式な検索グラウンディング(google_search)とはAPI形状が異なる可能性がある。
+        非対応/エラーの場合は呼び出し側でキャッチしてニュース欠落として扱う。
+        """
+        if self._grounded_model is None:
+            import google.generativeai as genai
+            tool = genai.protos.Tool(google_search_retrieval=genai.protos.GoogleSearchRetrieval())
+            self._grounded_model = genai.GenerativeModel(self.model_name, tools=[tool])
+        return self._grounded_model
+
+    def generate_grounded_json(self, prompt, stage="misc", retries=1):
+        """Google Search Groundingを有効にした呼び出し。
+
+        グラウンディングとJSONモード(response_mime_type)は併用できないため、
+        プロンプト側にJSON形式での出力を指示し、コードフェンス除去＋json.loadsでパースする。
+        """
+        if not self._model:
+            raise ValueError("GEMINI_API_KEY が設定されていません。")
+        last_err = None
+        for _ in range(retries + 1):
+            try:
+                model = self._get_grounded_model()
+                response = model.generate_content(prompt)
+                self._add_cost(stage, response)
+                if not response.text:
+                    raise ValueError("空の応答")
+                return json.loads(_strip_code_fence(response.text))
+            except Exception as e:
+                last_err = e
+        raise ValueError(f"Gemini(grounding)呼び出し失敗: {last_err}")
 
 
 def fetch_market_data(ticker_candidates):
@@ -206,12 +242,27 @@ class StrategyEngine:
         self._run_stage("company", labels["company"], lambda: self.client.generate_json(
             P.STAGE1_COMPANY.format(company=company_name), stage="company"), stages)
         s1 = stages.get("company", {})
-        target_summary = json.dumps(
-            {k: s1.get(k) for k in ("official_name", "industry_sector", "business_model",
-                                    "strengths", "weaknesses") if k in s1},
-            ensure_ascii=False) if "error" not in s1 else company_name
 
-        # ② 株式市場分析（yfinance実データ→Gemini解釈。未上場はスキップ）
+        # ② 直近ニュース収集（英/日/中、Google Search Grounding）
+        def stage_news():
+            official = s1.get("official_name", company_name) if "error" not in s1 else company_name
+            return self.client.generate_grounded_json(
+                P.STAGE1B_NEWS.format(company=company_name, official_name=official),
+                stage="news")
+        self._run_stage("news", labels["news"], stage_news, stages)
+        news_stage = stages.get("news", {})
+
+        target_summary_dict = {k: s1.get(k) for k in
+                                ("official_name", "industry_sector", "business_model",
+                                 "strengths", "weaknesses") if k in s1} if "error" not in s1 else {}
+        if "error" not in news_stage and news_stage.get("recent_news"):
+            target_summary_dict["recent_news_headlines"] = [
+                f"[{n.get('date','')}/{n.get('language','')}] {n.get('headline','')}"
+                for n in news_stage["recent_news"][:8]
+            ]
+        target_summary = json.dumps(target_summary_dict, ensure_ascii=False) if target_summary_dict else company_name
+
+        # ③ 株式市場分析（yfinance実データ→Gemini解釈。未上場はスキップ）
         def stage2():
             if "error" in s1:
                 return {"skipped": "会社分析が失敗したためスキップ"}
@@ -228,14 +279,14 @@ class StrategyEngine:
             return out
         self._run_stage("market", labels["market"], stage2, stages)
 
-        # ③ 業界・競合分析
+        # ④ 業界・競合分析
         self._run_stage("industry", labels["industry"], lambda: self.client.generate_json(
             P.STAGE3_INDUSTRY.format(company=company_name,
                                      sector=s1.get("industry_sector", "不明"),
                                      stage1_summary=target_summary),
             stage="industry"), stages)
 
-        # ④ 類似RTOCS事例の選定（LLM-as-retriever）
+        # ⑤ 類似RTOCS事例の選定（LLM-as-retriever）
         index = rtocs_index.build_index(data_dir=self.data_dir)
         records = index.get("records", [])
 
@@ -288,12 +339,12 @@ class StrategyEngine:
                 {k: v for k, v in stages.items() if isinstance(v, dict) and "error" not in v},
                 ensure_ascii=False)
 
-        # ⑥ 課題分析
+        # ⑦ 課題分析
         self._run_stage("issues", labels["issues"], lambda: self.client.generate_json(
             P.STAGE6_ISSUES.format(company=company_name, all_analysis=_all_analysis()),
             stage="issues"), stages)
 
-        # ⑦ 戦略策定（ディープモードは批判・改訂パス付き）
+        # ⑧ 戦略策定（ディープモードは批判・改訂パス付き）
         def stage7():
             lessons = json.dumps(stages.get("cases", {}), ensure_ascii=False)
             draft = self.client.generate_json(

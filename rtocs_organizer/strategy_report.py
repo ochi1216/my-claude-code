@@ -125,6 +125,28 @@ def _sec_company(s):
     """
 
 
+_LANG_BADGE = {"en": "🇬🇧 EN", "ja": "🇯🇵 JA", "zh": "🇨🇳 ZH"}
+
+
+def _sec_news(s):
+    variants = s.get("name_variants", {}) or {}
+    variant_badges = "".join(
+        f'<span class="badge">{_LANG_BADGE.get(lang, lang.upper())}: {_e(name)}</span>'
+        for lang, name in variants.items() if name)
+    news_items = sorted(s.get("recent_news", []) or [], key=lambda n: n.get("date", ""), reverse=True)
+    rows = "".join(
+        f"""<tr><td>{_e(n.get('date'))}</td>
+            <td>{_LANG_BADGE.get(n.get('language',''), _e(n.get('language')))}</td>
+            <td>{_e(n.get('headline'))}<br><span style="color:#718096;font-size:0.85rem;">{_e(n.get('summary'))}</span></td>
+            <td>{_e(n.get('source'))}</td></tr>"""
+        for n in news_items)
+    table_html = (f'<table><tr><th>日付</th><th>言語</th><th>見出し・要約</th><th>媒体</th></tr>{rows}</table>'
+                  if rows else '<div class="skip-box">ニュースは見つかりませんでした</div>')
+    note = s.get("recency_note", "")
+    note_html = f'<div class="skip-box">ℹ️ {_e(note)}</div>' if note else ""
+    return f"{variant_badges}{table_html}{note_html}"
+
+
 def _sec_market(s, market_data):
     chart = _price_chart_b64(market_data)
     chart_html = f'<img class="chart" src="data:image/png;base64,{chart}">' if chart else ""
@@ -188,12 +210,17 @@ def _sec_cases(retrieve, cases, selected_records):
 
 
 def _sec_issues(s):
+    def _evidence_html(evidence):
+        # 後方互換: 万一文字列で返ってきても壊れないようにする
+        items = evidence if isinstance(evidence, list) else ([evidence] if evidence else [])
+        return "".join(f'<div style="color:#718096;font-size:0.85rem;">・{_e(x)}</div>' for x in items)
+
     rows = "".join(
         f"""<div class="item"><strong>■ {_e(i.get('title'))}</strong>
             <span class="badge">緊急度: {_e(i.get('urgency'))}</span><br>
             症状: {_e(i.get('symptom'))}<br>
             根本原因: {_e(i.get('root_cause'))}<br>
-            <span style="color:#718096;font-size:0.85rem;">根拠: {_e(i.get('evidence'))}</span></div>"""
+            <div style="margin-top:4px;">根拠:</div>{_evidence_html(i.get('evidence'))}</div>"""
         for i in s.get("issues", []))
     return rows or '<div class="skip-box">課題データなし</div>'
 
@@ -239,6 +266,7 @@ def generate_strategy_report(result, out_dir=None):
     sections = [
         exec_html,
         card("🏢 会社分析", _guard(stages.get("company", {}), _sec_company)),
+        card("📰 直近ニュース（英語/日本語/中国語）", _guard(stages.get("news", {}), _sec_news)),
         card("📈 株式市場分析", _guard(stages.get("market", {}),
                                        lambda s: _sec_market(s, result.get("market_data")))),
         card("🌐 業界・競合分析", _guard(stages.get("industry", {}), _sec_industry)),
