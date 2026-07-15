@@ -24,7 +24,7 @@ ENTRIES_SHEET = "Entries"
 TAGMASTER_SHEET = "TagMaster"
 TIMELOG_SHEET = "TimeLog"
 
-ENTRIES_HEADER = ["日付", "タグ", "メモ"]
+ENTRIES_HEADER = ["日付", "タグ", "L", "K", "P", "T"]
 TAGMASTER_HEADER = ["タグ名", "色コード"]
 TIMELOG_HEADER = ["開始", "終了", "タグ"]
 
@@ -80,6 +80,24 @@ def _ensure_timelog_sheet(wb) -> None:
         ws = wb.create_sheet(TIMELOG_SHEET)
         ws.append(TIMELOG_HEADER)
         print(f"🔧 既存ブックに'{TIMELOG_SHEET}'シートを追加しました。")
+
+
+def _ensure_lkpt_columns(wb) -> None:
+    """
+    Entriesシートが旧形式（日付/タグ/メモの3列）のままなら、
+    メモ列をL列として読み替え、K/P/T列を追加する自己修復を行う。
+    既存行の値は列の移動をせずそのまま残るため、既存のメモは
+    自動的にLのデータとして統合される。
+    """
+    ws = wb[ENTRIES_SHEET]
+    header = [cell.value for cell in ws[1]]
+    if len(header) >= 3 and header[2] == "メモ":
+        ws.cell(row=1, column=3, value="L")
+        ws.insert_cols(4, amount=3)
+        ws.cell(row=1, column=4, value="K")
+        ws.cell(row=1, column=5, value="P")
+        ws.cell(row=1, column=6, value="T")
+        print("🔧 EntriesシートをLKPT形式（L/K/P/T）に移行しました。")
 
 
 def _load_with_retry(path: str, max_retries: int = MAX_RETRIES,
@@ -141,12 +159,14 @@ def _save_with_retry(wb, path: str, max_retries: int = MAX_RETRIES,
 def append_entry(date_str: str, tag: str, memo: str,
                   path: str = EXCEL_PATH) -> bool:
     """
-    Entriesシートに1行追記する。
+    Entriesシートに1行追記する。memoはL列（列C）にそのまま入る
+    （C列は元は「メモ」列だったが、LKPT形式移行後は「L」列として
+    読み替えられている）。K/P/T列は空のままになる。
 
     Args:
         date_str: "YYYY-MM-DD HH:MM" 形式の日時文字列
         tag: タグ名（TagMasterに存在するものを推奨）
-        memo: 1行メモ
+        memo: 1行メモ（L列に記録される）
         path: Excelファイルパス
 
     Returns:
@@ -168,8 +188,8 @@ def append_entry(date_str: str, tag: str, memo: str,
     return success
 
 
-def record_check_in(tag: str, memo: str, path: str = EXCEL_PATH,
-                     now: datetime = None) -> tuple:
+def record_check_in(tag: str, l: str, k: str, p: str, t: str,
+                     path: str = EXCEL_PATH, now: datetime = None) -> tuple:
     """
     タイムログのチェックインを記録する。
 
@@ -178,12 +198,16 @@ def record_check_in(tag: str, memo: str, path: str = EXCEL_PATH,
     2回目以降のチェックインでは、本日分の直近の終了時刻から今までを
     1件の作業記録として記録する（経過がMAX_TIMELOG_GAP_HOURSを超える
     場合は打ち切る）。
-    memoが空でなければ、既存のEntriesシートにも学びとして記録する。
-    TimeLog・Entriesへの追記は1回のload/saveにまとめ、部分成功を防ぐ。
+    l/k/p/tのいずれかが空でなければ、既存のEntriesシートにもLKPTとして
+    記録する。TimeLog・Entriesへの追記は1回のload/saveにまとめ、
+    部分成功を防ぐ。
 
     Args:
         tag: タグ名
-        memo: 1行メモ（空文字列可）
+        l: Learned（学び）1行メモ（空文字列可）
+        k: Keep（継続すべき事）1行メモ（空文字列可）
+        p: Problem（課題）1行メモ（空文字列可）
+        t: Try（次に挑戦したい事）1行メモ（空文字列可）
         path: Excelファイルパス
         now: 基準時刻（省略時はdatetime.now()）
 
@@ -199,6 +223,7 @@ def record_check_in(tag: str, memo: str, path: str = EXCEL_PATH,
     ensure_workbook_exists(path)
     wb = _load_with_retry(path)
     _ensure_timelog_sheet(wb)
+    _ensure_lkpt_columns(wb)
     ws_timelog = wb[TIMELOG_SHEET]
 
     today = now.date()
@@ -227,12 +252,13 @@ def record_check_in(tag: str, memo: str, path: str = EXCEL_PATH,
         kind = "interval"
         minutes = int((now - start).total_seconds() // 60)
 
-    if memo:
+    has_lkpt = bool(l or k or p or t)
+    if has_lkpt:
         if ENTRIES_SHEET not in wb.sheetnames:
             print(f"❌ シート'{ENTRIES_SHEET}'が見つかりません。")
         else:
             ws_entries = wb[ENTRIES_SHEET]
-            ws_entries.append([now.strftime("%Y-%m-%d %H:%M"), tag, memo])
+            ws_entries.append([now.strftime("%Y-%m-%d %H:%M"), tag, l, k, p, t])
 
     success = _save_with_retry(wb, path)
     if success:
@@ -243,8 +269,9 @@ def record_check_in(tag: str, memo: str, path: str = EXCEL_PATH,
                 f"⏱️ 作業記録: [{start.strftime('%H:%M')}-{now.strftime('%H:%M')}] "
                 f"{tag} ({minutes}分)"
             )
-        if memo:
-            print(f"📝 記録しました → [{now.strftime('%Y-%m-%d %H:%M')}] [{tag}] {memo}")
+        if has_lkpt:
+            print(f"📝 LKPTを記録しました → [{now.strftime('%Y-%m-%d %H:%M')}] [{tag}] "
+                  f"L={l} K={k} P={p} T={t}")
     return success, kind, minutes
 
 

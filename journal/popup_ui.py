@@ -2,7 +2,7 @@
 """
 popup_ui.py
 学びジャーナル - ホットキー起動の入力ポップアップUI
-Version: 0.8.0
+Version: 0.9.0
 """
 
 import ctypes
@@ -45,7 +45,7 @@ def _format_duration(minutes: int) -> str:
 
 
 HOTKEY = "ctrl+shift+j"
-VERSION = "0.8.0"
+VERSION = "0.9.0"
 
 _trigger_queue = queue.Queue()
 
@@ -135,7 +135,10 @@ class PopupWindow:
         self.root = root
         self.window = None
         self.selected_tag = None
-        self.memo_var = tk.StringVar()
+        self.l_var = tk.StringVar()
+        self.k_var = tk.StringVar()
+        self.p_var = tk.StringVar()
+        self.t_var = tk.StringVar()
         self.tag_rows = {}
         self.selected_label = None
         self._themed_bg_widgets = []
@@ -164,7 +167,8 @@ class PopupWindow:
             return
 
         self.selected_tag = None
-        self.memo_var.set("")
+        for var in (self.l_var, self.k_var, self.p_var, self.t_var):
+            var.set("")
         self.tag_rows = {}
         self._themed_bg_widgets = []
         self._themed_fg_widgets = []
@@ -176,18 +180,18 @@ class PopupWindow:
             tags = []
 
         self.window = tk.Toplevel(self.root)
-        self.window.title("今日の学び")
+        self.window.title("LKPT")
         self.window.configure(bg=BG_COLOR)
         self.window.attributes("-topmost", True)
         self.window.resizable(True, True)
         self._register_themed(self.window)
 
         row_height = 34
-        # タイトル・selected_label(太字バッジ化で縦に大きくなった分を加味)・entry・
-        # キャンセルボタン・余白の合計目安
-        chrome_height = 210
+        # タイトル・selected_label(太字バッジ)・LKPT入力4行・登録/キャンセル
+        # ボタン・余白の合計目安
+        chrome_height = 300
         width = 300
-        height = max(260, chrome_height + row_height * len(tags))
+        height = max(340, chrome_height + row_height * len(tags))
         screen_w = self.window.winfo_screenwidth()
         screen_h = self.window.winfo_screenheight()
         height = min(height, screen_h - 100)
@@ -200,7 +204,7 @@ class PopupWindow:
         title_font = tkfont.Font(family="Yu Gothic UI", size=12, weight="bold")
         label = tk.Label(
             self.window,
-            text="📝 今日の学び",
+            text="📝 LKPT",
             bg=BG_COLOR,
             fg=TEXT_COLOR,
             font=title_font,
@@ -247,17 +251,40 @@ class PopupWindow:
         # 選択中バッジは一括テーマ切替(_apply_theme)の対象外にし、_select_tag内で
         # タグの生の色を直接背景に当てて目立たせる（意図的に_register_themedを呼ばない）
 
-        entry = tk.Entry(
-            self.window,
-            bg=ENTRY_BG,
-            fg=TEXT_COLOR,
-            insertbackground=TEXT_COLOR,
-            relief="flat",
-            textvariable=self.memo_var,
-        )
-        entry.pack(pady=8, ipady=4, padx=20, fill="x")
-        entry.focus_set()
-        entry.bind("<Return>", lambda e: self._submit())
+        lkpt_frame = tk.Frame(self.window, bg=BG_COLOR)
+        lkpt_frame.pack(pady=(4, 8), padx=20, fill="x")
+        self._register_themed(lkpt_frame)
+
+        lkpt_label_font = tkfont.Font(family="Yu Gothic UI", size=10, weight="bold")
+        first_entry = None
+        for field_label, var in (
+            ("L", self.l_var), ("K", self.k_var), ("P", self.p_var), ("T", self.t_var),
+        ):
+            field_row = tk.Frame(lkpt_frame, bg=BG_COLOR)
+            field_row.pack(fill="x", pady=2)
+            self._register_themed(field_row)
+
+            field_label_widget = tk.Label(
+                field_row, text=field_label, font=lkpt_label_font,
+                bg=BG_COLOR, fg=TEXT_COLOR, width=2,
+            )
+            field_label_widget.pack(side="left")
+            self._register_themed(field_label_widget, bg=True, fg=True)
+
+            field_entry = tk.Entry(
+                field_row,
+                bg=ENTRY_BG,
+                fg=TEXT_COLOR,
+                insertbackground=TEXT_COLOR,
+                relief="flat",
+                textvariable=var,
+            )
+            field_entry.pack(side="left", ipady=3, fill="x", expand=True)
+            field_entry.bind("<Return>", lambda e: self._submit())
+            if first_entry is None:
+                first_entry = field_entry
+
+        first_entry.focus_set()
 
         btn_frame = tk.Frame(self.window, bg=BG_COLOR)
         btn_frame.pack(pady=6)
@@ -324,12 +351,15 @@ class PopupWindow:
         print(f"🏷️ タグ選択: {tag_name}")
 
     def _submit(self) -> None:
-        memo = self.memo_var.get().strip()
+        l = self.l_var.get().strip()
+        k = self.k_var.get().strip()
+        p = self.p_var.get().strip()
+        t = self.t_var.get().strip()
         if not self.selected_tag:
             self.selected_label.config(text="⚠️ タグを選択してください")
             return
 
-        success, kind, minutes = record_check_in(self.selected_tag, memo)
+        success, kind, minutes = record_check_in(self.selected_tag, l, k, p, t)
         if not success:
             self.selected_label.config(text="⚠️ 記録に失敗しました（退避保存を確認してください）")
             print("⚠️ 記録に失敗しました（退避保存を確認してください）。")

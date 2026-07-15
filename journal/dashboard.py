@@ -2,7 +2,7 @@
 """
 dashboard.py
 学びジャーナル - 日次〜年次の集計ダッシュボード
-Version: 0.6.0
+Version: 0.7.0
 """
 
 import tkinter as tk
@@ -45,7 +45,7 @@ def load_entries(path: str = EXCEL_PATH) -> list:
 
     entries = []
     for row in ws.iter_rows(min_row=2, values_only=True):
-        date_value, tag, memo = row[0], row[1], row[2]
+        date_value, tag = row[0], row[1]
         if not date_value:
             continue
         try:
@@ -56,7 +56,13 @@ def load_entries(path: str = EXCEL_PATH) -> list:
         except ValueError:
             print(f"⚠️ 日時の解析に失敗した行をスキップしました: {date_value}")
             continue
-        entries.append({"datetime": dt, "tag": tag, "memo": memo})
+        # 旧形式(メモ1列)のファイルをLKPT移行前に開いても壊れないよう、
+        # 存在しない列は空文字列として扱う
+        l = row[2] if len(row) > 2 and row[2] else ""
+        k = row[3] if len(row) > 3 and row[3] else ""
+        p = row[4] if len(row) > 4 and row[4] else ""
+        t = row[5] if len(row) > 5 and row[5] else ""
+        entries.append({"datetime": dt, "tag": tag, "l": l, "k": k, "p": p, "t": t})
 
     print(f"📊 記録を読み込みました（{len(entries)}件）")
     return entries
@@ -377,7 +383,13 @@ class DashboardWindow:
         self.listbox.delete(0, tk.END)
         for entry in self.entries:
             date_str = entry["datetime"].strftime("%Y-%m-%d %H:%M")
-            line = f"[{date_str}] [{entry['tag']}] {entry['memo']}"
+            parts = [
+                f"{label}:{entry[key]}"
+                for label, key in (("L", "l"), ("K", "k"), ("P", "p"), ("T", "t"))
+                if entry[key]
+            ]
+            detail = " ".join(parts)
+            line = f"[{date_str}] [{entry['tag']}] {detail}"
             self.listbox.insert(tk.END, line)
 
     def _draw_time_charts(self, minutes_by_tag: dict) -> None:
