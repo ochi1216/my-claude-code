@@ -2,6 +2,13 @@
 
 このフォルダ内の変更履歴。バージョンアップ時は旧ファイルを残したまま新ファイルを追加し、ここに変更点を追記する。
 
+## [20260715_02] - 2026-07-15
+
+**追加ファイル:** `rtocs_dashboard_20260715_02.py`（`_01`からのバグ修正版。`_01`はそのまま残置）
+
+- 傾向分析タブの「キーワードの年次トレンド比較」で `NameError: name 'kw' is not defined` が発生する不具合を修正（キーワード頻度上位を取り出すリスト内包表記の誤り）
+- Streamlitの `use_container_width` 非推奨引数（2025-12-31以降削除予定）を `width='stretch'` に置換
+
 ## [20260715_01] - 2026-07-15
 
 **追加ファイル:** `rtocs_dashboard_20260715_01.py`, `rtocs_index.py`, `strategy_engine.py`, `strategy_prompts.py`, `strategy_report.py`

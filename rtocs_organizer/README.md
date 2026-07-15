@@ -55,13 +55,13 @@ BBT「大前研一ライブ」のRTOCSコーナーの講義動画を自動取得
 - `rtocs_index.py` — `data/JSON_lake` から軽量なケース一覧（`data/rtocs_index.json`）を増分構築する共通部品
 - `strategy_prompts.py` / `strategy_engine.py` — 企業名を1つ入力すると「会社分析→株式市場分析→業界・競合分析→類似RTOCS事例選定→他業種事例分析→課題分析→戦略策定」を自動で実行するパイプライン
 - `strategy_report.py` — 分析結果を1枚の自己完結HTMLレポートに整形
-- `rtocs_dashboard_20260715_01.py` — 上記をまとめたStreamlitダッシュボード本体
+- `rtocs_dashboard_20260715_02.py` — 上記をまとめたStreamlitダッシュボード本体（最新版。変更履歴は [`CHANGELOG.md`](CHANGELOG.md) を参照）
 
 ### 起動方法
 
 ```
 pip install -r requirements.txt
-streamlit run rtocs_dashboard_20260715_01.py
+streamlit run rtocs_dashboard_20260715_02.py
 ```
 
 ブラウザが自動で開き、以下の3タブが表示される。
