@@ -2,6 +2,18 @@
 
 このフォルダ内の変更履歴。バージョンアップ時は旧ファイルを残したまま新ファイルを追加し、ここに変更点を追記する。
 
+## [20260715_04] - 2026-07-15
+
+**追加ファイル:** `rtocs_dashboard_20260715_04.py`（`_03`からのコピー＋バージョン更新。`_01`〜`_03`はそのまま残置）
+**変更ファイル:** `strategy_engine.py`, `requirements.txt`
+
+実機検証で判明したバグ修正:
+
+- 直近ニュース収集ステージが `400 google_search_retrieval is not supported. Please use google_search tool instead.` で必ず失敗する不具合を修正
+  - 原因: `google-generativeai`（レガシー・Google公式に開発終了宣言済みのSDK）のグラウンディング機能は旧世代方式(`google_search_retrieval`)のみで、`gemini-2.5-flash`/`gemini-2.5-pro`が要求する新方式(`google_search`)を構成できなかった
+  - 対応: ニュース収集ステージのみ、後継の統合SDK `google-genai` に切り替え、`google_search`ツールを使用するよう変更。他の7ステージ（JSONモード呼び出し）は`google-generativeai`のまま変更なし
+- `requirements.txt`に`google-genai>=1.0`を追加（`google-generativeai`と共存）
+
 ## [20260715_03] - 2026-07-15
 
 **追加ファイル:** `rtocs_dashboard_20260715_03.py`（`_02`からのコピー＋バージョン更新。`_01`/`_02`はそのまま残置）

@@ -57,7 +57,7 @@ class GeminiClient:
         self.total_cost_usd = 0.0
         self.stage_costs_jpy = {}
         self._model = None
-        self._grounded_model = None
+        self._genai2_client = None
         if self.api_key:
             import google.generativeai as genai
             genai.configure(api_key=self.api_key)
@@ -95,32 +95,38 @@ class GeminiClient:
                 last_err = e
         raise ValueError(f"Gemini呼び出し失敗: {last_err}")
 
-    def _get_grounded_model(self):
-        """Google Search Groundingツールを付けたモデルを遅延生成する。
+    def _get_genai2_client(self):
+        """Google Search Grounding用の新SDK(google-genai)クライアントを遅延生成する。
 
-        google-generativeai(deprecated)のTool型はgoogle_search_retrievalのみを公開しており、
-        Gemini 2.x系での正式な検索グラウンディング(google_search)とはAPI形状が異なる可能性がある。
-        非対応/エラーの場合は呼び出し側でキャッチしてニュース欠落として扱う。
+        レガシーの`google-generativeai`が公開するTool型は`google_search_retrieval`
+        （Gemini 1.5世代向けの旧グラウンディング方式）のみで、Gemini 2.x系が要求する
+        `google_search`ツールとはAPI形状が異なり使えない（実機で400エラーを確認済み）。
+        後継の統合SDK`google-genai`（別パッケージ、共存可能）のみがgoogle_searchツールを
+        公開しているため、ニュース収集ステージに限りこちらを使う。
         """
-        if self._grounded_model is None:
-            import google.generativeai as genai
-            tool = genai.protos.Tool(google_search_retrieval=genai.protos.GoogleSearchRetrieval())
-            self._grounded_model = genai.GenerativeModel(self.model_name, tools=[tool])
-        return self._grounded_model
+        if self._genai2_client is None:
+            from google import genai as genai2
+            self._genai2_client = genai2.Client(api_key=self.api_key)
+        return self._genai2_client
 
     def generate_grounded_json(self, prompt, stage="misc", retries=1):
-        """Google Search Groundingを有効にした呼び出し。
+        """Google Search Groundingを有効にした呼び出し（google-genai SDK使用）。
 
         グラウンディングとJSONモード(response_mime_type)は併用できないため、
         プロンプト側にJSON形式での出力を指示し、コードフェンス除去＋json.loadsでパースする。
         """
-        if not self._model:
+        if not self.api_key:
             raise ValueError("GEMINI_API_KEY が設定されていません。")
+        from google.genai import types as genai2_types
         last_err = None
         for _ in range(retries + 1):
             try:
-                model = self._get_grounded_model()
-                response = model.generate_content(prompt)
+                client = self._get_genai2_client()
+                config = genai2_types.GenerateContentConfig(
+                    tools=[genai2_types.Tool(google_search=genai2_types.GoogleSearch())]
+                )
+                response = client.models.generate_content(
+                    model=self.model_name, contents=prompt, config=config)
                 self._add_cost(stage, response)
                 if not response.text:
                     raise ValueError("空の応答")

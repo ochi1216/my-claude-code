@@ -55,13 +55,13 @@ BBT「大前研一ライブ」のRTOCSコーナーの講義動画を自動取得
 - `rtocs_index.py` — `data/JSON_lake` から軽量なケース一覧（`data/rtocs_index.json`）を増分構築する共通部品
 - `strategy_prompts.py` / `strategy_engine.py` — 企業名を1つ入力すると「会社分析→直近ニュース収集(英/日/中)→株式市場分析→業界・競合分析→類似RTOCS事例選定→他業種事例分析→課題分析→戦略策定」を自動で実行するパイプライン
 - `strategy_report.py` — 分析結果を1枚の自己完結HTMLレポートに整形
-- `rtocs_dashboard_20260715_03.py` — 上記をまとめたStreamlitダッシュボード本体（最新版。変更履歴は [`CHANGELOG.md`](CHANGELOG.md) を参照）
+- `rtocs_dashboard_20260715_04.py` — 上記をまとめたStreamlitダッシュボード本体（最新版。変更履歴は [`CHANGELOG.md`](CHANGELOG.md) を参照）
 
 ### 起動方法
 
 ```
 pip install -r requirements.txt
-streamlit run rtocs_dashboard_20260715_03.py
+streamlit run rtocs_dashboard_20260715_04.py
 ```
 
 ブラウザが自動で開き、以下の3タブが表示される。
@@ -75,4 +75,4 @@ streamlit run rtocs_dashboard_20260715_03.py
 - 上場企業は `yfinance` で株価・財務データを自動取得するが、未上場企業は定性分析のみとなる（自動判定・自動フォールバック）
 - 各分析ステージが失敗しても処理は止まらず、レポート内に「取得失敗」として表示される（部分的なレポートは必ず生成される）
 - AIの知識に基づく分析は不確実な場合があるため、レポート内の記述は参考情報として扱い、重要な意思決定の前には要確認
-- 直近ニュース収集はGeminiの検索グラウンディング機能（`google-generativeai`パッケージ経由）を使用するベストエフォート実装。同パッケージはGoogle公式に非推奨化されており、モデル世代によっては検索が正しく機能しない場合がある。その場合もニュースセクションが空になるだけで、他の分析ステージには影響しない
+- 直近ニュース収集はGeminiの検索グラウンディング機能（`google-genai`パッケージ経由）を使用するベストエフォート実装。この1ステージだけが失敗しても、ニュースセクションが空になるだけで他の分析ステージには影響しない
