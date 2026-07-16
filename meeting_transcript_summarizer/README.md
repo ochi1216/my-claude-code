@@ -6,9 +6,10 @@
 
 1. `.mkv`録画から音声を抽出(ffmpeg)
 2. 文字起こし(GUIのラジオボタンで方式を選択)
-   - **クラウド(Gemini API)**: 簡易話者分離あり(話者A/B…)。音声がGeminiへ送信される。
+   - **クラウド(Gemini API)**: 簡易話者分離あり(話者A/B…)。音声がGeminiへ送信される。長時間の録画でも1回のAPI呼び出しでは出力が途中で打ち切られることがあるため、音声を`chunk_minutes`単位(既定10分)に分割して順に処理する。
    - **ローカル(faster-whisper)**: 話者ラベルなし。音声は外部に送信されない。
-3. 要約(議事録化) — 常にGemini APIを使用(文字起こし後のテキストのみ送信)
+3. 主な言語(日本語/English/自動判定)をGUIのラジオボタンで指定可能。Geminiへのプロンプトに反映するほか、faster-whisperの`language`引数に渡すことで認識精度を高める。
+4. 要約(議事録化) — 常にGemini APIを使用(文字起こし後のテキストのみ送信)
    - 会議概要・主な議題・決定事項・アクションアイテム・次回までのTODOをMarkdownと構造化データ(JSON)の両方で出力
 
 ## セットアップ
@@ -35,6 +36,9 @@ cp config.example.json config.json
 | --- | --- |
 | `gemini_api_key` | Gemini APIキー。環境変数`GEMINI_API_KEY`が設定されている場合はそちらが優先される |
 | `gemini_model` | 文字起こし・要約に使うGeminiモデル名 |
+| `gemini_max_output_tokens` | Gemini文字起こし1チャンクあたりの最大出力トークン数 |
+| `chunk_minutes` | クラウドモードで音声を分割する単位(分)。長い録画で出力が途中で切れる場合はこの値を小さくする |
+| `language` | 既定の主な言語(`ja`/`en`/`auto`)。GUI上でも会議ごとに変更可能 |
 | `whisper_model_size` | ローカルモードで使うfaster-whisperのモデルサイズ(`large-v3`等) |
 | `whisper_device` | faster-whisperの実行デバイス(`cpu`/`cuda`) |
 | `whisper_compute_type` | faster-whisperの演算精度(`int8`等) |
@@ -51,7 +55,7 @@ cp config.example.json config.json
 ### 直接起動する場合
 
 ```bash
-python meeting_transcript_summarizer_20260716_02.py
+python meeting_transcript_summarizer_20260716_03.py
 ```
 
 (上記はいずれもGUIが起動する。`.mkv`ファイルを選択し、文字起こし方式(クラウド/ローカル)を選んで「実行」を押す。)
@@ -67,7 +71,7 @@ python meeting_transcript_summarizer_20260716_02.py
 ## 既知の制約
 
 - 要約ステップは文字起こし方式に関わらず常にGemini APIを使用する(ローカルモードは音声のみ外部送信を避ける設計であり、テキストの要約はクラウドを利用する)。
-- 非常に長時間の録画（数時間規模）でのチャンク分割・再開処理は現時点では未実装。Gemini・faster-whisperそれぞれの単発リクエストで処理できる範囲を前提としている。
+- クラウドモードはチャンクごとに独立してGeminiへ送信するため、チャンクをまたいで話者ラベル(話者A/B…)が入れ替わる可能性がある(直前チャンク末尾の文字起こしをヒントとして渡してはいるが、完全な一致は保証されない)。
 - ローカルモードでは話者分離を行わないため、発言者ラベルは付与されない。
 - 会議音声・文字起こし内容には機密情報が含まれ得るため、出力ファイルの取り扱いには注意すること。
 
