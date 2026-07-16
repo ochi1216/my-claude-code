@@ -6,7 +6,7 @@
 | ------- | ----- | ---- | ------ | ---------- |
 | S01 | Outlook オーガナイザー開発 S01 - 引継ぎ管理の初期設定 | 2026-07-16 | 完了 | CLAUDE.md, docs/PROJECT_STATUS.md, docs/SESSION_HISTORY.md, docs/NEXT_TASK.md |
 | S02 | Outlook オーガナイザー開発 S02 - アクションからR19の除外 | 2026-07-16 | 完了 | outlook_total_organizer/outlook_total_organizer_20260716_01_01.py, outlook_total_organizer/CHANGELOG.md, docs/PROJECT_STATUS.md, docs/SESSION_HISTORY.md, docs/NEXT_TASK.md |
-| S03 | Outlook オーガナイザー開発 S03 - アクションタブの対象期間に3週間・1か月を追加 | 2026-07-16 | 完了 | outlook_total_organizer/outlook_total_organizer_20260716_02_01.py, outlook_total_organizer/CHANGELOG.md, docs/PROJECT_STATUS.md, docs/SESSION_HISTORY.md, docs/NEXT_TASK.md |
+| S03 | Outlook オーガナイザー開発 S03 - アクションタブの対象期間に3週間・1か月を追加 | 2026-07-16 | 完了 | outlook_total_organizer/outlook_total_organizer_20260716_02.py, outlook_total_organizer/CHANGELOG.md, docs/PROJECT_STATUS.md, docs/SESSION_HISTORY.md, docs/NEXT_TASK.md |
 
 ## S01 - 引継ぎ管理の初期設定
 
@@ -117,17 +117,17 @@
 ### Work Completed
 
 * 作業開始前に、セッションのシステム設定上の作業ブランチ（`claude/outlook-date-range-expansion-k5zoeb`）と、タスク指示書に記載の対象ブランチ（`claude/outlook-r19-filtering-ee1h81`、コミット`c5eb73c`）が食い違っていることを検出した。前者にはS01/S02の成果物（`CLAUDE.md`/`docs/`/`outlook_total_organizer/`一式）が一切存在しなかったため、内容を報告のうえユーザーに確認し、`claude/outlook-r19-filtering-ee1h81`を作業ブランチとして使用する指示を受けた。
-* `outlook_total_organizer_20260716_01_01.py`をコピーして新バージョン`outlook_total_organizer_20260716_02_01.py`を作成し、以下2箇所を変更した。
+* `outlook_total_organizer_20260716_01_01.py`をコピーして新バージョン`outlook_total_organizer_20260716_02.py`を作成し、以下2箇所を変更した。
   * `MailManagerGUI._ui_action_tab`: 対象期間コンボボックスの`values`に`"3週間"`, `"1ヶ月"`を追加。
   * `MailManagerGUI._get_action_days`: 日数変換辞書に`"3週間": 21`, `"1ヶ月": 30`を追加。
 * 日数換算値は、既存のコックピット/プロジェクト俯瞰/スタッフ俯瞰タブの期間プルダウンで既に使われている「1ヶ月」=30日の換算（`days_map`, `_get_period_days`等）と統一した。ユーザー指示は「１か月」（か）表記だったが、本ツール内の既存表記はすべて「ヶ月」（ヶ）で統一されていたため、既存表記に合わせた。
-* `outlook_total_organizer/CHANGELOG.md`の先頭に`VERSION 20260716_02_01`のエントリを追加。
-* `docs/PROJECT_STATUS.md`を更新（新バージョンファイルの追加、アクションタブの期間選択肢の記載、テスト方法・変更禁止ファイルの更新）。
+* `outlook_total_organizer/CHANGELOG.md`の先頭に`VERSION 20260716_02_01`のエントリを追加してコミット・プッシュ後、ユーザーから「今後はバージョンファイル命名規則の末尾`_01`を廃止し`outlook_total_organizer_yyyymmdd_NN.py`に統一する」との追加指示を受けた。これを受けて本セッション成果物のみ`git mv`で`outlook_total_organizer_20260716_02_01.py` → `outlook_total_organizer_20260716_02.py`にリネームし、CHANGELOG.mdのVERSION見出し（`20260716_02_01`→`20260716_02`）および全docs内のファイル名参照を追随修正した。旧命名規則ファイル（`_20260713_03_01.py`, `_20260716_01_01.py`）は遡ってリネームしていない。
+* `docs/PROJECT_STATUS.md`を更新（新バージョンファイルの追加、アクションタブの期間選択肢の記載、テスト方法・変更禁止ファイルの更新、新命名規則への変更の記録）。
 
 ### Files Changed
 
-* `outlook_total_organizer/outlook_total_organizer_20260716_02_01.py`（新規。`_20260716_01_01`からのコピー＋対象期間プルダウンへの「3週間」「1ヶ月」追加）
-* `outlook_total_organizer/CHANGELOG.md`（`VERSION 20260716_02_01`エントリを追加）
+* `outlook_total_organizer/outlook_total_organizer_20260716_02.py`（新規。`_20260716_01_01`からのコピー＋対象期間プルダウンへの「3週間」「1ヶ月」追加。当初`_20260716_02_01.py`として追加後、新命名規則への変更指示を受け`_20260716_02.py`にリネーム）
+* `outlook_total_organizer/CHANGELOG.md`（`VERSION 20260716_02`エントリを追加。当初`VERSION 20260716_02_01`として追加後、上記リネームに合わせ見出しを修正）
 * `docs/PROJECT_STATUS.md`（新バージョンファイル・アクションタブの期間選択肢・テスト方法・変更禁止ファイルの記載を更新）
 * `docs/SESSION_HISTORY.md`（本ファイル。S03の記録を追記）
 * `docs/NEXT_TASK.md`（S04向けに更新）
@@ -137,11 +137,12 @@
 * 「対象期間」の日数変換は、既存の`get_relevant_mails_for_period`/`search_mails_fast`側の期間フィルタリングロジック（`days`引数を`timedelta(days=days)`にそのまま使う汎用実装で、上限チェックなし）を変更せず、GUI側の選択肢と変換辞書に値を追加するだけで対応可能と判断した。
 * 「1か月」の表記は、ユーザー指示の「か」ではなく、本ツール内の既存表記（コックピット等の他タブ）に合わせて「ヶ月」に統一した。
 * 旧バージョンファイル（`_20260713_03_01`, `_20260716_01_01`）は上書きせず、新バージョンファイルとして追加した（プロジェクトのバージョン管理方針を踏襲）。
+* バージョンファイル命名規則を、ユーザー指示に基づき`outlook_total_organizer_yyyymmdd_NN_01.py`から`outlook_total_organizer_yyyymmdd_NN.py`（末尾`_01`廃止）に変更した。今後のバージョンファイルはすべてこの新規則に従う。既存の旧規則ファイルは遡ってリネームしない（不必要な差分・過去のCHANGELOGとの不整合を避けるため）。
 
 ### Tests
 
-* `ast.parse`によるPython構文チェック（`outlook_total_organizer_20260716_02_01.py`、エラーなし）。
-* `outlook_total_organizer_20260716_01_01.py`と`outlook_total_organizer_20260716_02_01.py`の`diff`により、意図した2箇所（コンボボックスの`values`、`_get_action_days`の日数変換辞書）のみが変更されていることを確認。
+* `ast.parse`によるPython構文チェック（`outlook_total_organizer_20260716_02.py`、エラーなし）。
+* `outlook_total_organizer_20260716_01_01.py`と`outlook_total_organizer_20260716_02.py`の`diff`により、意図した2箇所（コンボボックスの`values`、`_get_action_days`の日数変換辞書）のみが変更されていることを確認。
 * 本変更はtkinterのネイティブGUIウィジェット（`ttk.Combobox`）の選択肢追加であり、S02のようにHTML/JS部分を抽出してPlaywrightで検証する代替手段が適用できないため、ブラウザでの動作検証は実施していない。
 * Outlook実データ・Gemini API・tkinter GUIを含むエンドツーエンドの実機テスト（Windows＋Outlookインストール環境でのプルダウン選択→アクション一覧生成の動作確認）は、実行環境がLinuxコンテナのため未実施。
 

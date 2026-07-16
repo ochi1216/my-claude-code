@@ -1,6 +1,6 @@
 # CHANGELOG — outlook_total_organizer
 
-## VERSION 20260716_02_01
+## VERSION 20260716_02
 
 ### 追加・修正
 	**アクションタブの「対象期間」に「3週間」「1ヶ月」を追加**: アクションダッシュボード生成タブの対象期間プルダウン（従来は「24H」「今日」「3日間」「1週間」「2週間」の5択）に、「3週間」（21日）「1ヶ月」（30日）の2択を追加した。日数換算値は、コックピット/プロジェクト俯瞰/スタッフ俯瞰タブの期間プルダウンで既に使われている「1ヶ月」=30日の換算と統一した。
@@ -13,7 +13,7 @@
 	なし
 
 変更ファイル：
-	`outlook_total_organizer_20260716_02_01.py`（`_20260716_01_01`からのコピー＋今回の変更。`_20260716_01_01`はそのまま残置）
+	`outlook_total_organizer_20260716_02.py`（`_20260716_01_01`からのコピー＋今回の変更。`_20260716_01_01`はそのまま残置。なお本バージョンからファイル命名規則を`outlook_total_organizer_yyyymmdd_NN_01.py`から`outlook_total_organizer_yyyymmdd_NN.py`（末尾の`_01`を廃止）に変更した。以降のバージョンもこの新命名規則に統一する）
 
 変更しないこと（宣誓）：
 	`summarize_action_dashboard`のデータ構造・並び替え(`sortActionCards`)ロジック・R19Projフィルタ（`toggleR19Filter`/`r19FilterMode`）・進捗/優先度更新API呼び出し・`get_relevant_mails_for_period`/`search_mails_fast`の期間フィルタリングロジック自体（日数の意味付けは変更せず、既存の`days`引数にそのまま21・30を渡すのみ）
