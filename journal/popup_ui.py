@@ -2,7 +2,7 @@
 """
 popup_ui.py
 学びジャーナル - ホットキー起動の入力ポップアップUI
-Version: 0.9.0
+Version: 0.9.1
 """
 
 import ctypes
@@ -45,7 +45,7 @@ def _format_duration(minutes: int) -> str:
 
 
 HOTKEY = "ctrl+shift+j"
-VERSION = "0.9.0"
+VERSION = "0.9.1"
 
 _trigger_queue = queue.Queue()
 
@@ -415,6 +415,11 @@ def run() -> None:
     # run()内で遅延importし、自モジュールの関数をコールバックとして渡す
     from scheduler import start_scheduler_loop
     start_scheduler_loop(root, queue_popup_trigger)
+
+    # 起動直後に一度ポップアップを表示し、本日最初のチェックイン（基準点）を
+    # すぐに促す。Windowsスタートアップから自動起動された場合、次の定時
+    # リマインドまで何も表示されず待たされてしまうのを防ぐため
+    queue_popup_trigger()
 
     print(f"🚀 ポップアップUIを起動しました。ホットキー({HOTKEY})待受中...")
     root.mainloop()
