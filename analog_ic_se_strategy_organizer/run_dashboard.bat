@@ -1,58 +1,64 @@
 @echo off
 setlocal enabledelayedexpansion
-chcp 65001 >nul
 
 rem run_dashboard.bat
 rem
-rem analog_ic_se_strategy_organizer_YYYYMMDD_NN.py のうち、ファイル名が最も新しい
-rem （＝日付・連番が最大の）ものを自動的に選んで起動する。
-rem バージョンアップ時にファイル名の日付が変わっても、このバッチファイルは
-rem 書き換える必要はない（常に最新版を自動選択する）。
+rem Finds the analog_ic_se_strategy_organizer_YYYYMMDD_NN.py with the
+rem newest date/sequence number in this folder and launches it with
+rem streamlit. When a newer dated version is added later, this launcher
+rem does NOT need to be edited - it always picks the latest one.
 rem
-rem 配置場所: analog_ic_se_strategy_organizer フォルダ内（コード本体と同じ階層）
+rem Place this file directly inside the analog_ic_se_strategy_organizer
+rem folder, next to the tool's .py files and requirements.txt.
+rem
+rem NOTE: this file intentionally contains only ASCII text (no Japanese)
+rem to avoid character-encoding (mojibake) problems that can make
+rem Windows cmd.exe misparse the script on some systems.
 
 set "SCRIPT_DIR=%~dp0"
 cd /d "%SCRIPT_DIR%"
 
 echo ============================================================
-echo  Analog IC SE Strategy Organizer - 起動スクリプト
+echo  Analog IC SE Strategy Organizer - Launcher
 echo ============================================================
 echo.
 
 if "%GEMINI_API_KEY%"=="" (
-    echo [警告] 環境変数 GEMINI_API_KEY が設定されていません。
-    echo         setx GEMINI_API_KEY "your-api-key-here" で設定してから、
-    echo         新しいターミナル／このバッチファイルを開き直してください。
-    echo         （設定しなくても画面は起動しますが、分析の実行はできません）
+    echo [WARNING] Environment variable GEMINI_API_KEY is not set.
+    echo           Run:  setx GEMINI_API_KEY "your-api-key-here"
+    echo           then close this window and open a new one before
+    echo           launching again. The dashboard will still open
+    echo           without it, but analysis steps will fail.
     echo.
 )
 
-rem ファイル名降順（新しい日付・連番が先頭）で一覧し、最初の1件を採用する
+rem List matching files newest-name-first, take the first one.
 set "LATEST="
 for /f "delims=" %%F in ('dir /b /o-n "analog_ic_se_strategy_organizer_????????_??.py" 2^>nul') do (
     if not defined LATEST set "LATEST=%%F"
 )
 
 if not defined LATEST (
-    echo [エラー] analog_ic_se_strategy_organizer_YYYYMMDD_NN.py が見つかりませんでした。
-    echo          このバッチファイルは、ツール本体（*.py一式）と同じフォルダに
-    echo          置いて実行してください。
+    echo [ERROR] Could not find any analog_ic_se_strategy_organizer_YYYYMMDD_NN.py
+    echo         file in this folder. Place run_dashboard.bat directly inside
+    echo         the analog_ic_se_strategy_organizer folder, next to the
+    echo         tool's .py files.
     echo.
     pause
     exit /b 1
 )
 
-echo 起動するバージョン: %LATEST%
+echo Launching version: %LATEST%
 echo.
 
 streamlit run "%LATEST%"
 
 if errorlevel 1 (
     echo.
-    echo [エラー] streamlit の起動に失敗しました。依存パッケージが未インストールの
-    echo          可能性があります。先に以下を実行してから再度お試しください。
+    echo [ERROR] Failed to start streamlit. If dependencies are not installed
+    echo         yet, run the following command first, then try again:
     echo.
-    echo              pip install -r requirements.txt
+    echo             pip install -r requirements.txt
     echo.
 )
 
