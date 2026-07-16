@@ -1,9 +1,11 @@
-# 詳細設計: analog_ic_se_strategy_organizer
+# 詳細設計・実装記録: analog_ic_se_strategy_organizer
 
-**作成日**: 2026-07-16
+**作成日**: 2026-07-16（同日中に詳細設計→実装まで実施）
 **引継ぎ元**: Claude Code（`HANDOVER_analog_ic_scout.md` の後続セッション）
-**引継ぎ先**: Claude Code（実装セッション）
+**引継ぎ先**: Claude Code（実機検証セッション。10章参照）
 **対象者**: 越智さん（アナログ半導体のシニアシステムエンジニア）
+
+**このドキュメントの位置づけ**: 元々は「詳細設計のみ」を目的に作成したが、同一セッション内で越智さんから「これらをベースに実装を開始してほしい」との指示があり、パイプライン本体・ダッシュボードまで実装した。そのため本文中には設計時点の記述と実装後の更新が混在している（各章に実装状況を注記）。
 
 ---
 
@@ -44,24 +46,23 @@
 
 ```
 analog_ic_se_strategy_organizer/
-  ic_index.py                                    # 製品ケースライブラリの増分インデックス構築（rtocs_index.pyと同型）【未実装】
-  ic_schema.py                                    # config読み込み・fact構造ヘルパー・カテゴリ解決【未実装】
-  ic_prompts.py                                   # 5ステージ分のGeminiプロンプト定数【未実装】
-  ic_engine.py                                    # GeminiClient（JSON/grounding）＋ IcPipeline本体【未実装】
-  ic_report.py                                    # HTMLレポート生成【未実装】
+  ic_index.py                                    # 製品ケースライブラリの増分インデックス構築（rtocs_index.pyと同型）【実装済み】
+  ic_schema.py                                    # config読み込み・fact構造ヘルパー・カテゴリ解決【実装済み】
+  ic_prompts.py                                   # 5ステージ分＋ポートフォリオ俯瞰用のGeminiプロンプト定数【実装済み】
+  ic_engine.py                                    # GeminiClient（JSON/grounding）＋ IcPipeline本体【実装済み】
+  ic_report.py                                    # HTMLレポート生成【実装済み】
   ic_competitor_import.py                         # Excel(4地域シート)→config/competitors_db.jsonの変換スクリプト【実装済み】
-  analog_ic_se_strategy_organizer_YYYYMMDD_NN.py  # Streamlit本体（3タブ）【未実装】
+  analog_ic_se_strategy_organizer_20260716_01.py  # Streamlit本体（3タブ）【実装済み】
   config/
     category_schema.json                          # カテゴリ→比較パラメータ一覧（9カテゴリ）【実装済み】
     competitors_db.json                            # ic_competitor_import.pyの生成物（67社）【実装済み】
     source_data/
       analog_power_semiconductor_companies_global_2026.xlsx  # 越智さん提供Excelの原本【保存済み】
-  data/                                            # 実行時生成（product_lake/, ic_index.json, ic_reports/ 等）【未実装・未生成】
-  requirements.txt                                 # 【実装済み】現時点で実使用しているのはopenpyxlのみ
-  CHANGELOG.md, README.md                          # 【実装済み】
+  data/                                            # 実行時生成（product_lake/, ic_index.json, ic_reports/ 等）。gitには含めない
+  requirements.txt, CHANGELOG.md, README.md         # 【実装済み】
 ```
 
-【未実装】の各ファイルは本ドキュメントで設計のみ記述し、コード化していない（構想・設計段階のため）。【実装済み】は今回のセッションで実ファイルとして作成した。
+初版実装が完了し、パイプラインの制御ロジック・HTMLレポート生成・Streamlitダッシュボード3タブはモック応答とPlaywrightでの画面確認により動作検証済み。**ただし実際のGemini API呼び出しでの検証は未実施**（開発環境に`GEMINI_API_KEY`が無く、`google-generativeai`の依存関係も壊れていたため）。詳細は`CHANGELOG.md`と11章を参照。
 
 ---
 
@@ -85,7 +86,7 @@ rtocs_organizerの単純な「(要確認)」注記より一段厳格にするた
 - `source_type`: `"TI_official"`（データシート/アプリケーションノート/TI公式発表）／`"third_party"`（Yole・TechInsights・Omdia・特許・テカルダウン記事等の公開二次情報）／`"llm_estimate"`（検索グラウンディング未使用のLLM知識のみの推定）／`"user_input"`（越智さんによる手動補正）の4値クローズドセット。
 - `confidence`: `"high"`（一次情報を直接確認）／`"medium"`（複数の二次情報が一致）／`"low"`（単一ソースまたはLLM推定のみ）の3段階。
 - `as_of`: 取得・確認日（データシートは改訂されるため鮮度管理に必須）。
-- `ic_schema.py`（未実装）に`make_fact(value, source_type, confidence, unit=None, source_detail="", source_url="", as_of=None, note="")`ヘルパーを置き、全ステージのプロンプト出力後にコード側で構造検証（キー欠落時は`confidence="low"`にフォールバック等）を行う想定。
+- `ic_schema.py`に`make_fact(value, source_type, confidence, unit=None, source_detail="", source_url="", as_of=None, note="")`ヘルパーを実装済み。不正な`source_type`/`confidence`は自動的に`confidence="low"`へフォールバックする。`normalize_fact()`でLLM出力（dict想定）を安全なfact構造に正規化する。
 
 `competitors_db.json`（6章）は会社単位で1つの`source_url`/`verified_at`しか持たない簡略版だが、同じ思想（出典と確度・鮮度を必ず併記する）を踏襲している。
 
@@ -210,7 +211,7 @@ python3 ic_competitor_import.py
 
 ---
 
-## 8. 5ステージパイプライン詳細設計【未実装、設計のみ】
+## 8. 5ステージパイプライン詳細設計【実装済み、`ic_engine.py`/`ic_prompts.py`】
 
 全ステージ共通で`ic_engine.py`の`IcPipeline._run_stage(key, label, fn, stages)`（`rtocs_organizer/strategy_engine.py`の`_run_stage`と同一パターン）でラップし、失敗時は`{"error": "取得失敗: {e}"}`を格納して次のステージへ進む。
 
@@ -251,7 +252,7 @@ python3 ic_competitor_import.py
 
 ---
 
-## 9. ダッシュボード3タブ構成【未実装、設計のみ】
+## 9. ダッシュボード3タブ構成【実装済み、`analog_ic_se_strategy_organizer_20260716_01.py`】
 
 ### タブ1: 📦 製品登録・検索
 - 型番入力欄＋カテゴリ手動指定セレクトボックス（5章の9カテゴリ、未指定なら自動判定）
@@ -261,12 +262,13 @@ python3 ic_competitor_import.py
 - テキスト検索（型番/アプリケーション）＋カテゴリフィルタ
 
 ### タブ2: 📊 ポートフォリオ俯瞰
+- 競合企業DBの概況（地域別社数の`plotly.express.pie`、カテゴリ別主要(●)/限定(△)企業数の積み上げ棒グラフ）— `competitors_db.json`から直接集計、分析済み製品が0件でも表示できる
 - カテゴリ別製品登録数（`plotly.express.bar`）
-- カテゴリ別CAGR分布（ステージ1`market_estimates`集計）
-- 競合ギャップが大きい製品ランキング（ステージ3`gap_vs_ti`件数をスコア化）
-- 地域別競合カバレッジ（`competitors_db.json`の`breadth_score`分布・地域別社数を可視化、`plotly.express.pie`）
-- ステージ4提案の優先度別件数
-- 「AI俯瞰総評」ボタン（rtocsの`generate_trend_commentary`と同型、`portfolio_commentary.json`にキャッシュ）
+- ステージ4提案の優先度別件数（`plotly.express.bar`）
+- 競合ギャップが大きい製品ランキング（ステージ3`gap_vs_ti.advantages_of_competitor`の件数をスコア化したテーブル）
+- 「AI俯瞰総評」ボタン（rtocsの`generate_trend_commentary`と同型、`ic_engine.generate_portfolio_commentary`＋`ic_prompts.PORTFOLIO_COMMENTARY`として実装、`portfolio_commentary.json`にキャッシュ）
+
+初版では「カテゴリ別CAGR分布」（ステージ1`market_estimates`集計）は未実装（分析済み製品が蓄積してから追加する方が実用的なため見送った）。次バージョンでの追加候補。
 
 ### タブ3: 🎯 製品ディープダイブ
 - 型番入力＋分析モード（通常/フル競合探索）
@@ -275,16 +277,16 @@ python3 ic_competitor_import.py
 
 ---
 
-## 10. 後続実装セッションへの実装順序
+## 10. 実装状況と後続セッションでやること
 
-1. `ic_schema.py`（fact構造ヘルパー＋`category_schema.json`/`competitors_db.json`のローダー）を実装。単体で`load_category_schema()`/`load_competitors()`/`make_fact()`が動くことを確認（5〜6章のファイルは今回作成済みのため、ここから着手できる）
-2. `ic_index.py`をrtocs_index.pyから複製・改修（`JSON_lake`→`product_lake`、レコード項目を4章の`classifiers`に合わせる）。ダミーJSONを1件手置きして`build_index()`の増分検出を確認
-3. `ic_engine.py`の`GeminiClient`部分をstrategy_engine.pyから移植。API key設定済み環境で`generate_json`/`generate_grounded_json`が単体で動くことを確認（ここでgroundingの実データ取得精度を最初に検証する。11章の要検証事項①参照）
-4. `ic_prompts.py`をステージ0から順に作成
-5. `ic_engine.py`の`IcPipeline`本体を`_run_stage`パターンでステージ0→1→2→3→4の順に1つずつ実装・単体確認
-6. `ic_report.py`をstrategy_report.pyのCSS/`_guard()`構造を流用して実装（IC比較テーブル・fact構造のconfidenceバッジ表示を追加）
-7. Streamlitダッシュボード本体をタブ1→タブ3→タブ2の順で実装（タブ2はデータが蓄積してから意味を持つため最後でよい）
-8. 実際のTI型番数件でE2E実行し、grounded searchで拾えた数値をデータシートと手動突き合わせ検証。CHANGELOG.mdに結果を記録
+上記1〜7のステップ（`ic_schema.py`→`ic_index.py`→`ic_engine.py`→`ic_prompts.py`→`IcPipeline`本体→`ic_report.py`→Streamlitダッシュボード3タブ）は2026-07-16のセッションで実装済み。パイプラインの制御ロジック（ステージ間のデータ受け渡し、失敗時のフォールバック、HTMLレポート生成）は`GeminiClient`をモックした単体テストで検証し、ダッシュボードはPlaywrightで実画面（3タブ）を確認した。
+
+**後続セッションでやること（実機検証、8章のステップ8に相当）:**
+1. `GEMINI_API_KEY`を設定した環境（この開発環境は`google-generativeai`の依存関係`cryptography`が壊れておりAPI呼び出し確認ができなかった）で`pip install -r requirements.txt`
+2. 実際のTI型番数件（例: 越智さんが日常的に扱う型番）で🎯製品ディープダイブタブを実行
+3. grounded searchで拾えた`key_specs`の数値をTIデータシートと手動突き合わせ、精度を確認（11章 要検証事項1）
+4. 精度・コスト・レイテンシに応じて、ステージ3の呼び出し粒度（通常/フルモード）やプロンプトを調整
+5. 検証結果を`CHANGELOG.md`に追記
 
 ---
 
@@ -293,12 +295,14 @@ python3 ic_competitor_import.py
 1. **grounding精度の未検証**: TI直接アクセスが403だったためgrounded search方式に統一する方針は確定したが、Gemini検索グラウンディング経由でデータシートの数値項目（効率・Iq等）をどこまで正確に拾えるかは未検証。ハルシネーションリスクが高いため、実装直後に数件を手動データシートと突き合わせる検証ステップ（10章ステップ8）を必須工程として組み込んだ。精度が低い場合、`key_specs`の一部項目を「取得しない/confidence=lowで必ず警告表示」に倒す再設計が必要になる可能性がある。
 2. **`ic_competitor_import.py`の列位置ハードコード**: Excelの列順・列数が将来変わった場合、スクリプト内`CATEGORY_COLUMNS`等の定数を手動で追随させる必要がある。列名ヘッダーを動的に読んでマッピングする方式への変更は次回改修候補。
 3. **`active`フラグと再インポートの競合**: `competitors_db.json`の`active`フラグは越智さんが個別に`false`へ変更しても、次回`ic_competitor_import.py`実行時に`true`へ一律上書きされる。恒久的な除外はExcel側の行削除で管理する運用を6章・README.mdに明記したが、実運用で使いにくければ「インポート時に既存の`active=false`を保持する」仕様に変更する必要がある。
-4. **`generic_analog_ic`フォールバックカテゴリ**: ステージ0でLLMが返したカテゴリが9カテゴリいずれにも一致しない場合のフォールバック先として`category_schema.json`には未定義（現状は9カテゴリのみ）。次セッションで`generic_analog_ic`を`category_schema.json`に追加するか、9カテゴリ以外は非対応とするかを決める必要がある。
+4. **`generic_analog_ic`フォールバックカテゴリ**: `category_schema.json`はExcel実データに準拠させる方針を優先し、汎用カテゴリはJSONファイルには追加せず`ic_schema.py`内のコード定数（`GENERIC_CATEGORY`）として実装した（`resolve_category()`が9カテゴリ非該当時に自動フォールバック）。この判断が適切か（設定ファイル化した方が越智さんにとって編集しやすいか）は運用してみて再検討の余地がある。
 5. **ステージ3の呼び出し粒度とコスト**: 1社1コール設計だが、実測してみないとコスト・レイテンシが許容範囲か分からない。通常モード（地域代表1社）とフルモードの2段階を用意したが、実データで調整が必要。
 6. **価格情報(`price_1ku_usd`)の取得精度**: TI価格ページや流通サイトの情報鮮度・正確性はgrounded searchでは低くなりがちなため、必須フィールドにせずoptional・confidence低めを許容する設計にした。
 7. **`data/`配下の取り扱い**: `rtocs_organizer/data`は現状リポジトリに未コミット（実行時生成）。`analog_ic_se_strategy_organizer/data`（特に`product_lake`）も同じ運用（git管理外）で良いか、越智さんに確認したい。
 8. **競合他社データの転載・利用範囲**: ステージ3で競合各社のデータシート由来スペックを比較表として社内共有する場合の著作権・利用規約上の扱いは未検討。レポート内に免責を入れる想定だが、法務観点の最終確認は越智さん側で行ってほしい。
 9. **`schema_version`のマイグレーション方針**: `category_schema.json`を将来改訂した際、既存`product_lake`内の古いJSON（旧スキーマの`key_specs`）をどう扱うか（再解析必須か、旧データのまま許容するか）は未確定。
+10. **実際のGemini API呼び出しが未検証**: 開発環境に`GEMINI_API_KEY`が無く、`google-generativeai`パッケージの依存関係（`cryptography`のRustバインディング）も壊れていたため、実機でのAPI呼び出し確認ができなかった。越智さんの環境での実機検証が必須（10章参照）。
+11. **ポートフォリオ俯瞰タブのCAGR分布グラフ未実装**: 9章に記載の通り、初版では見送った。分析済み製品が蓄積してから実装するのが実用的。
 
 ---
 
@@ -326,4 +330,4 @@ python3 ic_competitor_import.py
 - 呼称は「越智さん」
 - 回答は日本語・結論先出し
 - 越智さんはプログラム初心者を自認しつつ、専門領域（半導体）については高度な要求を出してくる。技術的な実現可能性（スクレイピングの法的リスク、API有無、データの信頼性）を率直に指摘し、楽観的な機能一覧の提示だけで終わらせないこと
-- 「まだ構想段階」という越智さんの明言を尊重し、パイプライン本体・ダッシュボードの実装は次セッションで行う（今回は設計＋競合データベースの整備までに留めた）
+- パイプライン本体・ダッシュボードは実装済みだが、実際のGemini API呼び出しでの動作確認はまだ完了していない。「動いている」と報告する前に、越智さんの環境での実機検証結果を確認すること

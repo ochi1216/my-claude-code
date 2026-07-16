@@ -2,6 +2,25 @@
 
 このフォルダ内の変更履歴。バージョンアップ時は旧ファイルを残したまま新ファイルを追加し、ここに変更点を追記する。
 
+## [20260716_01] - 2026-07-16
+
+`DESIGN_analog_ic_se_strategy_organizer.md` に基づき、パイプライン本体とStreamlitダッシュボードを実装した初版。
+
+**追加ファイル:**
+- `ic_schema.py` — fact構造ヘルパー（`make_fact`/`normalize_fact`）、`category_schema.json`/`competitors_db.json`のローダー、カテゴリ解決（9カテゴリ以外は`generic_analog_ic`にフォールバック）、地域代表企業選定（`pick_regional_representatives`）、競合DBサマリー（`competitors_summary`）
+- `ic_index.py` — `data/product_lake/*.json`（1製品=1ファイル）から`data/ic_index.json`を増分構築（`rtocs_index.py`と同型）。`save_product_case`でパイプライン結果を保存
+- `ic_prompts.py` — 5ステージ分のGeminiプロンプト（fact構造での出力を指示）＋ポートフォリオ俯瞰タブ用のAI総評プロンプト
+- `ic_engine.py` — `GeminiClient`（JSONモード＋Google Search Grounding、`google-genai`使用）と`IcPipeline`（5ステージ: 製品取り込み→市場分析→キーカスタマー推定→競合IC比較→次世代スペック提案。各ステージ失敗しても継続する部分レポート方針）
+- `ic_report.py` — 自己完結HTMLレポート生成（fact構造は出典・確度バッジ付きで描画）
+- `analog_ic_se_strategy_organizer_20260716_01.py` — Streamlit 3タブダッシュボード（📦製品登録・検索／📊ポートフォリオ俯瞰／🎯製品ディープダイブ）
+
+**動作検証:**
+- `ic_schema.py`/`ic_index.py`: 単体テストで増分構築・fact構造正規化・カテゴリフォールバックを確認
+- `ic_engine.py`/`ic_report.py`: `GeminiClient`をモックした一気通貫パイプラインで、ステージ間のデータ受け渡し・HTMLレポート生成（Playwrightでスクリーンショット確認）を確認
+- ダッシュボード3タブ: `streamlit run`で起動し、Playwrightで実画面を確認（3タブとも正常表示、チャート描画も確認）
+- **未検証**: 実際のGemini API呼び出し（`GEMINI_API_KEY`未設定、かつこの開発環境では`google-generativeai`の依存関係(`cryptography`のRustバインディング)が壊れており動作確認不可）。`GEMINI_API_KEY`を設定した環境で`pip install -r requirements.txt`後に実際のTI型番で動作確認することを推奨する
+- **未検証**: grounded searchでデータシートの数値項目をどこまで正確に拾えるか（`DESIGN_analog_ic_se_strategy_organizer.md` 11章の要検証事項1）。実データでの検証が必要
+
 ## [構想・詳細設計段階] - 2026-07-16
 
 このツールはまだパイプライン本体（`ic_index.py` / `ic_schema.py` / `ic_prompts.py` / `ic_engine.py` / `ic_report.py` / Streamlitダッシュボード）を実装していない。今回のセッションでは以下のみを作成した。詳細設計は [`/DESIGN_analog_ic_se_strategy_organizer.md`](../DESIGN_analog_ic_se_strategy_organizer.md)（リポジトリルート）を参照。
