@@ -1,5 +1,9 @@
 # my-claude-code
 
+## Outlook Total Organizer
+
+Outlookメール解析・アクションダッシュボードツール。詳細は [`outlook_total_organizer/CHANGELOG.md`](outlook_total_organizer/CHANGELOG.md) を参照（README.md は未整備）。
+
 ## BBT RTOCS Organizer
 
 セットアップ手順は [`rtocs_organizer/README.md`](rtocs_organizer/README.md) を参照。
