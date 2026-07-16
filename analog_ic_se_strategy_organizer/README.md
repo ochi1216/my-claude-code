@@ -26,6 +26,18 @@ TI（Texas Instruments）のアナログ・電源半導体製品を型番1つか
 
 3. ダッシュボードを起動する。
 
+   **Windows**: `run_dashboard.bat` をダブルクリックする（推奨）。同じフォルダ内にある
+   `analog_ic_se_strategy_organizer_YYYYMMDD_NN.py` のうち、ファイル名の日付・連番が
+   最も新しいものを自動的に選んで起動する。バージョンアップでファイル名の日付が変わっても
+   このバッチファイル自体は書き換える必要がない。`run_dashboard.bat` は必ず`analog_ic_se_strategy_organizer`
+   フォルダ直下（コード本体・`requirements.txt`と同じ階層）に置くこと。
+
+   ```
+   run_dashboard.bat
+   ```
+
+   **macOS/Linux、または手動で起動する場合**: 起動したいバージョンのファイル名を直接指定する。
+
    ```
    streamlit run analog_ic_se_strategy_organizer_20260716_01.py
    ```
