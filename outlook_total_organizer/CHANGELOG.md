@@ -1,5 +1,28 @@
 # CHANGELOG — outlook_total_organizer
 
+## VERSION 20260716_03
+
+### 追加・修正
+	**アクションカードに🚩フラグマークを追加**: スレッド内のいずれかのメールにOutlookのフラグがアクティブ設定（`FlagStatus == 2`）されている場合、カードヘッダーの「🧩 R19Proj」バッジが表示される位置の右・タイトルの左に🚩マークを表示するようにした。テキストは付けずアイコンのみ（ユーザー指示により、当初「🚩 フラグ」というテキスト付きで実装したが、アイコンのみに変更）。完了済みフラグ（`FlagStatus == 1`）はアクティブ扱いしない（`group_by_thread`が算出する`is_flagged`の既存ロジックをそのまま踏襲）。
+	バッジ背景色は当初、他バッジ（R19Proj紫等）に合わせて濃い赤（`#dc2626`）にしていたが、赤地に🚩（赤い旗）が視認しづらいとのユーザー指摘を受け、薄いピンク背景＋淡い赤枠（`background:#fef2f2; border:1px solid #fecaca;`）に変更した。
+	R19Projバッジと同様、非該当カードも同じ幅の固定スロット（`.action-flag-wrap`, 30px）を確保し、タイトルの開始位置がカード間で揃うようにしている。
+
+### 変更関数
+	`MailSummarizer.summarize_action_dashboard`（スレッドの`is_flagged`を`action_cards`の各カードに追加）
+	`HTMLReportGenerator.generate_action_dashboard_report`（`is_flagged`から`flag_badge`を生成し`.action-flag-wrap`スロットとして`.action-r19-wrap`の直後・タイトルの直前に挿入。CSSに`.bg-flag`・`.action-flag-wrap`を追加）
+
+### 新規追加：
+	なし
+
+変更ファイル：
+	`outlook_total_organizer_20260716_03.py`（`_20260716_02`からのコピー＋今回の変更。`_20260716_02`はそのまま残置）
+
+動作確認時の注意：
+	フラグ判定に使う`FlagStatus`列挙値は、既存の`toggle_flag`/`remove_flag`実装（`FlagStatus == 2`をアクティブ、`0`をなしとして扱う）と`group_by_thread`の`is_flagged`算出ロジックに準拠しており、今回新たに定義したものではない。フィルタボタンは追加していない（表示のみの変更）。
+
+変更しないこと（宣誓）：
+	`summarize_action_dashboard`のデータ構造（`is_flagged`追加以外）・並び替え(`sortActionCards`)ロジック・R19Projフィルタ（`toggleR19Filter`/`r19FilterMode`）・進捗/優先度更新API呼び出し・`group_by_thread`のフラグ判定ロジック自体（`is_flagged`はそのまま参照するのみで変更しない）・`toggle_flag`/`remove_flag`等のフラグ操作API
+
 ## VERSION 20260716_02
 
 ### 追加・修正

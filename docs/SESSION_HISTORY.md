@@ -7,6 +7,7 @@
 | S01 | Outlook オーガナイザー開発 S01 - 引継ぎ管理の初期設定 | 2026-07-16 | 完了 | CLAUDE.md, docs/PROJECT_STATUS.md, docs/SESSION_HISTORY.md, docs/NEXT_TASK.md |
 | S02 | Outlook オーガナイザー開発 S02 - アクションからR19の除外 | 2026-07-16 | 完了 | outlook_total_organizer/outlook_total_organizer_20260716_01_01.py, outlook_total_organizer/CHANGELOG.md, docs/PROJECT_STATUS.md, docs/SESSION_HISTORY.md, docs/NEXT_TASK.md |
 | S03 | Outlook オーガナイザー開発 S03 - アクションタブの対象期間に3週間・1か月を追加 | 2026-07-16 | 完了 | outlook_total_organizer/outlook_total_organizer_20260716_02.py, outlook_total_organizer/CHANGELOG.md, docs/PROJECT_STATUS.md, docs/SESSION_HISTORY.md, docs/NEXT_TASK.md |
+| S04 | Outlook オーガナイザー開発 S04 - アクションカードにフラグマークを追加 | 2026-07-16 | 完了 | outlook_total_organizer/outlook_total_organizer_20260716_03.py, outlook_total_organizer/CHANGELOG.md, docs/PROJECT_STATUS.md, docs/SESSION_HISTORY.md, docs/NEXT_TASK.md |
 
 ## S01 - 引継ぎ管理の初期設定
 
@@ -157,3 +158,63 @@
 
 * 次の作業: 未確定（ユーザーからの次のタスク指示を受ける）。実機テスト（S02・S03分含む）の実施や、README.md/requirements.txtの整備などが候補。
 * 次回の推奨タイトル: `Outlook オーガナイザー開発 S04 - （ユーザー指示待ち）`
+
+## S04 - アクションカードにフラグマークを追加
+
+### Purpose
+
+* アクションダッシュボードの各カードで、スレッド内のいずれかのメールにOutlookのフラグがアクティブ設定されている場合に、それを視覚的に示すマークを追加する。「🧩 R19Proj」バッジが表示される位置の右・タイトルの左に表示する。完了済みフラグは対象外とする。（マークはユーザー指示によりテキストなしのアイコンのみ、配色は視認性を考慮した淡い色に調整。）
+
+### Work Completed
+
+* 既存コードを調査し、`OutlookMailManager.group_by_thread`（`outlook_total_organizer_20260716_02.py` 1218-1269行）に、スレッド内いずれかのメールが`FlagStatus == 2`（Outlookのアクティブ設定フラグ。`OlFlagStatus`列挙で`olFlagMarked`に相当）であれば`True`になる`is_flagged`フィールドが既に算出されていることを確認した。完了済みフラグ（`FlagStatus == 1`、`olFlagComplete`）は対象外というロジックも既存実装ですでに満たされていた（`toggle_flag`/`remove_flag`の実装とも整合）。よって新規のフラグ判定ロジックは実装せず、既存の`is_flagged`をそのまま利用する方針とした。
+* `outlook_total_organizer_20260716_02.py`をコピーして新バージョン`outlook_total_organizer_20260716_03.py`を作成し、以下を変更した。
+  * `MailSummarizer.summarize_action_dashboard`: スレッドの`is_flagged`を`action_cards`の各カード辞書に追加。
+  * `HTMLReportGenerator.generate_action_dashboard_report`: `is_flagged`から`flag_badge`（`<span class="badge bg-flag">🚩</span>`）を生成し、`.action-r19-wrap`の直後・タイトル(`topic_html`)の直前に`.action-flag-wrap`スロットとして挿入。CSSに`.bg-flag`と`.action-flag-wrap`（既存の`.action-cat-wrap`/`.action-r19-wrap`と同じ仕組みでタイトル位置を揃える固定幅スロット）を追加。
+* 実装当初は「🚩 フラグ」というテキスト付きバッジ（幅70px、背景`#dc2626`の濃い赤）で実装したが、ユーザーから2度追加指摘を受けて修正した:
+  1. 「フラグは、旗アイコンだけで十分。"フラグ"という記載は不要」との指摘を受け、テキストを削除しアイコンのみ（`🚩`）に変更。スロット幅も70px→30pxに縮小。
+  2. 「赤に、赤旗は見えづらい」との指摘を受け、バッジ背景を濃い赤（`#dc2626`）から薄いピンク＋淡い赤枠（`background:#fef2f2; border:1px solid #fecaca;`）に変更し、🚩の赤色自体が視認できるようにした。
+* カードヘッダー部分のHTML/CSSのみを抽出したスタンドアロンHTML（`flag_badge_test.html`）を作成し、Node版Playwright（`/opt/node22/lib/node_modules/playwright`をscratchpadに`node_modules`としてシンボリックリンクして利用）のヘッドレスブラウザで、「R19なし/フラグなし」「R19あり/フラグなし」「R19なし/フラグあり」「R19あり/フラグあり」の4パターンの表示とタイトル位置の整列を、上記2回の修正それぞれの後に再検証した。
+* `outlook_total_organizer/CHANGELOG.md`の先頭に`VERSION 20260716_03`のエントリを追加。
+* `docs/PROJECT_STATUS.md`を更新（新バージョンファイルの追加、アクションダッシュボード機能の記載、確定済み仕様への`is_flagged`追記、テスト方法・変更禁止ファイルの更新）。
+
+### Files Changed
+
+* `outlook_total_organizer/outlook_total_organizer_20260716_03.py`（新規。`_20260716_02.py`からのコピー＋フラグマーク追加）
+* `outlook_total_organizer/CHANGELOG.md`（`VERSION 20260716_03`エントリを追加）
+* `docs/PROJECT_STATUS.md`（新バージョンファイル・アクションダッシュボード機能・確定済み仕様・テスト方法・変更禁止ファイルの記載を更新）
+* `docs/SESSION_HISTORY.md`（本ファイル。S04の記録を追記）
+* `docs/NEXT_TASK.md`（S05向けに更新）
+
+### Decisions
+
+* フラグ判定ロジック（`FlagStatus == 2`をアクティブとする、`== 1`の完了済みは除外する）は、ユーザーが明示した「終了済みフラグは無視」という要件と、既存の`group_by_thread`の`is_flagged`実装が完全に一致していたため、新規ロジックを実装せず既存フィールドをそのまま再利用する方針とした（変更範囲の最小化）。
+* 表示位置は、ユーザー指示「R19Projのタグが付く場所の右、タイトルの左」に忠実に従い、`.action-r19-wrap`（R19Projバッジのスロット）の直後、`topic_html`（タイトル）の直前に新しいスロット`.action-flag-wrap`を挿入した。
+* R19Projバッジと同じ「非該当時も同幅の固定スロットを確保する」設計を踏襲し、フラグの有無でカード間のタイトル開始位置がずれないようにした。
+* 絞り込み用のフィルタボタンは追加していない（ユーザー指示は表示のみを要求しており、フィルタ機能はスコープ外と判断）。
+* バッジ表記（テキストなしアイコンのみ）と配色（薄いピンク背景）は、いずれもユーザーからの追加フィードバックに基づく変更であり、当初の実装（テキスト付き・濃い赤背景）から修正した。
+
+### Tests
+
+* `ast.parse`によるPython構文チェック（`outlook_total_organizer_20260716_03.py`、エラーなし）。
+* `outlook_total_organizer_20260716_02.py`と`outlook_total_organizer_20260716_03.py`の`diff`により、意図した6箇所（`is_flagged`算出・カード辞書への追加、`flag_badge`生成、HTML挿入、CSS2箇所）のみが変更されていることを、テキスト削除・配色修正それぞれの後に確認。
+* カードヘッダー部分のHTML/CSSを抽出したスタンドアロンHTMLをNode版Playwrightのヘッドレスブラウザで検証し、最終版（アイコンのみ・薄いピンク背景）で以下を確認:
+  * R19なし・フラグなし: どちらのバッジも非表示、タイトルの開始位置が基準
+  * R19あり・フラグなし: R19Projバッジのみ表示、タイトル開始位置は基準と一致
+  * R19なし・フラグあり: フラグバッジのみ表示（R19Projバッジの位置に相当するスロットは空）、タイトル開始位置は基準と一致
+  * R19あり・フラグあり: 両方のバッジが表示、タイトル開始位置は基準と一致
+  * スクリーンショットでも位置関係（カテゴリ→R19Proj→フラグ→タイトルの順）を目視確認
+* Outlook実データ・Gemini API・tkinter GUIを含むエンドツーエンドの実機テスト（実際にOutlookでメールにフラグを設定し、ダッシュボード生成でバッジが表示されることの確認）は、実行環境がLinuxコンテナのため未実施。
+
+### Open Items
+
+* 未実施: 実機（Windows＋Outlookインストール環境）での🚩マーク表示の動作確認（実際にフラグを付けたメールを含むスレッドでの表示、完了済みフラグのみのスレッドで表示されないことの確認を含む）。
+* 未確認: `README.md`・`requirements.txt`の要否、本ツールの起動方法・必要な環境変数・主な利用者（S02から持ち越し）。
+* 未確認: `claude/outlook-organizer-setup-nqzdo6`ブランチ（S01の成果物が存在する別ブランチ、未マージ）と本作業ブランチの関係整理（S02から持ち越し）。
+* 未確認: `claude/outlook-date-range-expansion-k5zoeb`ブランチを今後どう扱うか（S03から持ち越し）。
+* 未確認: フラグマークに絞り込みフィルタ（R19Projボタンのような）が必要かどうかは、ユーザーから明示的な要求がなかったため実装していない。要否は次回以降に確認。
+
+### Next Session
+
+* 次の作業: 未確定（ユーザーからの次のタスク指示を受ける）。実機テスト（S02・S03・S04分含む）の実施や、README.md/requirements.txtの整備などが候補。
+* 次回の推奨タイトル: `Outlook オーガナイザー開発 S05 - （ユーザー指示待ち）`
