@@ -39,7 +39,7 @@ TI（Texas Instruments）のアナログ・電源半導体製品を型番1つか
    **macOS/Linux、または手動で起動する場合**: 起動したいバージョンのファイル名を直接指定する。
 
    ```
-   streamlit run analog_ic_se_strategy_organizer_20260716_01.py
+   streamlit run analog_ic_se_strategy_organizer_20260717_01.py
    ```
 
 ブラウザが自動で開き、以下の3タブが表示される。
