@@ -44,11 +44,17 @@ cp config.example.json config.json
 
 ## 実行方法
 
+### Windows(バッチファイル、推奨)
+
+`run_meeting_transcript_summarizer.bat` をダブルクリックする。フォルダ内の`meeting_transcript_summarizer_*.py`のうち、ファイル名(YYYYMMDD_連番)が最も新しいものを自動的に選んで起動するため、バージョンアップで本体スクリプトが増えてもバッチファイル自体を変更する必要はない。
+
+### 直接起動する場合
+
 ```bash
 python meeting_transcript_summarizer_20260716_01.py
 ```
 
-GUIが起動するので、`.mkv`ファイルを選択し、文字起こし方式(クラウド/ローカル)を選んで「実行」を押す。
+(上記はいずれもGUIが起動する。`.mkv`ファイルを選択し、文字起こし方式(クラウド/ローカル)を選んで「実行」を押す。)
 
 ## 出力
 
