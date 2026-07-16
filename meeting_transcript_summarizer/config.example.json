@@ -1,0 +1,8 @@
+{
+  "gemini_api_key": "<YOUR_GEMINI_API_KEY>",
+  "gemini_model": "gemini-2.5-flash",
+  "whisper_model_size": "large-v3",
+  "whisper_device": "cpu",
+  "whisper_compute_type": "int8",
+  "output_dir": "output"
+}

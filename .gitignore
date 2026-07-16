@@ -7,3 +7,7 @@ venv/
 po_database_organizer/config.json
 po_database_organizer/token_cache.json
 po_database_organizer/cache/
+
+# 会議録画文字起こし・要約ツールのローカル設定・出力
+meeting_transcript_summarizer/config.json
+meeting_transcript_summarizer/output/

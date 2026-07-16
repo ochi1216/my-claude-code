@@ -1,5 +1,9 @@
 # my-claude-code
 
+## 会議録画 文字起こし・要約ツール
+
+セットアップ手順は [`meeting_transcript_summarizer/README.md`](meeting_transcript_summarizer/README.md) を参照。
+
 ## BBT RTOCS Organizer
 
 セットアップ手順は [`rtocs_organizer/README.md`](rtocs_organizer/README.md) を参照。
