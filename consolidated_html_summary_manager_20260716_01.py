@@ -826,7 +826,7 @@ URL: ${url}
         let pendingAutoUncheckFiles = {};
         let lastHighlightedFilename = null;
         let suppressNextHighlightScroll = false;
-        let skipMode = 0; // 0: 標準(▶▶), 1: 一時結論(▶), 2: 継続結論(▶固定), 3: タイトルのみ(▶▶▶), 4: 結論読み上げ(▶緑)
+        let skipMode = 0; // 0: 標準(▶▶), 1: 一時結論(▶), 2: 主なポイント見出しのみ(▶固定), 3: タイトルのみ(▶▶▶), 4: 結論読み上げ(▶緑)
         // 手動でモードを選んだ場合、同一ファイルを聴いている間 or 再生停止までapplyAutoSkipModeによる上書きを防ぐ（mode2の既存の永続固定動作はスコープ外・変更なし）
         let skipModeManualOverride = false;
         let skipModeOverrideFilename = null;
@@ -1625,11 +1625,12 @@ URL: ${url}
             }
             const isFavorite = qData.item && qData.item.is_favorite === true;
             let newMode;
-            // V/BBTはお気に入りより優先（お気に入りのV/BBT動画もmode4になる）
+            // サマリーファイルをずっとmode4やmode1に固定する必要がなくなったため、V/BBTとお気に入りは
+            // どちらもmode0（標準）とする。Short/Nのみ引き続きmode3（タイトルのみ）
             if (/^summary_(V|BBT)_/.test(filename)) {
-                newMode = 4;
+                newMode = 0;
             } else if (isFavorite) {
-                newMode = 1;
+                newMode = 0;
             } else if (/^summary_(Short|N)_/.test(filename)) {
                 newMode = 3;
             } else {
@@ -2209,6 +2210,13 @@ URL: ${url}
                         txt = "主なポイント。 " + tempDiv.textContent;
                     }
                     else if (currentPart === 'conclusion') txt = item.conclusion ? ("結論。 " + item.conclusion) : "";
+                    else if (currentPart === 'point_titles') {
+                        const listHtml = buildPointTitlesList(item.points);
+                        let tempDiv = document.createElement("div");
+                        tempDiv.innerHTML = listHtml;
+                        const headings = Array.from(tempDiv.querySelectorAll('li')).map(li => li.textContent.trim());
+                        txt = headings.length > 0 ? "主なポイント。 " + headings.join("、 ") : "";
+                    }
                 }
             }
             
@@ -2279,8 +2287,16 @@ URL: ${url}
                     } else {
                         advanceAuto();
                     }
+                } else if (skipMode === 2) {
+                    // skipMode 2: 主なポイントの見出しのみ読み上げる（本文は読まない、アコーディオンも開かない）
+                    const qData = flatQueue[currentFlatIndex];
+                    if (buildPointTitlesList(qData.item.points)) {
+                        currentPart = 'point_titles'; playTimer = setTimeout(playCurrentPart, 10);
+                    } else {
+                        advanceAuto();
+                    }
                 } else {
-                    // skipMode 1 or 2: 結論をスキップしpointsへ（存在する場合は自動展開）
+                    // skipMode 1: 結論をスキップしpointsへ（存在する場合は自動展開）
                     const qData = flatQueue[currentFlatIndex];
                     if (qData.item.points) {
                         openPointsAccordion(qData.fIdx, qData.iIdx);
@@ -2292,6 +2308,10 @@ URL: ${url}
             }
             else if (currentPart === 'conclusion') {
                 // skipMode 4でsummary読了後に遷移してくる。読了後は次のカードへ
+                advanceAuto();
+            }
+            else if (currentPart === 'point_titles') {
+                // skipMode 2でsummary読了後に遷移してくる。読了後は次のカードへ
                 advanceAuto();
             }
             else if (currentPart === 'points') { advanceAuto(); }
