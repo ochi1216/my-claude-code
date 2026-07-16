@@ -51,7 +51,7 @@ cp config.example.json config.json
 ### 直接起動する場合
 
 ```bash
-python meeting_transcript_summarizer_20260716_01.py
+python meeting_transcript_summarizer_20260716_02.py
 ```
 
 (上記はいずれもGUIが起動する。`.mkv`ファイルを選択し、文字起こし方式(クラウド/ローカル)を選んで「実行」を押す。)
@@ -62,6 +62,7 @@ python meeting_transcript_summarizer_20260716_01.py
 
 - `transcript.md` / `transcript.json`: 文字起こし結果
 - `summary.md` / `summary.json`: 要約(議事録)
+- `transcript_raw_gemini_response.txt`: (クラウドモードのみ)Geminiからの応答全文。文字起こしの書式に問題があった場合の確認・調整用
 
 ## 既知の制約
 
