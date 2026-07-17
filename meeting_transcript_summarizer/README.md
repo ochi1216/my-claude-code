@@ -10,7 +10,8 @@
    - **ローカル(faster-whisper)**: 話者ラベルなし。音声は外部に送信されない。
 3. 主な言語(日本語/English/自動判定)をGUIのラジオボタンで指定可能。Geminiへのプロンプトに反映するほか、faster-whisperの`language`引数に渡すことで認識精度を高める。
 4. 要約(議事録化) — 常にGemini APIを使用(文字起こし後のテキストのみ送信)
-   - 会議概要・主な議題・決定事項・アクションアイテム・次回までのTODOをMarkdownと構造化データ(JSON)の両方で出力
+   - 会議概要・主な議題・決定事項・アクションアイテム・次回までのTODOをMarkdown・構造化データ(JSON)・HTMLの3形式で出力
+   - 処理完了時、HTML版の要約を既定のブラウザで自動的に開く
 
 ## セットアップ
 
@@ -55,7 +56,7 @@ cp config.example.json config.json
 ### 直接起動する場合
 
 ```bash
-python meeting_transcript_summarizer_20260716_03.py
+python meeting_transcript_summarizer_20260716_04.py
 ```
 
 (上記はいずれもGUIが起動する。`.mkv`ファイルを選択し、文字起こし方式(クラウド/ローカル)を選んで「実行」を押す。)
@@ -65,7 +66,7 @@ python meeting_transcript_summarizer_20260716_03.py
 `output/<会議ファイル名>_<実行日時>/` 配下に以下を出力する。
 
 - `transcript.md` / `transcript.json`: 文字起こし結果
-- `summary.md` / `summary.json`: 要約(議事録)
+- `summary.md` / `summary.json` / `summary.html`: 要約(議事録)。`summary.html`は処理完了時に自動的にブラウザで開かれる
 - `transcript_raw_gemini_response.txt`: (クラウドモードのみ)Geminiからの応答全文。文字起こしの書式に問題があった場合の確認・調整用
 
 ## 既知の制約
@@ -74,6 +75,7 @@ python meeting_transcript_summarizer_20260716_03.py
 - クラウドモードはチャンクごとに独立してGeminiへ送信するため、チャンクをまたいで話者ラベル(話者A/B…)が入れ替わる可能性がある(直前チャンク末尾の文字起こしをヒントとして渡してはいるが、完全な一致は保証されない)。
 - ローカルモードでは話者分離を行わないため、発言者ラベルは付与されない。
 - 会議音声・文字起こし内容には機密情報が含まれ得るため、出力ファイルの取り扱いには注意すること。
+- HTML要約の自動起動は既定のブラウザに依存するため、環境によっては開かない場合がある(その場合はログに理由が表示されるので、`summary.html`を手動で開くこと)。
 
 ## バージョン管理
 
