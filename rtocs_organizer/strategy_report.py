@@ -281,9 +281,12 @@ def _sec_strategy(s):
     items = ""
     for idx, st in enumerate(s.get("strategies", []), 1):
         refs = "".join(f'<span class="badge">📚 {_e(r)}</span>' for r in st.get("referenced_cases", []) or [])
+        lens = st.get("framework_lens", "")
+        lens_html = f'<span class="badge" style="background:#fef3c7;border:1px solid #fde68a;">🧭 {_e(lens)}</span>' if lens else ""
         items += f"""
           <div class="strategy-item">
             <h3>戦略{idx}: {_e(st.get('title'))}</h3>
+            {lens_html}
             <div class="item"><strong>根拠:</strong> {_e(st.get('rationale'))}</div>
             <div class="item"><strong>最初の90日:</strong>{_ul(st.get('first_90_days'))}</div>
             <div class="item"><strong>リスク:</strong> {_e(st.get('risks'))}</div>
