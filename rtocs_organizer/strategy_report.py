@@ -246,7 +246,8 @@ def _sec_cases(retrieve, cases, selected_records):
     for c in (retrieve or {}).get("selected_cases", []) if isinstance(retrieve, dict) else []:
         rec = by_id.get(c.get("video_id"), {})
         ep = f"#{rec.get('episode')}" if rec.get("episode") else ""
-        sel_rows += (f"<tr><td>{_e(c.get('company'))} {_e(ep)}</td>"
+        cross_badge = ' <span class="badge" style="background:#e6fffa;border:1px solid #81e6d9;">🌉 異業種</span>' if c.get("is_cross_industry") else ""
+        sel_rows += (f"<tr><td>{_e(c.get('company'))} {_e(ep)}{cross_badge}</td>"
                      f"<td>{_e(rec.get('sector'))}</td><td>{_e(c.get('reason'))}</td></tr>")
     sel_html = (f"<table><tr><th>参照RTOCS</th><th>業種</th><th>選定理由</th></tr>{sel_rows}</table>"
                 if sel_rows else "")
@@ -277,24 +278,37 @@ def _sec_issues(s):
     return rows or '<div class="skip-box">課題データなし</div>'
 
 
+_MODE_BADGE = {
+    "conservative": ("🛡️ 保守的", "#e6fffa", "#81e6d9"),
+    "ambitious": ("🚀 野心的", "#fef3c7", "#fde68a"),
+    "disruptive": ("💥 破壊的", "#fff5f5", "#feb2b2"),
+}
+
+
 def _sec_strategy(s):
     items = ""
     for idx, st in enumerate(s.get("strategies", []), 1):
         refs = "".join(f'<span class="badge">📚 {_e(r)}</span>' for r in st.get("referenced_cases", []) or [])
         lens = st.get("framework_lens", "")
         lens_html = f'<span class="badge" style="background:#fef3c7;border:1px solid #fde68a;">🧭 {_e(lens)}</span>' if lens else ""
+        mode = st.get("mode", "")
+        mode_label, mode_bg, mode_border = _MODE_BADGE.get(mode, (mode, "#edf2f7", "#e2e8f0"))
+        mode_html = f'<span class="badge" style="background:{mode_bg};border:1px solid {mode_border};">{_e(mode_label)}</span>' if mode else ""
         items += f"""
           <div class="strategy-item">
             <h3>戦略{idx}: {_e(st.get('title'))}</h3>
-            {lens_html}
+            {mode_html}{lens_html}
             <div class="item"><strong>根拠:</strong> {_e(st.get('rationale'))}</div>
             <div class="item"><strong>最初の90日:</strong>{_ul(st.get('first_90_days'))}</div>
             <div class="item"><strong>リスク:</strong> {_e(st.get('risks'))}</div>
             {refs}
           </div>"""
+    devils_note = s.get("devils_advocate_note", "")
+    devils_html = (f'<div class="error-box">😈 悪魔の代弁者: {_e(devils_note)}</div>'
+                   if devils_note else "")
     closing = s.get("closing_message", "")
     closing_html = f'<div class="highlight-box" style="border-left-color:#d69e2e;background:#fffbeb;">💬 {_e(closing)}</div>' if closing else ""
-    return items + closing_html
+    return items + devils_html + closing_html
 
 
 def generate_strategy_report(result, out_dir=None):
