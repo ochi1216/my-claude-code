@@ -233,8 +233,16 @@ class StrategyEngine:
             stages[key] = {"error": f"取得失敗: {e}"}
             self.progress_cb(key, label, "error")
 
-    def run_pipeline(self, company_name):
+    def run_pipeline(self, company_name, user_constraints=None):
+        """user_constraints: 経営者自身が明示する制約条件（任意のフリーテキスト）。
+        課題分析・戦略策定（ディープモードの改訂パス含む）に必ず反映させる。
+        """
         stages = {}
+        user_constraints = (user_constraints or "").strip()
+        constraints_block = (
+            f"\n# 経営者自身が明示した制約条件（必須順守）\n{user_constraints}\n"
+            "上記の制約に反する分析・提言は絶対に行わないでください。\n"
+        ) if user_constraints else ""
         result = {
             "company": company_name,
             "mode": "deep" if self.deep else "flash",
@@ -243,6 +251,7 @@ class StrategyEngine:
             "stages": stages,
             "market_data": None,
             "selected_case_records": [],
+            "user_constraints": user_constraints,
         }
         labels = dict(STAGE_LABELS)
 
@@ -281,6 +290,8 @@ class StrategyEngine:
         target_summary_dict = {k: s1.get(k) for k in
                                 ("official_name", "industry_sector", "business_model",
                                  "strengths", "weaknesses") if k in s1} if "error" not in s1 else {}
+        if user_constraints:
+            target_summary_dict["user_constraints"] = user_constraints
         if "error" not in news_stage and news_stage.get("recent_news"):
             target_summary_dict["recent_news_headlines"] = [
                 f"[{n.get('date','')}/{n.get('language','')}] {n.get('headline','')}"
@@ -380,22 +391,24 @@ class StrategyEngine:
 
         # ⑨ 課題分析
         self._run_stage("issues", labels["issues"], lambda: self.client.generate_json(
-            P.STAGE6_ISSUES.format(company=company_name, all_analysis=_all_analysis()),
+            P.STAGE6_ISSUES.format(company=company_name, all_analysis=_all_analysis(),
+                                   user_constraints_block=constraints_block),
             stage="issues"), stages)
 
         # ⑩ 戦略策定（ディープモードは批判・改訂パス付き）
         def stage7():
             lessons = json.dumps(stages.get("cases", {}), ensure_ascii=False)
             draft = self.client.generate_json(
-                P.STAGE7_STRATEGY.format(company=company_name,
-                                         all_analysis=_all_analysis(), lessons=lessons),
+                P.STAGE7_STRATEGY.format(company=company_name, all_analysis=_all_analysis(),
+                                         lessons=lessons, user_constraints_block=constraints_block),
                 stage="strategy")
             if self.deep:
                 try:
                     revised = self.client.generate_json(
                         P.STAGE7B_CRITIQUE.format(company=company_name,
                                                   draft_strategy=json.dumps(draft, ensure_ascii=False),
-                                                  all_analysis=_all_analysis()),
+                                                  all_analysis=_all_analysis(),
+                                                  user_constraints_block=constraints_block),
                         stage="strategy")
                     if revised.get("strategies"):
                         return revised

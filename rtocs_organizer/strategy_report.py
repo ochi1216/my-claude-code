@@ -302,10 +302,19 @@ def generate_strategy_report(result, out_dir=None):
     exec_html = (f'<div class="card"><div class="section-title">📋 エグゼクティブサマリー</div>'
                  f'<div class="highlight-box">{_e(exec_summary)}</div></div>') if exec_summary else ""
 
+    user_constraints = result.get("user_constraints", "")
+    constraints_html = (
+        f'<div class="card"><div class="section-title">📌 経営者が明示した制約条件</div>'
+        f'<div class="highlight-box" style="border-left-color:#d69e2e;background:#fffbeb;">'
+        f'{_e(user_constraints)}</div>'
+        f'<div class="skip-box">この制約条件は課題分析・戦略策定の全ステージで必須順守として扱われています。</div>'
+        f'</div>') if user_constraints else ""
+
     def card(title, inner, extra_class=""):
         return f'<div class="card {extra_class}"><div class="section-title">{title}</div>{inner}</div>'
 
     sections = [
+        constraints_html,
         exec_html,
         card("🏢 会社分析", _guard(stages.get("company", {}), _sec_company)),
         card("📰 直近ニュース（英語/日本語/中国語）", _guard(stages.get("news", {}), _sec_news)),
