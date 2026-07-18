@@ -330,6 +330,25 @@ STAGE7B_CRITIQUE = SYSTEM_PREFIX + """
 初稿と同じ構造（executive_summary / strategies[] / closing_message）で、改訂版のみを出力。
 """
 
+# 深掘りチャット: レポート生成後、経営者からの追加質問にプレーンテキストで回答する
+# （JSONモードは使わない。自由記述の会話文を返すため）
+STAGE_CHAT_FOLLOWUP = SYSTEM_PREFIX + """
+# Task
+対象企業「{company}」について、すでに以下の分析結果と戦略提言が生成されています。
+経営者からの追加質問に、分析結果に基づいて自然な文章で回答してください。
+分析結果に書かれていない事実を断定的に答えず、推測の場合は必ず「(要確認)」を付けてください。
+JSON形式は使わず、読みやすい自然文（短い見出しや箇条書きの利用は可）で回答してください。
+
+# 分析結果
+{all_analysis}
+
+# これまでの会話
+{history}
+
+# 経営者からの質問
+{question}
+"""
+
 # AI俯瞰総評（フェーズ1・傾向分析タブ用）
 TREND_COMMENTARY = SYSTEM_PREFIX + """
 # Task

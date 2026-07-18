@@ -2,6 +2,19 @@
 
 このフォルダ内の変更履歴。バージョンアップ時は旧ファイルを残したまま新ファイルを追加し、ここに変更点を追記する。
 
+## [20260715_11] - 2026-07-18
+
+**変更ファイル:** `strategy_prompts.py`, `strategy_engine.py`, `README.md`
+**追加ファイル:** `rtocs_dashboard_20260715_11.py`（`_10`からのコピー＋バージョン更新。`_01`〜`_10`はそのまま残置）
+
+MECE改善構想（5軸）の**軸3「OUTPUT（成果物・対話性）」の項目①**に対応:
+
+- `strategy_prompts.py`に`STAGE_CHAT_FOLLOWUP`を新規追加（JSONモードは使わず自然文で回答させるプロンプト）
+- `strategy_engine.py`の`GeminiClient`に`generate_text()`（プレーンテキスト応答、JSONモード不使用）を追加
+- `strategy_engine.py`に`answer_followup_question(result, question, chat_history=None, ...)`を新規追加。生成済みの全分析結果を文脈として渡し、経営者からの追加質問に自然文で回答する（1問=1回のGemini呼び出し、stage="chat"で別集計）
+- 戦略分析タブのレポート表示直後に「💬 レポートについて質問する」チャットUIを追加（`st.chat_message`/`st.chat_input`、会話履歴はセッション内で保持、新しい分析を実行すると履歴をリセット）
+- 軸3-②（分析前の確認・修正チェックポイント）・軸3-③（複数シナリオ並列比較）は次の実装対象・将来拡張として保留中
+
 ## [20260715_10] - 2026-07-18
 
 **変更ファイル:** `strategy_prompts.py`, `strategy_report.py`, `README.md`

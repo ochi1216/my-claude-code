@@ -97,6 +97,22 @@ class GeminiClient:
                 last_err = e
         raise ValueError(f"Gemini呼び出し失敗: {last_err}")
 
+    def generate_text(self, prompt, stage="misc", retries=1):
+        """プレーンテキスト応答（JSONモード不使用）。深掘りチャット等の自由記述回答に使う。"""
+        if not self._model:
+            raise ValueError("GEMINI_API_KEY が設定されていません。")
+        last_err = None
+        for _ in range(retries + 1):
+            try:
+                response = self._model.generate_content(prompt)
+                self._add_cost(stage, response)
+                if not response.text:
+                    raise ValueError("空の応答")
+                return response.text.strip()
+            except Exception as e:
+                last_err = e
+        raise ValueError(f"Gemini呼び出し失敗: {last_err}")
+
     def _get_genai2_client(self):
         """Google Search Grounding用の新SDK(google-genai)クライアントを遅延生成する。
 
@@ -428,6 +444,33 @@ class StrategyEngine:
             "total_jpy": round(self.client.total_cost_jpy, 2),
         }
         return result
+
+
+def answer_followup_question(result, question, chat_history=None, api_key=None, model_name=None):
+    """レポート生成後の深掘りチャット（軸3-①）。
+
+    生成済みのパイプライン結果(result)を文脈として、経営者からの追加質問に自然文で回答する。
+    JSONモードは使わない（会話文が欲しいため）。呼び出し1回のみ・stage="chat"で別集計する。
+
+    戻り値: (回答文字列, コスト円)
+    """
+    model_name = model_name or result.get("model") or "gemini-2.5-flash"
+    client = GeminiClient(api_key=api_key, model_name=model_name)
+    stages = result.get("stages", {})
+    all_analysis = json.dumps(
+        {k: v for k, v in stages.items() if isinstance(v, dict) and "error" not in v},
+        ensure_ascii=False)
+    history_text = "\n".join(
+        f"{'経営者' if h.get('role') == 'user' else 'コンサルタント'}: {h.get('content', '')}"
+        for h in (chat_history or [])) or "(まだ質問はありません)"
+    prompt = P.STAGE_CHAT_FOLLOWUP.format(
+        company=result.get("company", ""),
+        all_analysis=all_analysis,
+        history=history_text,
+        question=question,
+    )
+    answer = client.generate_text(prompt, stage="chat")
+    return answer, round(client.total_cost_jpy, 2)
 
 
 def generate_trend_commentary(records, api_key=None, model_name="gemini-2.5-flash"):
