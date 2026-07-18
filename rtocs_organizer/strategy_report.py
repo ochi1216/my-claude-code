@@ -147,6 +147,29 @@ def _sec_news(s):
     return f"{variant_badges}{table_html}{note_html}"
 
 
+def _sec_analyst(s):
+    views = sorted(s.get("analyst_views", []) or [], key=lambda a: a.get("date", ""), reverse=True)
+    view_rows = "".join(
+        f"""<tr><td>{_e(v.get('date'))}</td><td>{_e(v.get('source'))}</td>
+            <td>{_e(v.get('rating_or_view'))}<br><span style="color:#718096;font-size:0.85rem;">{_e(v.get('rationale'))}</span></td></tr>"""
+        for v in views)
+    view_html = (f'<table><tr><th>日付</th><th>アナリスト/調査会社</th><th>見解</th></tr>{view_rows}</table>'
+                 if view_rows else '<div class="skip-box">アナリスト見解は見つかりませんでした</div>')
+
+    narratives = sorted(s.get("management_narrative", []) or [], key=lambda n: n.get("date", ""), reverse=True)
+    narrative_html = "".join(
+        f"""<div class="item"><strong>{_e(n.get('event'))}</strong> ({_e(n.get('date'))})<br>{_e(n.get('summary'))}</div>"""
+        for n in narratives) or '<div class="skip-box">経営陣メッセージは見つかりませんでした</div>'
+
+    gap = s.get("market_expectation_gap", "")
+    gap_html = f'<div class="highlight-box">💡 市場評価と自己認識のギャップ: {_e(gap)}</div>' if gap else ""
+    note = s.get("recency_note", "")
+    note_html = f'<div class="skip-box">ℹ️ {_e(note)}</div>' if note else ""
+    return f"""<div class="item"><strong>アナリストの見解:</strong></div>{view_html}
+        <div class="item" style="margin-top:10px;"><strong>経営陣自身のメッセージ:</strong></div>{narrative_html}
+        {gap_html}{note_html}"""
+
+
 def _sec_market(s, market_data):
     chart = _price_chart_b64(market_data)
     chart_html = f'<img class="chart" src="data:image/png;base64,{chart}">' if chart else ""
@@ -267,6 +290,7 @@ def generate_strategy_report(result, out_dir=None):
         exec_html,
         card("🏢 会社分析", _guard(stages.get("company", {}), _sec_company)),
         card("📰 直近ニュース（英語/日本語/中国語）", _guard(stages.get("news", {}), _sec_news)),
+        card("📊 アナリスト洞察・経営陣メッセージ", _guard(stages.get("analyst", {}), _sec_analyst)),
         card("📈 株式市場分析", _guard(stages.get("market", {}),
                                        lambda s: _sec_market(s, result.get("market_data")))),
         card("🌐 業界・競合分析", _guard(stages.get("industry", {}), _sec_industry)),

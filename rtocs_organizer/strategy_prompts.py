@@ -62,6 +62,36 @@ STAGE1B_NEWS = SYSTEM_PREFIX + """
 recent_newsは重要度の高い順に最大10件まで。各言語から最低1件ずつ探すよう努めてください（見つからない場合は無理に作らないこと）。
 """
 
+# ステージ1C: アナリスト洞察・経営陣メッセージ収集（Google Search Groundingを使用。
+# STAGE1B_NEWSと同じ理由でJSONモードとは併用しない）
+STAGE1C_ANALYST = SYSTEM_PREFIX + """
+# Task
+対象企業「{company}」（正式名称候補: {official_name}）について、検索機能を使って以下を調べてください。
+単なるニュース速報ではなく、**市場関係者による「解釈・評価」**と**経営陣自身の発言**を重視してください。
+
+1. セルサイドアナリストのレーティング変更・目標株価修正とその理由（直近12ヶ月）
+2. 直近の決算説明会(Earnings Call)・投資家向け説明会(Investor Day)でのマネジメント自身の発言
+   （成長ドライバーの説明、今後の見通し、強調している投資領域）
+3. 上記2つを踏まえた「市場の評価」と「経営陣の自己認識」の間にあるギャップ（あれば）
+
+# Output Format (JSON)
+以下のJSON形式のみを出力してください（前後に説明文やコードフェンスを付けないこと）。
+{{
+  "analyst_views": [
+    {{"source": "証券会社・調査会社名", "date": "YYYY-MM",
+      "rating_or_view": "レーティング変更内容、または見解の要点",
+      "rationale": "その根拠(100文字程度)"}}
+  ],
+  "management_narrative": [
+    {{"event": "決算説明会/Investor Day等の名称", "date": "YYYY-MM",
+      "summary": "経営陣の発言要点(100文字程度)"}}
+  ],
+  "market_expectation_gap": "市場の評価と経営陣の自己認識の間のギャップに関する所見(150文字程度、無ければ「特筆すべきギャップは見当たらない」等と明記)",
+  "recency_note": "十分な情報が見つからなかった場合、または検索機能が使えなかった場合の注記(問題なければ空文字)"
+}}
+analyst_views・management_narrativeはそれぞれ重要度の高い順に最大5件まで。見つからない場合は無理に作らず空配列にしてください。
+"""
+
 # ステージ2: 株式市場分析（yfinance実データをGeminiが解釈）
 STAGE2_MARKET = SYSTEM_PREFIX + """
 # Task
