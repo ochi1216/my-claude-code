@@ -254,9 +254,14 @@ class StrategyEngine:
             stages[key] = {"error": f"取得失敗: {e}"}
             self.progress_cb(key, label, "error")
 
-    def run_pipeline(self, company_name, user_constraints=None):
+    def run_pipeline(self, company_name, user_constraints=None, stop_before_issues=False):
         """user_constraints: 経営者自身が明示する制約条件（任意のフリーテキスト）。
         課題分析・戦略策定（ディープモードの改訂パス含む）に必ず反映させる。
+
+        stop_before_issues=True の場合（軸3-②: 分析前の確認・修正チェックポイント。
+        デフォルトOFF・選択制）、会社分析〜他業種事例分析までの前半ステージのみ実行して
+        結果を返す。呼び出し側が内容を確認・修正した後、continue_pipeline() に同じ結果
+        dictを渡すことで課題分析・戦略策定の後半ステージを実行できる。
         """
         stages = {}
         user_constraints = (user_constraints or "").strip()
@@ -405,6 +410,53 @@ class StrategyEngine:
                 stage="cases")
         self._run_stage("cases", labels["cases"], stage5, stages)
 
+        if stop_before_issues:
+            # 軸3-②: 確認・修正チェックポイント。呼び出し側が前半の結果を確認・修正した後、
+            # continue_pipeline(result) で課題分析・戦略策定を実行できるよう、後半の実行に
+            # 必要な文脈だけを内部キー（アンダースコア始まり）で保持しておく。
+            # レポート生成側(strategy_report.py)は既知のキーのみ参照するため無害。
+            result["_pending_continuation"] = {
+                "company_name": company_name,
+                "constraints_block": constraints_block,
+            }
+            result["_stopped_before_issues"] = True
+            result["costs"] = {
+                "stages_jpy": {k: round(v, 2) for k, v in self.client.stage_costs_jpy.items()},
+                "total_usd": round(self.client.total_cost_usd, 4),
+                "total_jpy": round(self.client.total_cost_jpy, 2),
+            }
+            return result
+
+        self._run_late_stages(stages, result, company_name, constraints_block)
+        return result
+
+    def continue_pipeline(self, result, additional_note=None):
+        """run_pipeline(..., stop_before_issues=True) で保留した結果を受け取り、
+        課題分析・戦略策定の後半ステージを実行して完成させる（軸3-②）。
+
+        additional_note: 中間結果を確認した経営者が、後半ステージに追加で反映させたい
+        コメント・修正指示（任意）。指定すると制約条件ブロックに追記され、必須順守として扱われる。
+        """
+        ctx = result.get("_pending_continuation")
+        if not ctx:
+            raise ValueError("再開できる保留状態がありません（stop_before_issues=Trueで生成した結果を渡してください）")
+        result.pop("_pending_continuation", None)
+        result.pop("_stopped_before_issues", None)
+        constraints_block = ctx["constraints_block"]
+        additional_note = (additional_note or "").strip()
+        if additional_note:
+            constraints_block += (
+                f"\n# 中間確認時に経営者が追加したコメント・修正指示（必須順守）\n{additional_note}\n"
+            )
+            result["user_constraints"] = "\n".join(
+                s for s in (result.get("user_constraints", ""), additional_note) if s).strip()
+        self._run_late_stages(result["stages"], result, ctx["company_name"], constraints_block)
+        return result
+
+    def _run_late_stages(self, stages, result, company_name, constraints_block):
+        """⑨課題分析・⑩戦略策定（ディープモードは批判・改訂パス付き）を実行し、costsを確定する。"""
+        labels = dict(STAGE_LABELS)
+
         def _all_analysis():
             return json.dumps(
                 {k: v for k, v in stages.items() if isinstance(v, dict) and "error" not in v},
@@ -443,7 +495,6 @@ class StrategyEngine:
             "total_usd": round(self.client.total_cost_usd, 4),
             "total_jpy": round(self.client.total_cost_jpy, 2),
         }
-        return result
 
 
 def answer_followup_question(result, question, chat_history=None, api_key=None, model_name=None):
