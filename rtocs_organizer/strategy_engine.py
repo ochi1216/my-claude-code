@@ -36,7 +36,32 @@ STAGE_LABELS = [
     ("cases", "⑧ 他業種事例分析"),
     ("issues", "⑨ 課題分析"),
     ("strategy", "⑩ 戦略策定"),
+    ("progress", "⑪ 前回分析との比較（進捗トラッキング）"),
 ]
+
+DEFAULT_REPORTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "strategy_reports")
+
+
+def find_previous_report(disp_name, reports_dir=None, exclude_path=None):
+    """軸5-①: 同一企業の過去レポート（strategy_report.generate_strategy_reportが保存する
+    JSONサイドカー）を検出し、最新のものを (dict, path) で返す。無ければ (None, None)。
+
+    ファイル名の突合は strategy_report.py の safe_name 生成ロジックと同じ方式（先頭40文字・
+    禁止文字の置換）を用いる。
+    """
+    import glob
+    reports_dir = reports_dir or DEFAULT_REPORTS_DIR
+    safe_name = re.sub(r'[\\/:*?"<>|]+', "_", str(disp_name))[:40]
+    candidates = sorted(glob.glob(os.path.join(reports_dir, f"Strategy_{safe_name}_*.json")), reverse=True)
+    for path in candidates:
+        if exclude_path and os.path.abspath(path) == os.path.abspath(exclude_path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f), path
+        except Exception:
+            continue
+    return None, None
 
 
 def _strip_code_fence(text):
@@ -535,6 +560,29 @@ class StrategyEngine:
             return draft
         self._run_stage("strategy", labels["strategy"], stage7, stages)
         _assess_financial_feasibility(stages.get("strategy", {}), result.get("market_data"))
+
+        # ⑪ 前回分析との比較（軸5-①: 進捗トラッキング。同企業の過去レポートが見つかった場合のみ実行）
+        def stage_progress():
+            s1 = stages.get("company", {})
+            disp_name = (s1.get("official_name", company_name)
+                         if isinstance(s1, dict) and "error" not in s1 else company_name)
+            prev, _ = find_previous_report(disp_name)
+            if not prev:
+                return {"skipped": "過去の分析レポートが見つからないため比較をスキップ（初回分析）"}
+            prev_stages = prev.get("stages", {}) if isinstance(prev, dict) else {}
+            previous_summary = json.dumps(
+                {"issues": prev_stages.get("issues"), "strategy": prev_stages.get("strategy")},
+                ensure_ascii=False)
+            current_summary = json.dumps(
+                {"issues": stages.get("issues"), "strategy": stages.get("strategy")},
+                ensure_ascii=False)
+            return self.client.generate_json(
+                P.STAGE_PROGRESS_DIFF.format(company=company_name,
+                                             previous_generated_at=prev.get("generated_at", "不明"),
+                                             previous_summary=previous_summary,
+                                             current_summary=current_summary),
+                stage="progress")
+        self._run_stage("progress", labels["progress"], stage_progress, stages)
 
         result["costs"] = {
             "stages_jpy": {k: round(v, 2) for k, v in self.client.stage_costs_jpy.items()},

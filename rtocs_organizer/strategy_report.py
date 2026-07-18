@@ -10,6 +10,7 @@ strategy_engine.run_pipeline() の結果dictから、自己完結の1枚HTMLを�
 import os
 import io
 import re
+import json
 import html
 import base64
 from datetime import datetime
@@ -322,6 +323,8 @@ def _sec_strategy(s):
             {mode_html}{lens_html}
             <div class="item"><strong>根拠:</strong> {_e(st.get('rationale'))}</div>
             <div class="item"><strong>最初の90日:</strong>{_ul(st.get('first_90_days'))}</div>
+            {f'<div class="item"><strong>1年後のマイルストーン:</strong>{_ul(st.get("year_1_milestones"))}</div>' if st.get('year_1_milestones') else ''}
+            {f'<div class="item"><strong>3年後のビジョン:</strong> {_e(st.get("year_3_vision"))}</div>' if st.get('year_3_vision') else ''}
             <div class="item"><strong>リスク:</strong> {_e(st.get('risks'))}</div>
             {refs}
             {feasibility_html}
@@ -332,6 +335,17 @@ def _sec_strategy(s):
     closing = s.get("closing_message", "")
     closing_html = f'<div class="highlight-box" style="border-left-color:#d69e2e;background:#fffbeb;">💬 {_e(closing)}</div>' if closing else ""
     return items + devils_html + closing_html
+
+
+def _sec_progress(s):
+    """軸5-①: 前回分析との比較（進捗トラッキング）"""
+    return f"""
+      <div class="highlight-box">{_e(s.get('progress_summary'))}</div>
+      <div class="item"><strong>改善・解消したと見られる点:</strong>{_ul(s.get('resolved_or_improved'))}</div>
+      <div class="item"><strong>新たな/悪化した課題:</strong>{_ul(s.get('new_or_worsened_issues'))}</div>
+      <div class="item"><strong>戦略の継続性:</strong> {_e(s.get('strategy_continuity'))}</div>
+      <div class="highlight-box" style="border-left-color:#d69e2e;background:#fffbeb;">💡 {_e(s.get('recommendation'))}</div>
+    """
 
 
 def generate_strategy_report(result, out_dir=None):
@@ -378,6 +392,8 @@ def generate_strategy_report(result, out_dir=None):
                         result.get("selected_case_records"))),
         card("🔍 課題分析", _guard(stages.get("issues", {}), _sec_issues)),
         card("🎯 戦略提言（大前式）", _guard(stages.get("strategy", {}), _sec_strategy), "strategy"),
+        card("📈 前回分析との比較（進捗トラッキング）", _guard(stages.get("progress", {}), _sec_progress))
+        if "progress" in stages else "",
     ]
 
     cost_html = (f'<div class="cost-banner">💰 推定APIコスト ({_e(result.get("model"))}): '
@@ -399,8 +415,21 @@ def generate_strategy_report(result, out_dir=None):
 </div></body></html>"""
 
     safe_name = re.sub(r'[\\/:*?"<>|]+', "_", str(disp_name))[:40]
-    filename = f"Strategy_{safe_name}_{dt.strftime('%Y%m%d_%H%M%S')}.html"
+    timestamp = dt.strftime('%Y%m%d_%H%M%S')
+    filename = f"Strategy_{safe_name}_{timestamp}.html"
     filepath = os.path.join(out_dir, filename)
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(html_doc)
+
+    # 軸5-①: 次回以降の進捗トラッキング（前回分析との比較）のため、構造化データもJSONで
+    # サイドカー保存する（内部キー"_"始まりは除外。中間確認チェックポインで保留中の結果は
+    # 呼び出し側の責務で保存しないことが多いが、保存されても後続の比較には影響しない）。
+    try:
+        sidecar = {k: v for k, v in result.items() if not k.startswith("_")}
+        json_path = os.path.join(out_dir, f"Strategy_{safe_name}_{timestamp}.json")
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(sidecar, f, ensure_ascii=False, indent=1)
+    except Exception:
+        pass  # サイドカー保存に失敗してもHTMLレポート自体は既に生成済みなので続行
+
     return filepath
