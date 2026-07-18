@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """一気通貫 企業戦略分析パイプライン。
 
-企業名1つを入力に、9ステージ（会社→直近ニュース(英/日/中)→アナリスト洞察・経営陣メッセージ→
-株式市場→業界・競合→類似事例選定→他業種事例→課題→戦略策定）を順に実行し、結果dictを返す。
-Streamlitには依存しない（ダッシュボードからもテストからも呼べる）。
+企業名1つを入力に、10ステージ（会社→直近ニュース(英/日/中)→アナリスト洞察・経営陣メッセージ→
+マクロ・技術トレンド→株式市場→業界・競合→類似事例選定→他業種事例→課題→戦略策定）を順に実行し、
+結果dictを返す。Streamlitには依存しない（ダッシュボードからもテストからも呼べる）。
 
 - 各ステージは失敗しても {"error": ...} を格納して続行する（部分レポート方針）
 - コストは既存organizerと同じ方式（トークン→USD→円換算）で集計
@@ -29,12 +29,13 @@ STAGE_LABELS = [
     ("company", "① 会社分析"),
     ("news", "② 直近ニュース収集（英/日/中）"),
     ("analyst", "③ アナリスト洞察・経営陣メッセージ収集"),
-    ("market", "④ 株式市場分析"),
-    ("industry", "⑤ 業界・競合分析"),
-    ("retrieve", "⑥ 類似RTOCS事例の選定"),
-    ("cases", "⑦ 他業種事例分析"),
-    ("issues", "⑧ 課題分析"),
-    ("strategy", "⑨ 戦略策定"),
+    ("macro", "④ マクロ・技術トレンド分析"),
+    ("market", "⑤ 株式市場分析"),
+    ("industry", "⑥ 業界・競合分析"),
+    ("retrieve", "⑦ 類似RTOCS事例の選定"),
+    ("cases", "⑧ 他業種事例分析"),
+    ("issues", "⑨ 課題分析"),
+    ("strategy", "⑩ 戦略策定"),
 ]
 
 
@@ -268,6 +269,15 @@ class StrategyEngine:
         self._run_stage("analyst", labels["analyst"], stage_analyst, stages)
         analyst_stage = stages.get("analyst", {})
 
+        # ④ マクロ・技術トレンド分析（業界全体・時代全体の構造変化。個社分析ではない）
+        def stage_macro():
+            return self.client.generate_grounded_json(
+                P.STAGE1D_MACRO.format(company=company_name,
+                                       sector=s1.get("industry_sector", "不明")),
+                stage="macro")
+        self._run_stage("macro", labels["macro"], stage_macro, stages)
+        macro_stage = stages.get("macro", {})
+
         target_summary_dict = {k: s1.get(k) for k in
                                 ("official_name", "industry_sector", "business_model",
                                  "strengths", "weaknesses") if k in s1} if "error" not in s1 else {}
@@ -284,9 +294,14 @@ class StrategyEngine:
                 ]
             if analyst_stage.get("market_expectation_gap"):
                 target_summary_dict["market_expectation_gap"] = analyst_stage["market_expectation_gap"]
+        if "error" not in macro_stage and macro_stage.get("macro_trends"):
+            target_summary_dict["macro_trends_summary"] = [
+                f"[{t.get('category','')}/{t.get('impact_direction','')}] {t.get('trend','')}"
+                for t in macro_stage["macro_trends"][:6]
+            ]
         target_summary = json.dumps(target_summary_dict, ensure_ascii=False) if target_summary_dict else company_name
 
-        # ④ 株式市場分析（yfinance実データ→Gemini解釈。未上場はスキップ）
+        # ⑤ 株式市場分析（yfinance実データ→Gemini解釈。未上場はスキップ）
         def stage2():
             if "error" in s1:
                 return {"skipped": "会社分析が失敗したためスキップ"}
@@ -303,14 +318,14 @@ class StrategyEngine:
             return out
         self._run_stage("market", labels["market"], stage2, stages)
 
-        # ⑤ 業界・競合分析
+        # ⑥ 業界・競合分析
         self._run_stage("industry", labels["industry"], lambda: self.client.generate_json(
             P.STAGE3_INDUSTRY.format(company=company_name,
                                      sector=s1.get("industry_sector", "不明"),
                                      stage1_summary=target_summary),
             stage="industry"), stages)
 
-        # ⑥ 類似RTOCS事例の選定（LLM-as-retriever）
+        # ⑦ 類似RTOCS事例の選定（LLM-as-retriever）
         index = rtocs_index.build_index(data_dir=self.data_dir)
         records = index.get("records", [])
 
@@ -330,7 +345,7 @@ class StrategyEngine:
             return out
         self._run_stage("retrieve", labels["retrieve"], stage4, stages)
 
-        # ⑦ 他業種事例分析（選定ケースのフルJSONを読み込み深掘り）
+        # ⑧ 他業種事例分析（選定ケースのフルJSONを読み込み深掘り）
         def stage5():
             if not result["selected_case_records"]:
                 return {"skipped": "類似事例が選定されなかったためスキップ"}
@@ -363,12 +378,12 @@ class StrategyEngine:
                 {k: v for k, v in stages.items() if isinstance(v, dict) and "error" not in v},
                 ensure_ascii=False)
 
-        # ⑧ 課題分析
+        # ⑨ 課題分析
         self._run_stage("issues", labels["issues"], lambda: self.client.generate_json(
             P.STAGE6_ISSUES.format(company=company_name, all_analysis=_all_analysis()),
             stage="issues"), stages)
 
-        # ⑨ 戦略策定（ディープモードは批判・改訂パス付き）
+        # ⑩ 戦略策定（ディープモードは批判・改訂パス付き）
         def stage7():
             lessons = json.dumps(stages.get("cases", {}), ensure_ascii=False)
             draft = self.client.generate_json(

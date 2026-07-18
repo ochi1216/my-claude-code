@@ -204,11 +204,30 @@ def _sec_industry(s):
         for c in s.get("competitors", []))
     return f"""
       <div class="highlight-box">{_e(s.get('industry_structure'))}</div>
-      <div class="item"><strong>業界トレンド:</strong>{_ul(s.get('industry_trends'))}</div>
       <table>{ff_rows}</table>
       <table><tr><th>競合</th><th>ポジショニング</th><th>脅威度</th></tr>{comp_rows}</table>
       <div class="item"><strong>対象企業のポジション:</strong> {_e(s.get('target_position'))}</div>
     """
+
+
+_IMPACT_BADGE = {"追い風": "🟢", "逆風": "🔴", "中立": "⚪", "両面あり": "🟡"}
+
+
+def _sec_macro(s):
+    trends = s.get("macro_trends", []) or []
+    rows = "".join(
+        f"""<tr><td>{_e(t.get('category'))}</td>
+            <td>{_IMPACT_BADGE.get(t.get('impact_direction',''), '')} {_e(t.get('impact_direction'))}</td>
+            <td>{_e(t.get('time_horizon'))}</td>
+            <td><strong>{_e(t.get('trend'))}</strong><br><span style="color:#718096;font-size:0.85rem;">{_e(t.get('summary'))}</span></td></tr>"""
+        for t in trends)
+    table_html = (f'<table><tr><th>カテゴリ</th><th>方向</th><th>時間軸</th><th>トレンド</th></tr>{rows}</table>'
+                  if rows else '<div class="skip-box">マクロトレンドは見つかりませんでした</div>')
+    shift = s.get("structural_shift_note", "")
+    shift_html = f'<div class="highlight-box">🌊 {_e(shift)}</div>' if shift else ""
+    note = s.get("recency_note", "")
+    note_html = f'<div class="skip-box">ℹ️ {_e(note)}</div>' if note else ""
+    return f"{table_html}{shift_html}{note_html}"
 
 
 def _sec_cases(retrieve, cases, selected_records):
@@ -291,6 +310,7 @@ def generate_strategy_report(result, out_dir=None):
         card("🏢 会社分析", _guard(stages.get("company", {}), _sec_company)),
         card("📰 直近ニュース（英語/日本語/中国語）", _guard(stages.get("news", {}), _sec_news)),
         card("📊 アナリスト洞察・経営陣メッセージ", _guard(stages.get("analyst", {}), _sec_analyst)),
+        card("🌊 マクロ・技術トレンド", _guard(stages.get("macro", {}), _sec_macro)),
         card("📈 株式市場分析", _guard(stages.get("market", {}),
                                        lambda s: _sec_market(s, result.get("market_data")))),
         card("🌐 業界・競合分析", _guard(stages.get("industry", {}), _sec_industry)),
