@@ -129,17 +129,23 @@ def load_competitors_db(config_dir=None, force=False):
     return db
 
 
-def load_competitors(category_key=None, active_only=True, min_level="limited", config_dir=None):
+def load_competitors(category_key=None, active_only=True, min_level="limited",
+                      exclude_names=None, config_dir=None):
     """競合企業一覧を返す。
 
     category_key指定時は、そのカテゴリで min_level 以上（primary優先、limitedも含む）の
     企業のみに絞り込む。region昇順→breadth_score降順でソートする
     （DESIGN 8.4節: 地域バランスを考慮した選定の下準備）。
+    exclude_names指定時は、その企業名（大文字小文字区別なし）を候補から除外する
+    （ベンチマーク対象=TIを「競合」として二重に選ばないための用途を想定。DESIGN 14章）。
     """
     db = load_competitors_db(config_dir=config_dir)
     companies = db.get("companies", [])
     if active_only:
         companies = [c for c in companies if c.get("active", True)]
+    if exclude_names:
+        exclude_lower = {n.strip().lower() for n in exclude_names if n}
+        companies = [c for c in companies if c.get("name", "").strip().lower() not in exclude_lower]
     if category_key:
         levels = {"primary": 2, "limited": 1, "none": 0}
         threshold = levels.get(min_level, 1)
@@ -173,9 +179,9 @@ def competitors_summary(config_dir=None):
     }
 
 
-def pick_regional_representatives(category_key=None, config_dir=None):
+def pick_regional_representatives(category_key=None, exclude_names=None, config_dir=None):
     """地域ごとにbreadth_score最上位1社を選ぶ（DESIGN 8.4節「通常モード」用）。"""
-    companies = load_competitors(category_key=category_key, config_dir=config_dir)
+    companies = load_competitors(category_key=category_key, exclude_names=exclude_names, config_dir=config_dir)
     best_by_region = {}
     for c in companies:
         region = c.get("region", "")
@@ -199,6 +205,12 @@ def own_company_name(config_dir=None):
     """自社名（例: "Nexperia"）を返す。未設定ならNone。"""
     oc = load_own_company(config_dir=config_dir)
     return oc.get("name") if oc else None
+
+
+def benchmark_target_name(config_dir=None):
+    """ベンチマーク対象企業名（例: "Texas Instruments"）を返す。未設定ならNone。"""
+    oc = load_own_company(config_dir=config_dir)
+    return oc.get("benchmark_target") if oc else None
 
 
 def find_company(name, config_dir=None):

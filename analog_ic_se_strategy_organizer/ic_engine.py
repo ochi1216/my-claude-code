@@ -244,16 +244,29 @@ class IcPipeline:
             return self.client.generate_grounded_json(prompt, stage="stage2_key_customers")
         self._run_stage("stage2_key_customers", labels["stage2_key_customers"], stage2, stages)
 
-        # ④ 競合IC比較（competitors_db.jsonから対象企業を抽出し1社ずつ検索）
+        # ④ 競合IC比較（competitors_db.jsonから対象企業を抽出し1社ずつ検索。
+        #    自社(config/own_company.json)は選定モードに関わらず必ず比較対象に含める）
         def stage3():
             if only_stage0:
                 return {"skipped": "「ステージ0のみ実行」モードのためスキップ"}
             if "error" in s0:
                 return {"skipped": "製品取り込みが失敗したためスキップ"}
+            own_name = ic_schema.own_company_name()
+            benchmark_name = ic_schema.benchmark_target_name()
+            # ベンチマーク対象(TI)自身は既にステージ0で分析対象になっているため、
+            # 「競合」プールからは除外する（TI vs TIの二重比較を避ける。DESIGN 14章）
+            exclude_names = [benchmark_name] if benchmark_name else None
+
             if self.competitor_mode == "full":
-                companies = ic_schema.load_competitors(category_key=category_key)
+                companies = ic_schema.load_competitors(category_key=category_key, exclude_names=exclude_names)
             else:
-                companies = ic_schema.pick_regional_representatives(category_key=category_key)
+                companies = ic_schema.pick_regional_representatives(
+                    category_key=category_key, exclude_names=exclude_names)
+
+            own_record = ic_schema.find_company(own_name) if own_name else None
+            if own_record and not any(c.get("name") == own_name for c in companies):
+                companies = companies + [own_record]
+
             if not companies:
                 return {"skipped": f"カテゴリ'{category_key}'に該当する競合企業がcompetitors_db.jsonに見つかりませんでした"}
 
@@ -265,6 +278,17 @@ class IcPipeline:
 
             results = []
             for c in companies:
+                is_own = bool(own_name) and c.get("name") == own_name
+                if is_own and c.get("categories", {}).get(category_key, "none") == "none":
+                    # 自社がこのカテゴリでまだ製品を持っていない場合、無理に検索させず
+                    # 「現行対抗品なし」を明示する（ハルシネーション防止。DESIGN 14章参照）
+                    results.append({
+                        "company": c.get("name", ""), "region": c.get("region", ""),
+                        "own_company": True, "no_current_product": True,
+                        "comparable_part": "", "specs": {}, "gap_vs_ti": {},
+                        "source_url": "", "lookup_status": "no_current_product",
+                    })
+                    continue
                 try:
                     prompt = P.STAGE3_COMPETITOR.format(
                         company=c.get("name", ""), region=c.get("region", ""),
@@ -273,10 +297,12 @@ class IcPipeline:
                         category_params_overview=params_overview)
                     out = self.client.generate_grounded_json(prompt, stage="stage3_competitors")
                     out["lookup_status"] = "ok"
+                    if is_own:
+                        out["own_company"] = True
                     results.append(out)
                 except Exception as e:
                     results.append({"company": c.get("name", ""), "region": c.get("region", ""),
-                                     "lookup_status": "error", "error": f"検索失敗: {e}"})
+                                     "own_company": is_own, "lookup_status": "error", "error": f"検索失敗: {e}"})
             if all(r.get("lookup_status") == "error" for r in results):
                 return {"error": "全競合企業の検索に失敗しました"}
             return {"competitors": results, "comparison_table_note": ""}
@@ -293,8 +319,11 @@ class IcPipeline:
                 s = stages.get(key, {})
                 return json.dumps(s, ensure_ascii=False) if isinstance(s, dict) and "error" not in s else "{}"
 
+            own_name = ic_schema.own_company_name()
             prompt = P.STAGE4_NEXT_GEN.format(
                 part_number=part_number, category=category_key,
+                own_company=own_name or "(自社未設定)",
+                category_params_overview=_category_params_text(category_def),
                 stage0_json=_safe("stage0_product"), stage1_json=_safe("stage1_market"),
                 stage2_json=_safe("stage2_key_customers"), stage3_json=_safe("stage3_competitors"))
             return self.client.generate_json(prompt, stage="stage4_next_gen")
@@ -315,7 +344,7 @@ class IcPipeline:
         s4 = stages.get("stage4_next_gen", {})
         if isinstance(s4, dict) and s4.get("proposed_specs"):
             top = s4["proposed_specs"][0]
-            top_priority_kpi = top.get("kpi", "")
+            top_priority_kpi = top.get("kpi_label", top.get("parameter_key", ""))
 
         s3 = stages.get("stage3_competitors", {})
         regions_covered = sorted({
