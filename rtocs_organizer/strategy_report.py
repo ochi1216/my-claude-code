@@ -181,11 +181,21 @@ def _sec_market(s, market_data):
       <td>{_fmt_num((md.get('dividend_yield') or 0)*100 if md.get('dividend_yield') else None,'%')}</td>
       <td>{_fmt_num(md.get('last_price'), md.get('currency',''))}</td></tr></table>
     """ if md else ""
+    # 軸1-⑤: 財務の実行可能性データ（手元資金・負債・FCF）
+    capacity = f"""
+      <table><tr><th>手元資金</th><th>総負債</th><th>負債資本比率</th><th>フリーキャッシュフロー</th></tr>
+      <tr><td>{_fmt_num(md.get('total_cash'), md.get('currency',''))}</td>
+      <td>{_fmt_num(md.get('total_debt'), md.get('currency',''))}</td>
+      <td>{_fmt_num(md.get('debt_to_equity'),'%')}</td>
+      <td>{_fmt_num(md.get('free_cash_flow'), md.get('currency',''))}</td></tr></table>
+    """ if md and any(md.get(k) is not None for k in
+                       ("total_cash", "total_debt", "debt_to_equity", "free_cash_flow")) else ""
     return f"""
-      {chart_html}{metrics}
+      {chart_html}{metrics}{capacity}
       <div class="item"><strong>バリュエーション:</strong> {_e(s.get('valuation_view'))}</div>
       <div class="item"><strong>株価トレンド:</strong> {_e(s.get('price_trend_view'))}</div>
       <div class="item"><strong>財務健全性:</strong> {_e(s.get('financial_health'))}</div>
+      <div class="highlight-box">💰 資金余力（M&A・大規模投資の裏付け）: {_e(s.get('financial_capacity_note'))}</div>
       <div class="item"><strong>市場の期待/懸念:</strong> {_e(s.get('market_expectation'))}</div>
       <div class="item"><strong>特筆指標:</strong> {_e(s.get('key_metrics_comment'))}</div>
     """

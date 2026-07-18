@@ -196,6 +196,11 @@ def fetch_market_data(ticker_candidates):
                 "fifty_two_week_high": _num("fiftyTwoWeekHigh"),
                 "fifty_two_week_low": _num("fiftyTwoWeekLow"),
                 "last_price": round(float(closes.iloc[-1]), 2),
+                # 軸1-⑤: 財務の実行可能性データ（戦略提言の資金的な裏付けを判断するための材料）
+                "total_cash": _num("totalCash"),
+                "total_debt": _num("totalDebt"),
+                "debt_to_equity": _num("debtToEquity"),
+                "free_cash_flow": _num("freeCashflow"),
                 "price_history": price_history,
                 "financials": financials,
             }
