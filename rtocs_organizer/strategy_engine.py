@@ -225,6 +225,51 @@ def fetch_market_data(ticker_candidates):
     return None
 
 
+# 軸4-②: 戦略提言のコスト規模語彙と資金余力(軸1-⑤で取得済みの財務データ)を粗く比較する
+# Pythonロジック（追加のGemini呼び出しは発生しない）。大規模な打ち手を示す語彙を検出した上で、
+# 手元資金・FCF・負債水準が乏しい場合に⚠️注記を各戦略に追加する。
+_LARGE_SCALE_KEYWORDS = [
+    "M&A", "買収", "大規模投資", "全額投資", "事業売却", "新規事業", "海外展開",
+    "プラットフォーム", "統合", "再編", "大胆", "積極投資",
+]
+
+
+def _assess_financial_feasibility(strategy_out, market_data):
+    """strategy_out(戦略策定ステージの出力)のstrategies[]各項目に、
+    財務データとの整合性チェック結果を"feasibility_flag"フィールドとして追加する（新規フィールド、既存構造は変更しない）。
+    """
+    if not isinstance(strategy_out, dict) or not isinstance(strategy_out.get("strategies"), list):
+        return
+    md = market_data or {}
+    cash = md.get("total_cash")
+    fcf = md.get("free_cash_flow")
+    dte = md.get("debt_to_equity")
+
+    concern_reasons = []
+    if fcf is not None and fcf < 0:
+        concern_reasons.append("フリーキャッシュフローがマイナス")
+    if cash is not None and cash <= 0:
+        concern_reasons.append("手元資金がほぼ無い")
+    if dte is not None and dte > 200:
+        concern_reasons.append("負債資本比率が高水準（200%超）")
+    capacity_concern = bool(concern_reasons)
+
+    for s in strategy_out["strategies"]:
+        if not isinstance(s, dict):
+            continue
+        text = f"{s.get('title', '')} {s.get('rationale', '')}"
+        hits = [kw for kw in _LARGE_SCALE_KEYWORDS if kw in text]
+        if hits and capacity_concern:
+            s["feasibility_flag"] = (
+                f"⚠️ 「{'/'.join(hits[:2])}」等の大規模な打ち手ですが、財務データ上は"
+                f"{'・'.join(concern_reasons)}ため、資金調達の裏付けを追加確認することを推奨します。"
+            )
+        elif hits and not md:
+            s["feasibility_flag"] = "ℹ️ 財務データが未取得（未上場等）のため、資金的な実行可能性は未検証です。"
+        else:
+            s["feasibility_flag"] = None
+
+
 def _market_data_for_prompt(md):
     """プロンプト投入用に価格履歴を年次サマリーへ圧縮する"""
     slim = {k: v for k, v in md.items() if k != "price_history"}
@@ -489,6 +534,7 @@ class StrategyEngine:
                     pass  # 改訂に失敗しても初稿を採用
             return draft
         self._run_stage("strategy", labels["strategy"], stage7, stages)
+        _assess_financial_feasibility(stages.get("strategy", {}), result.get("market_data"))
 
         result["costs"] = {
             "stages_jpy": {k: round(v, 2) for k, v in self.client.stage_costs_jpy.items()},

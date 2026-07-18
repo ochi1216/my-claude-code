@@ -12,6 +12,13 @@ SYSTEM_PREFIX = """あなたはマッキンゼー出身のトップ戦略コン�
 JSON内の文字列にダブルクォーテーションが含まれる場合は必ずエスケープしてください。
 """
 
+# 軸4-①: 出典タグ付け。各ステージの出力JSONに以下の2フィールドを追加させるための共通指示文。
+# 既存フィールドの構造は変えず、新規フィールドとして追加するだけなので後方互換性を保つ。
+_SOURCE_TAG_FIELDS = """
+  "source_confidence": "high/medium/lowのいずれか（このステージの記述全体がどれだけ裏付けのある情報に基づくかの目安）",
+  "source_note": "確度の根拠(何が実データ・検索結果に基づき、何がAIの知識・推論に基づくかを50字程度で){extra_hint}"
+"""
+
 # ステージ1: 会社分析＋証券コード解決
 STAGE1_COMPANY = SYSTEM_PREFIX + """
 # Task
@@ -33,7 +40,8 @@ STAGE1_COMPANY = SYSTEM_PREFIX + """
   "strengths": ["強み1", "強み2", "強み3"],
   "weaknesses": ["弱み1", "弱み2"],
   "recent_topics": ["直近の重要トピック(知識の範囲で、要確認と付記)"],
-  "confidence_note": "この分析の確度に関する注記"
+  "confidence_note": "この分析の確度に関する注記",
+""" + _SOURCE_TAG_FIELDS.format(extra_hint="（このステージはあなたの知識のみに基づくため、通常medium/lowになりやすい点に留意）") + """
 }}
 """
 
@@ -57,7 +65,8 @@ STAGE1B_NEWS = SYSTEM_PREFIX + """
       "headline": "見出し", "source": "報道機関名", "summary": "要点(100文字程度)",
       "relevance": "この分析にとっての関連性(50文字程度)"}}
   ],
-  "recency_note": "検索で十分なニュースが見つからなかった場合、または検索機能が使えなかった場合の注記(問題なければ空文字)"
+  "recency_note": "検索で十分なニュースが見つからなかった場合、または検索機能が使えなかった場合の注記(問題なければ空文字)",
+""" + _SOURCE_TAG_FIELDS.format(extra_hint="（検索結果が十分あればhigh、少なければmedium、検索が機能しなかった場合はlow）") + """
 }}
 recent_newsは重要度の高い順に最大10件まで。各言語から最低1件ずつ探すよう努めてください（見つからない場合は無理に作らないこと）。
 """
@@ -87,7 +96,8 @@ STAGE1C_ANALYST = SYSTEM_PREFIX + """
       "summary": "経営陣の発言要点(100文字程度)"}}
   ],
   "market_expectation_gap": "市場の評価と経営陣の自己認識の間のギャップに関する所見(150文字程度、無ければ「特筆すべきギャップは見当たらない」等と明記)",
-  "recency_note": "十分な情報が見つからなかった場合、または検索機能が使えなかった場合の注記(問題なければ空文字)"
+  "recency_note": "十分な情報が見つからなかった場合、または検索機能が使えなかった場合の注記(問題なければ空文字)",
+""" + _SOURCE_TAG_FIELDS.format(extra_hint="（検索結果が十分あればhigh、少なければmedium、検索が機能しなかった場合はlow）") + """
 }}
 analyst_views・management_narrativeはそれぞれ重要度の高い順に最大5件まで。見つからない場合は無理に作らず空配列にしてください。
 """
@@ -117,7 +127,8 @@ STAGE1D_MACRO = SYSTEM_PREFIX + """
       "summary": "詳細(100文字程度)", "time_horizon": "短期(1年以内)/中期(1-3年)/長期(3年以上)"}}
   ],
   "structural_shift_note": "この業界全体に影響する最大の構造変化についての所見(150文字程度)",
-  "recency_note": "十分な情報が見つからなかった場合、または検索機能が使えなかった場合の注記(問題なければ空文字)"
+  "recency_note": "十分な情報が見つからなかった場合、または検索機能が使えなかった場合の注記(問題なければ空文字)",
+""" + _SOURCE_TAG_FIELDS.format(extra_hint="（検索結果が十分あればhigh、少なければmedium、検索が機能しなかった場合はlow）") + """
 }}
 macro_trendsは重要度の高い順に最大6件まで。
 """
@@ -142,7 +153,8 @@ STAGE2_MARKET = SYSTEM_PREFIX + """
   "financial_health": "売上・利益推移・手元資金・負債水準から見た財務健全性(150文字程度)",
   "financial_capacity_note": "M&Aや大規模投資に振り向けられる資金余力の目安(手元資金・FCF・負債水準から判断。データが無ければ「データ不足のため要確認」と明記)",
   "market_expectation": "市場が織り込んでいる期待/懸念の推察(150文字程度)",
-  "key_metrics_comment": "特筆すべき指標とその意味"
+  "key_metrics_comment": "特筆すべき指標とその意味",
+""" + _SOURCE_TAG_FIELDS.format(extra_hint="（数値自体はyfinanceの実データのためhigh寄りだが、解釈・推察部分はAIの知識に基づく点を踏まえて判断）") + """
 }}
 """
 
@@ -172,7 +184,8 @@ STAGE3_INDUSTRY = SYSTEM_PREFIX + """
   "competitors": [
     {{"name": "競合企業名", "positioning": "ポジショニングと対象企業との差異", "threat_level": "高/中/低"}}
   ],
-  "target_position": "対象企業の業界内ポジションの総括(150文字程度)"
+  "target_position": "対象企業の業界内ポジションの総括(150文字程度)",
+""" + _SOURCE_TAG_FIELDS.format(extra_hint="（このステージはあなたの知識のみに基づくため、通常medium/lowになりやすい点に留意）") + """
 }}
 競合は3〜5社挙げてください。
 """
@@ -232,7 +245,8 @@ STAGE5_CASES = SYSTEM_PREFIX + """
       "application": "対象企業への具体的な適用方法(150文字程度)"
     }}
   ],
-  "cross_industry_insight": "業種を超えて共通する示唆の総括(200文字程度)"
+  "cross_industry_insight": "業種を超えて共通する示唆の総括(200文字程度)",
+""" + _SOURCE_TAG_FIELDS.format(extra_hint="（参照元のRTOCSケース自体は実在データのためhighだが、対象企業への適用は推論のためmedium寄りになりやすい）") + """
 }}
 教訓は4〜6個抽出してください。
 """
@@ -256,7 +270,8 @@ STAGE6_ISSUES = SYSTEM_PREFIX + """
       "urgency": "高/中/低",
       "evidence": ["根拠1(分析結果のどの項目から導いたか、1項目1文で簡潔に)", "根拠2", "根拠3(あれば)"]
     }}
-  ]
+  ],
+""" + _SOURCE_TAG_FIELDS.format(extra_hint="（引用元の各ステージの確度を踏まえた総合判断。実データ・検索結果に基づく分析からの引用が多ければhigh）") + """
 }}
 課題は3〜5個特定してください。evidenceは配列とし、1項目につき1つの根拠のみを書いてください（複数の根拠を1つの文字列にまとめて詰め込まないこと）。
 """
@@ -305,7 +320,8 @@ STAGE7_STRATEGY = SYSTEM_PREFIX + """
     }}
   ],
   "devils_advocate_note": "3つの戦略セット全体に対する最も辛辣な反論。最も失敗しそうな戦略はどれで、なぜ失敗するか、失敗を避けるには何を検証すべきかを150文字程度で(必須、手加減しないこと)",
-  "closing_message": "大前氏風の締めの一言(この会社の経営者へのメッセージ、100文字程度)"
+  "closing_message": "大前氏風の締めの一言(この会社の経営者へのメッセージ、100文字程度)",
+""" + _SOURCE_TAG_FIELDS.format(extra_hint="（提言全体の確度。実データ・検索結果に基づく分析結果を土台にした戦略が多ければhigh、AIの推論への依存度が高ければlow）") + """
 }}
 戦略は必ず3つ。3つのframework_lensができるだけ異なるものになるようにしてください。3つのmodeは必ずconservative/ambitious/disruptiveを1つずつ使ってください。
 """

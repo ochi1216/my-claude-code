@@ -49,8 +49,28 @@ def _e(v):
     return html.escape(str(v)) if v is not None else ""
 
 
+_CONF_BADGE = {
+    "high": ("✅ 高", "#f0fff4", "#9ae6b4"),
+    "medium": ("🟡 中", "#fffff0", "#faf089"),
+    "low": ("🔴 低", "#fff5f5", "#feb2b2"),
+}
+
+
+def _source_badge_html(stage_dict):
+    """軸4-①: 出典確度バッジ（source_confidence/source_note）。無ければ何も出さない（後方互換）。"""
+    conf = stage_dict.get("source_confidence")
+    note = stage_dict.get("source_note")
+    if not conf and not note:
+        return ""
+    label, bg, border = _CONF_BADGE.get(conf, (conf or "—", "#edf2f7", "#e2e8f0"))
+    note_html = f' <span style="color:#718096;font-size:0.85rem;">{_e(note)}</span>' if note else ""
+    return (f'<div style="margin-top:10px;">'
+            f'<span class="badge" style="background:{bg};border:1px solid {border};">出典確度: {_e(label)}</span>'
+            f'{note_html}</div>')
+
+
 def _guard(stage_dict, body_fn):
-    """error/skippedを共通処理し、正常時のみ本体HTMLを描画する"""
+    """error/skippedを共通処理し、正常時は本体HTML＋出典確度バッジを描画する"""
     if not isinstance(stage_dict, dict):
         return f'<div class="skip-box">データ形式が不正です</div>'
     if "error" in stage_dict:
@@ -58,7 +78,7 @@ def _guard(stage_dict, body_fn):
     if "skipped" in stage_dict:
         return f'<div class="skip-box">⏩ {_e(stage_dict["skipped"])}</div>'
     try:
-        return body_fn(stage_dict)
+        return body_fn(stage_dict) + _source_badge_html(stage_dict)
     except Exception as e:
         return f'<div class="error-box">❌ 描画エラー: {_e(e)}</div>'
 
@@ -294,6 +314,8 @@ def _sec_strategy(s):
         mode = st.get("mode", "")
         mode_label, mode_bg, mode_border = _MODE_BADGE.get(mode, (mode, "#edf2f7", "#e2e8f0"))
         mode_html = f'<span class="badge" style="background:{mode_bg};border:1px solid {mode_border};">{_e(mode_label)}</span>' if mode else ""
+        feasibility = st.get("feasibility_flag")
+        feasibility_html = f'<div class="error-box" style="margin-top:8px;">{_e(feasibility)}</div>' if feasibility else ""
         items += f"""
           <div class="strategy-item">
             <h3>戦略{idx}: {_e(st.get('title'))}</h3>
@@ -302,6 +324,7 @@ def _sec_strategy(s):
             <div class="item"><strong>最初の90日:</strong>{_ul(st.get('first_90_days'))}</div>
             <div class="item"><strong>リスク:</strong> {_e(st.get('risks'))}</div>
             {refs}
+            {feasibility_html}
           </div>"""
     devils_note = s.get("devils_advocate_note", "")
     devils_html = (f'<div class="error-box">😈 悪魔の代弁者: {_e(devils_note)}</div>'
