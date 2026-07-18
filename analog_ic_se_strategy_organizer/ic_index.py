@@ -179,3 +179,50 @@ def save_product_case(result, data_dir=None):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=1)
     return path
+
+
+# --- ロードマップビュー（DESIGN 14.6章）: 「次に着手すべきカテゴリ」の優先順位付け -------
+
+# 自社の現状ポジションに応じた重み。noneに近いほど「新規に手を付ける」優先度を上げる
+# （primaryのカテゴリは既に先行しているため、新規企画の緊急度としては相対的に低くする）。
+ROADMAP_STATUS_WEIGHT = {"none": 1.0, "limited": 0.7, "primary": 0.4}
+
+
+def roadmap_priorities(data_dir=None, config_dir=None):
+    """カテゴリ別の「次に着手すべき優先度」を算出する。
+
+    ic_schema.whitespace_analysis()（競合データのみで算出した市場全体の手薄度）に、
+    自社の現状ポジション（none/limited/primaryで重み付け）と、product_lakeに
+    蓄積された分析済み製品の直近性（このカテゴリを最後にいつ深掘りしたか）を
+    組み合わせる。LLM呼び出しは行わず、既存データの集計のみで完結する（コスト0）。
+
+    注意（DESIGN 14.6章）: 「TIの推定リフレッシュ周期」のような競合の開発動向シグナルは
+    ここには含まれない。それには特許・学会発表等の新しいデータソースを扱う別ステージ
+    （D:技術トレンド・特許シグナル分析、未実装）が必要なため、本関数はあくまで
+    「市場の手薄さ×自社の現在地×分析済みの鮮度」という自社データのみに基づく
+    一次的な優先順位付けにとどまる。
+    """
+    import ic_schema
+
+    index = load_index(data_dir=data_dir)
+    records = index.get("records", [])
+    by_category = {}
+    for r in records:
+        by_category.setdefault(r.get("category"), []).append(r)
+
+    results = []
+    for r in ic_schema.whitespace_analysis(config_dir=config_dir):
+        cat = r["category"]
+        cat_records = sorted(by_category.get(cat, []),
+                              key=lambda x: x.get("analyzed_at", ""), reverse=True)
+        status_weight = ROADMAP_STATUS_WEIGHT.get(r["own_company_status"], 0.5)
+        results.append({
+            **r,
+            "analyzed_count": len(cat_records),
+            "last_analyzed_at": cat_records[0].get("analyzed_at") if cat_records else None,
+            "recent_part_numbers": [x.get("part_number") for x in cat_records[:3]],
+            "roadmap_score": round(r["whitespace_score"] * status_weight, 3),
+        })
+
+    results.sort(key=lambda x: x["roadmap_score"], reverse=True)
+    return results
