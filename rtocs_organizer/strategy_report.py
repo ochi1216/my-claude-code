@@ -207,6 +207,21 @@ def _sec_analyst(s):
         {gap_html}{note_html}"""
 
 
+_OUTLOOK_BADGE = {
+    "強気": ("🟢 強気(上昇期待)", "#f0fff4", "#9ae6b4"),
+    "中立": ("⚪ 中立", "#edf2f7", "#e2e8f0"),
+    "弱気": ("🔴 弱気(下落リスク)", "#fff5f5", "#feb2b2"),
+    "不透明": ("🟡 不透明", "#fffff0", "#faf089"),
+}
+
+
+def _outlook_badge(direction):
+    for key, val in _OUTLOOK_BADGE.items():
+        if key in (direction or ""):
+            return val
+    return (direction or "—", "#edf2f7", "#e2e8f0")
+
+
 def _sec_market(s, market_data, target_company=""):
     chart = _price_chart_b64(market_data)
     chart_html = f'<img class="chart" src="data:image/png;base64,{chart}">' if chart else ""
@@ -247,6 +262,38 @@ def _sec_market(s, market_data, target_company=""):
       <td>{_fmt_num(md.get('free_cash_flow'), md.get('currency',''))}</td></tr></table>
     """ if md and any(md.get(k) is not None for k in
                        ("total_cash", "total_debt", "debt_to_equity", "free_cash_flow")) else ""
+
+    # 今後の方向性（軸: 単なる現状データの説明で終わらせず、方向性・リスク・カタリストまで示す）
+    outlook = s.get("outlook") or {}
+    outlook_html = ""
+    if outlook:
+        label, bg, border = _outlook_badge(outlook.get("direction"))
+        outlook_html = f"""
+          <div class="item" style="margin-top:10px;"><strong>📈 今後の見立て:</strong>
+            <span class="badge" style="background:{bg};border:1px solid {border};">{_e(label)}</span>
+            <span class="badge">想定期間: {_e(outlook.get('time_horizon'))}</span>
+          </div>
+          <div class="highlight-box">{_e(outlook.get('rationale'))}</div>
+        """
+
+    risks = s.get("key_risks") or []
+    risks_html = ""
+    if risks:
+        rows = "".join(
+            f"<tr><td>{_e(r.get('risk'))}</td><td>{_e(r.get('trigger'))}</td><td>{_e(r.get('potential_impact'))}</td></tr>"
+            for r in risks)
+        risks_html = (f'<div class="item" style="margin-top:10px;"><strong>⚠️ 想定リスク:</strong></div>'
+                      f'<table><tr><th>リスク</th><th>顕在化の条件</th><th>想定される影響</th></tr>{rows}</table>')
+
+    catalysts = s.get("catalysts") or []
+    catalysts_html = ""
+    if catalysts:
+        rows = "".join(
+            f"<tr><td>{_e(c.get('event'))}</td><td>{_e(c.get('expected_timing'))}</td><td>{_e(c.get('potential_impact'))}</td></tr>"
+            for c in catalysts)
+        catalysts_html = (f'<div class="item" style="margin-top:10px;"><strong>📅 今後のカタリスト（株価を動かしうるイベント）:</strong></div>'
+                          f'<table><tr><th>イベント</th><th>想定時期</th><th>想定インパクト</th></tr>{rows}</table>')
+
     return f"""
       {chart_html}{metrics}{source_html}{capacity}
       <div class="item"><strong>バリュエーション:</strong> {_e(s.get('valuation_view'))}</div>
@@ -255,6 +302,7 @@ def _sec_market(s, market_data, target_company=""):
       <div class="highlight-box">💰 資金余力（M&A・大規模投資の裏付け）: {_e(s.get('financial_capacity_note'))}</div>
       <div class="item"><strong>市場の期待/懸念:</strong> {_e(s.get('market_expectation'))}</div>
       <div class="item"><strong>特筆指標:</strong> {_e(s.get('key_metrics_comment'))}</div>
+      {outlook_html}{risks_html}{catalysts_html}
     """
 
 

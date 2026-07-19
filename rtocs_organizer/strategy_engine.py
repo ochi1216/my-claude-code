@@ -519,7 +519,8 @@ class StrategyEngine:
             result["market_data"] = md
             out = self.client.generate_json(
                 P.STAGE2_MARKET.format(company=company_name,
-                                       market_data=_market_data_for_prompt(md)),
+                                       market_data=_market_data_for_prompt(md),
+                                       context_summary=target_summary),
                 stage="market")
             return out
         self._run_stage("market", labels["market"], stage2, stages)

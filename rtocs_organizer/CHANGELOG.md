@@ -2,6 +2,21 @@
 
 このフォルダ内の変更履歴。バージョンアップ時は旧ファイルを残したまま新ファイルを追加し、ここに変更点を追記する。
 
+## [20260719_02] - 2026-07-19
+
+**変更ファイル:** `strategy_prompts.py`, `strategy_engine.py`, `strategy_report.py`, `README.md`
+**追加ファイル:** `rtocs_dashboard_20260719_02.py`（`20260719_01`からのコピー＋バージョン更新。旧版はそのまま残置）
+
+ユーザーより「株式市場分析が現状データの表示だけで、今後の方向性やリスク分析が無い」との指摘があり対応。追加のAPI呼び出しは発生しない（既存の株式市場分析ステージのプロンプト強化のみ）:
+
+- `STAGE2_MARKET`に、直近ニュース・アナリスト洞察・マクロ/技術トレンドの分析結果（既存ステージの出力、`context_summary`として新たに投入）を統合させ、単なる現状データの説明で終わらせない指示を追加
+- 出力スキーマに以下を新設:
+  - `outlook`: `{{direction: 強気/中立/弱気/不透明, time_horizon, rationale}}` — バリュエーション・トレンド・アナリスト見解・マクロトレンドを統合した今後の方向性の見立て
+  - `key_risks`: `[{{risk, trigger, potential_impact}}]` — 見立てを崩しうる具体的なリスク要因（2〜4件）
+  - `catalysts`: `[{{event, expected_timing, potential_impact}}]` — 株価を動かしうる今後のイベント（1〜3件）
+- `strategy_engine.py`のstage2()が、これまで会社分析結果のみだった`market_data`に加えて、newsステージ以降で構築済みの`target_summary`（ニュース・アナリスト・マクロの要約）を`STAGE2_MARKET`に渡すよう変更
+- レポートの株式市場分析カードに、色分けされた「今後の見立て」バッジ・想定リスクの表・カタリストの表を追加。旧バージョンの結果データ（`outlook`等のフィールドが無い）でも空セクションを出さず後方互換
+
 ## [20260719_01] - 2026-07-19
 
 **変更ファイル:** `strategy_prompts.py`, `strategy_engine.py`, `strategy_report.py`, `README.md`
