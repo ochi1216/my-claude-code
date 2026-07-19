@@ -70,8 +70,24 @@ def _source_badge_html(stage_dict):
             f'{note_html}</div>')
 
 
+def _grounding_sources_html(stage_dict):
+    """検索グラウンディングが実際に参照したURL（grounding_sources、APIのメタデータ由来。
+    LLM生成のURLではないためハルシネーションしない）を出典リンクとして表示する。無ければ何も出さない。
+    """
+    sources = stage_dict.get("grounding_sources")
+    if not sources:
+        return ""
+    links = "".join(
+        f'<a href="{_e(src.get("url"))}" target="_blank" rel="noopener noreferrer" '
+        f'style="margin-right:12px;display:inline-block;">🔗 {_e(src.get("title") or src.get("domain") or src.get("url"))}</a>'
+        for src in sources[:8] if src.get("url"))
+    if not links:
+        return ""
+    return f'<div class="skip-box" style="margin-top:8px;">参照元（検索結果）: {links}</div>'
+
+
 def _guard(stage_dict, body_fn):
-    """error/skippedを共通処理し、正常時は本体HTML＋出典確度バッジを描画する"""
+    """error/skippedを共通処理し、正常時は本体HTML＋出典確度バッジ＋参照元リンクを描画する"""
     if not isinstance(stage_dict, dict):
         return f'<div class="skip-box">データ形式が不正です</div>'
     if "error" in stage_dict:
@@ -79,7 +95,7 @@ def _guard(stage_dict, body_fn):
     if "skipped" in stage_dict:
         return f'<div class="skip-box">⏩ {_e(stage_dict["skipped"])}</div>'
     try:
-        return body_fn(stage_dict) + _source_badge_html(stage_dict)
+        return body_fn(stage_dict) + _source_badge_html(stage_dict) + _grounding_sources_html(stage_dict)
     except Exception as e:
         return f'<div class="error-box">❌ 描画エラー: {_e(e)}</div>'
 
@@ -191,17 +207,37 @@ def _sec_analyst(s):
         {gap_html}{note_html}"""
 
 
-def _sec_market(s, market_data):
+def _sec_market(s, market_data, target_company=""):
     chart = _price_chart_b64(market_data)
     chart_html = f'<img class="chart" src="data:image/png;base64,{chart}">' if chart else ""
     md = market_data or {}
+
+    # 後方互換: 旧バージョンのdividend_yield(小数)しか無いデータでも表示できるようにする
+    div_pct = md.get('dividend_yield_pct')
+    if div_pct is None and md.get('dividend_yield') is not None:
+        raw = md.get('dividend_yield')
+        div_pct = raw * 100 if raw < 1 else raw
+
     metrics = f"""
       <table><tr><th>ティッカー</th><th>時価総額</th><th>PER</th><th>PBR</th><th>配当利回り</th><th>直近株価</th></tr>
       <tr><td>{_e(md.get('ticker'))}</td><td>{_fmt_num(md.get('market_cap'), md.get('currency',''))}</td>
       <td>{_fmt_num(md.get('trailing_pe'))}</td><td>{_fmt_num(md.get('price_to_book'))}</td>
-      <td>{_fmt_num((md.get('dividend_yield') or 0)*100 if md.get('dividend_yield') else None,'%')}</td>
+      <td>{_fmt_num(div_pct,'%')}</td>
       <td>{_fmt_num(md.get('last_price'), md.get('currency',''))}</td></tr></table>
     """ if md else ""
+
+    # ティッカー誤認防止: 取得元の企業名・出典リンクを表示し、対象企業名との一致度が低い場合は警告する
+    source_html = ""
+    if md.get("ticker"):
+        link = (f'<a href="{_e(md.get("source_url", ""))}" target="_blank" rel="noopener noreferrer">'
+                f'{_e(md.get("matched_name") or md.get("ticker"))} ({_e(md.get("ticker"))}) ↗</a>')
+        if md.get("name_match_confidence") == "low":
+            source_html = (f'<div class="error-box">⚠️ 取得したティッカー（{_e(md.get("ticker"))}）の企業名'
+                            f'「{_e(md.get("matched_name"))}」が対象企業「{_e(target_company)}」'
+                            f'と一致しない可能性があります。以下のリンクで実際の取得元を必ず確認してください: {link}</div>')
+        else:
+            source_html = f'<div class="skip-box">📊 データ取得元: {link}（Yahoo Finance）</div>'
+
     # 軸1-⑤: 財務の実行可能性データ（手元資金・負債・FCF）
     capacity = f"""
       <table><tr><th>手元資金</th><th>総負債</th><th>負債資本比率</th><th>フリーキャッシュフロー</th></tr>
@@ -212,7 +248,7 @@ def _sec_market(s, market_data):
     """ if md and any(md.get(k) is not None for k in
                        ("total_cash", "total_debt", "debt_to_equity", "free_cash_flow")) else ""
     return f"""
-      {chart_html}{metrics}{capacity}
+      {chart_html}{metrics}{source_html}{capacity}
       <div class="item"><strong>バリュエーション:</strong> {_e(s.get('valuation_view'))}</div>
       <div class="item"><strong>株価トレンド:</strong> {_e(s.get('price_trend_view'))}</div>
       <div class="item"><strong>財務健全性:</strong> {_e(s.get('financial_health'))}</div>
@@ -385,7 +421,7 @@ def generate_strategy_report(result, out_dir=None):
         card("📊 アナリスト洞察・経営陣メッセージ", _guard(stages.get("analyst", {}), _sec_analyst)),
         card("🌊 マクロ・技術トレンド", _guard(stages.get("macro", {}), _sec_macro)),
         card("📈 株式市場分析", _guard(stages.get("market", {}),
-                                       lambda s: _sec_market(s, result.get("market_data")))),
+                                       lambda s: _sec_market(s, result.get("market_data"), disp_name))),
         card("🌐 業界・競合分析", _guard(stages.get("industry", {}), _sec_industry)),
         card("📚 他業種RTOCS事例分析",
              _sec_cases(stages.get("retrieve", {}), stages.get("cases", {}),

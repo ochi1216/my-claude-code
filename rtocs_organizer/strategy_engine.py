@@ -64,6 +64,34 @@ def find_previous_report(disp_name, reports_dir=None, exclude_path=None):
     return None, None
 
 
+def _extract_grounding_sources(response):
+    """Google Search Groundingが実際に参照したURLを、レスポンスのgrounding_metadataから
+    抽出する。LLMにURLをテキストとして生成させると存在しないURLをハルシネーションする
+    リスクがあるため、API自体が返す検証可能なメタデータ（candidates[].grounding_metadata.
+    grounding_chunks[].web.{uri,title,domain}）のみを使う。
+    """
+    sources = []
+    seen = set()
+    try:
+        for cand in (getattr(response, "candidates", None) or []):
+            gm = getattr(cand, "grounding_metadata", None)
+            if not gm:
+                continue
+            for chunk in (getattr(gm, "grounding_chunks", None) or []):
+                web = getattr(chunk, "web", None)
+                uri = getattr(web, "uri", None) if web else None
+                if uri and uri not in seen:
+                    seen.add(uri)
+                    sources.append({
+                        "title": getattr(web, "title", "") or "",
+                        "url": uri,
+                        "domain": getattr(web, "domain", "") or "",
+                    })
+    except Exception:
+        pass
+    return sources
+
+
 def _strip_code_fence(text):
     text = text.strip()
     if text.startswith("```json"):
@@ -157,6 +185,9 @@ class GeminiClient:
 
         グラウンディングとJSONモード(response_mime_type)は併用できないため、
         プロンプト側にJSON形式での出力を指示し、コードフェンス除去＋json.loadsでパースする。
+        レスポンスのgrounding_metadataから実際に参照されたURLを抽出し、"grounding_sources"
+        フィールドとして結果に追加する（LLMにURLを生成させるのではなく、APIが返す検証可能な
+        メタデータを使うため、出典リンクのハルシネーションが起きない）。
         """
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY が設定されていません。")
@@ -173,22 +204,77 @@ class GeminiClient:
                 self._add_cost(stage, response)
                 if not response.text:
                     raise ValueError("空の応答")
-                return json.loads(_strip_code_fence(response.text))
+                parsed = json.loads(_strip_code_fence(response.text))
+                if isinstance(parsed, dict):
+                    sources = _extract_grounding_sources(response)
+                    if sources:
+                        parsed["grounding_sources"] = sources
+                return parsed
             except Exception as e:
                 last_err = e
         raise ValueError(f"Gemini(grounding)呼び出し失敗: {last_err}")
 
 
-def fetch_market_data(ticker_candidates):
+def _normalize_company_name(name):
+    """企業名の突合用に、法人格・記号を除去して正規化する（大文字小文字・空白も無視）。"""
+    if not name:
+        return ""
+    name = str(name).lower()
+    for suffix in ["株式会社", "（株）", "(株)", "co., ltd.", "co.,ltd.", "co. ltd", "corporation",
+                   "corp.", "corp", "inc.", "inc", "ltd.", "ltd", "k.k.", "kabushiki kaisha",
+                   "group", "holdings", "holding", "plc", "s.a.", "n.v."]:
+        name = name.replace(suffix, "")
+    return re.sub(r"[^a-z0-9一-鿿぀-ヿ]", "", name)
+
+
+def _name_match_confidence(target_name_en, fetched_name):
+    """yfinanceが返した企業名(longName/shortName)と、対象企業の英語名候補を突合する。
+
+    軸「ティッカー誤認の防止」: Geminiが推測したticker_candidatesが本当に対象企業のものかを
+    機械的にチェックできる唯一の手がかりが、証券データベース側の企業名。完全一致は期待できない
+    ため、正規化後の部分一致で判定する。どちらか一方が無ければ"unknown"（誤判定で正しい候補を
+    弾かないよう、確信が持てない場合は"low"にしない）。
+    """
+    a, b = _normalize_company_name(target_name_en), _normalize_company_name(fetched_name)
+    if not a or not b:
+        return "unknown"
+    if a == b or a in b or b in a:
+        return "high"
+    return "low"
+
+
+def _normalize_dividend_yield_pct(raw):
+    """Yahoo Financeは2024年頃、dividendYieldの単位を「小数(0.0234=2.34%)」から
+    「%そのもの(2.34)」に変更した（yfinance自体は無加工でパススルーするため、旧仕様のまま
+    ダッシュボード側で無条件に100倍すると2.34%が234%と表示される不具合が生じていた）。
+    実際の利回りが100%を超えることは通常ないため、1未満なら小数形式とみなして100倍し、
+    1以上ならすでに%形式とみなす。
+    """
+    if raw is None:
+        return None
+    try:
+        raw = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return raw * 100 if raw < 1 else raw
+
+
+def fetch_market_data(ticker_candidates, company_name_en=None):
     """yfinanceで株価・財務データを取得する。全滅ならNone（=未上場扱い）。
 
     取得できないフィールドは黙って欠落させる（全フィールドがオプション）。
+    company_name_enを指定すると、取得できたデータの企業名(matched_name)と突合して
+    name_match_confidenceを付与する。confidenceが"low"（対象企業と一致しない可能性が高い）の
+    候補は保留し、他の候補で"low"以外が見つかればそちらを優先する（誤ったティッカーの
+    データを誤って採用するリスクを下げる）。全候補が"low"の場合は、何も返さないより
+    ⚠️付きで返す方が有用なため、最初に取得できた候補を返す。
     """
     try:
         import yfinance as yf
     except ImportError:
         return None
 
+    fallback = None
     for ticker_symbol in ticker_candidates or []:
         try:
             t = yf.Ticker(ticker_symbol)
@@ -227,13 +313,16 @@ def fetch_market_data(ticker_candidates):
                 v = info.get(key)
                 return float(v) if isinstance(v, (int, float)) else None
 
-            return {
+            matched_name = info.get("longName") or info.get("shortName") or ""
+            confidence = _name_match_confidence(company_name_en, matched_name)
+
+            data = {
                 "ticker": ticker_symbol,
                 "currency": info.get("currency", ""),
                 "market_cap": _num("marketCap"),
                 "trailing_pe": _num("trailingPE"),
                 "price_to_book": _num("priceToBook"),
-                "dividend_yield": _num("dividendYield"),
+                "dividend_yield_pct": _normalize_dividend_yield_pct(_num("dividendYield")),
                 "fifty_two_week_high": _num("fiftyTwoWeekHigh"),
                 "fifty_two_week_low": _num("fiftyTwoWeekLow"),
                 "last_price": round(float(closes.iloc[-1]), 2),
@@ -244,10 +333,20 @@ def fetch_market_data(ticker_candidates):
                 "free_cash_flow": _num("freeCashflow"),
                 "price_history": price_history,
                 "financials": financials,
+                # ティッカー誤認防止・出典リンク（ユーザーがワンクリックで裏取りできるように）
+                "matched_name": matched_name,
+                "name_match_confidence": confidence,
+                "source_url": f"https://finance.yahoo.com/quote/{ticker_symbol}",
             }
+
+            if confidence == "low":
+                if fallback is None:
+                    fallback = data
+                continue
+            return data
         except Exception:
             continue
-    return None
+    return fallback
 
 
 # 軸4-②: 戦略提言のコスト規模語彙と資金余力(軸1-⑤で取得済みの財務データ)を粗く比較する
@@ -414,7 +513,7 @@ class StrategyEngine:
                 return {"skipped": "会社分析が失敗したためスキップ"}
             if not s1.get("is_listed"):
                 return {"skipped": "未上場（または上場確認不可）のため定量分析をスキップ"}
-            md = self.market_fetcher(s1.get("ticker_candidates", []))
+            md = self.market_fetcher(s1.get("ticker_candidates", []), s1.get("official_name_en"))
             if not md:
                 return {"skipped": "株価データを取得できなかったためスキップ（ティッカー未解決）"}
             result["market_data"] = md

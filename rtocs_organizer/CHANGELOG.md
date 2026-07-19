@@ -2,6 +2,25 @@
 
 このフォルダ内の変更履歴。バージョンアップ時は旧ファイルを残したまま新ファイルを追加し、ここに変更点を追記する。
 
+## [20260719_01] - 2026-07-19
+
+**変更ファイル:** `strategy_prompts.py`, `strategy_engine.py`, `strategy_report.py`, `README.md`
+**追加ファイル:** `rtocs_dashboard_20260719_01.py`（`20260715_14`からのコピー＋バージョン更新。旧版はそのまま残置）
+
+**緊急バグ修正**。ユーザーより「株式情報の参照先データ、特に数値データが間違っている」との報告があり調査した結果、2つの根本原因が判明:
+
+1. **ティッカー誤認**: 会社分析ステージ(`STAGE1_COMPANY`)がGeminiの知識に基づいて推測する`ticker_candidates`は、実際に対象企業のものかを一切検証せず、株価データが取得できた（履歴が空でない）だけで無条件に採用していた。同名・類似名の別会社や親子会社違いのティッカーを誤って掴むと、PER/PBR/株価等の数値が丸ごと別会社のものになる
+2. **配当利回りの単位変更未対応**: Yahoo Financeは2024年頃、`dividendYield`の単位を「小数(0.0234=2.34%)」から「%そのもの(2.34)」に変更したが、`strategy_report.py`側は旧仕様のまま無条件に100倍していたため、実際の利回りの100倍の値（例: 2.34%が234%）が表示されていた
+
+**対応内容:**
+
+- `STAGE1_COMPANY`の出力に`official_name_en`（英語表記の正式社名）を追加。ティッカー推測の確信が持てない場合は無理に候補を挙げず空配列にするよう指示を強化
+- `strategy_engine.py`の`fetch_market_data()`が、取得した企業名(yfinanceの`longName`)と`official_name_en`を正規化して突合し、`name_match_confidence`(high/low/unknown)を付与。一致しない候補(low)は保留して次の候補を試し、他候補が無い場合のみ⚠️付きで返す（`_name_match_confidence()`, `_normalize_company_name()`新規追加）
+- `_normalize_dividend_yield_pct()`を新規追加。値が1未満なら小数形式とみなして100倍、1以上ならすでに%形式とみなす自動判定に変更（`dividend_yield`→`dividend_yield_pct`にフィールド名変更。旧フィールドしか無い場合の後方互換表示も維持）
+- 株式市場分析カードに、実際の取得元（Yahoo Financeの該当ティッカーページへの直接リンク）と取得企業名を常時表示。名称不一致時は⚠️警告ボックスで明示
+- `GeminiClient.generate_grounded_json()`が、Google Search Groundingのレスポンスから実際に参照したURL（`grounding_metadata.grounding_chunks[].web`）を`grounding_sources`として抽出するようにした（`_extract_grounding_sources()`新規追加）。LLMにURLを生成させるとハルシネーションのリスクがあるため、API自体が返す検証可能なメタデータのみを使う
+- レポートの`_guard()`共通処理に`grounding_sources`の描画を追加。ニュース・アナリスト洞察・マクロトレンドの各カードに「参照元（検索結果）」リンクが自動表示される（グラウンディングが機能しなかった場合は非表示のまま後方互換）
+
 ## [20260715_14] - 2026-07-18
 
 **変更ファイル:** `strategy_prompts.py`, `strategy_engine.py`, `strategy_report.py`, `README.md`
