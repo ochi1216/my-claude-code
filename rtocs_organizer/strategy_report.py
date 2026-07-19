@@ -10,6 +10,7 @@ strategy_engine.run_pipeline() の結果dictから、自己完結の1枚HTMLを�
 import os
 import io
 import re
+import glob
 import json
 import html
 import base64
@@ -430,6 +431,78 @@ def _sec_progress(s):
       <div class="item"><strong>戦略の継続性:</strong> {_e(s.get('strategy_continuity'))}</div>
       <div class="highlight-box" style="border-left-color:#d69e2e;background:#fffbeb;">💡 {_e(s.get('recommendation'))}</div>
     """
+
+
+def list_saved_reports(out_dir=None):
+    """data/strategy_reports/ に保存された過去の戦略分析レポート一覧を、生成日時の新しい順で返す。
+
+    各レコード: {{html_path, json_path(無ければNone), filename, company, generated_at, mode,
+    cost_jpy, executive_summary}}
+
+    JSONサイドカー（軸5-①で2026-07-18に導入）があれば会社名・生成日時・モード・コスト・
+    エグゼクティブサマリーを読み取る。JSONサイドカー導入前に生成されたHTMLのみのレポートも
+    一覧から漏れないよう、ファイル名（`Strategy_{{企業名}}_{{yyyymmdd_HHMMSS}}.html`）と
+    ファイルの更新日時から会社名・生成日時を推定するフォールバックを持つ。
+    """
+    out_dir = out_dir or DEFAULT_OUT_DIR
+    if not os.path.isdir(out_dir):
+        return []
+
+    records = []
+    for html_path in glob.glob(os.path.join(out_dir, "Strategy_*.html")):
+        base = html_path[:-len(".html")]
+        json_path = base + ".json"
+        has_json = os.path.exists(json_path)
+        record = {
+            "html_path": html_path,
+            "json_path": json_path if has_json else None,
+            "filename": os.path.basename(html_path),
+            "company": None,
+            "generated_at": "",
+            "mode": "",
+            "cost_jpy": None,
+            "executive_summary": "",
+        }
+        if has_json:
+            try:
+                with open(json_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                stages = data.get("stages", {}) or {}
+                company_stage = stages.get("company", {}) or {}
+                strategy_stage = stages.get("strategy", {}) or {}
+                record["company"] = (
+                    (company_stage.get("official_name") if isinstance(company_stage, dict) else None)
+                    or data.get("company"))
+                record["generated_at"] = data.get("generated_at", "")
+                record["mode"] = data.get("mode", "")
+                record["cost_jpy"] = (data.get("costs") or {}).get("total_jpy")
+                if isinstance(strategy_stage, dict):
+                    record["executive_summary"] = strategy_stage.get("executive_summary", "")
+            except Exception:
+                pass  # 壊れたJSONでもファイル名からのフォールバックで一覧には残す
+
+        if not record["company"]:
+            m = re.match(r"Strategy_(.+)_(\d{8}_\d{6})$", os.path.basename(base))
+            if m:
+                record["company"] = m.group(1)
+                if not record["generated_at"]:
+                    try:
+                        record["generated_at"] = datetime.strptime(m.group(2), "%Y%m%d_%H%M%S").isoformat()
+                    except ValueError:
+                        pass
+            else:
+                record["company"] = os.path.basename(base)
+
+        if not record["generated_at"]:
+            try:
+                record["generated_at"] = datetime.fromtimestamp(os.path.getmtime(html_path)).isoformat()
+            except Exception:
+                record["generated_at"] = ""
+
+        records.append(record)
+
+    records.sort(key=lambda r: r["generated_at"], reverse=True)
+    return records
 
 
 def generate_strategy_report(result, out_dir=None):
