@@ -422,6 +422,46 @@ def _sec_strategy(s):
     return items + devils_html + closing_html
 
 
+_PERSONA_ICON = {
+    "CFO": "💰",
+    "CTO": "💻",
+    "アクティビスト投資家": "📈",
+    "破壊者": "🚀",
+}
+
+
+def _persona_icon(name):
+    for key, icon in _PERSONA_ICON.items():
+        if key in (name or ""):
+            return icon
+    return "🎭"
+
+
+def _sec_personas(s):
+    """軸2-⑤: 複数ペルソナ討議（CFO/CTO/アクティビスト投資家/破壊者）。選択制のため、
+    このステージが実行されなかった結果データには"personas"キー自体が存在しない
+    （呼び出し側のgenerate_strategy_reportがカードごと出さない）。
+    """
+    blocks = ""
+    for p in s.get("persona_reactions", []) or []:
+        icon = _persona_icon(p.get("persona"))
+        rows = "".join(
+            f"<tr><td>{_e(r.get('strategy_title'))}</td><td>{_e(r.get('comment'))}</td>"
+            f"<td>{_e(r.get('concern_level'))}</td></tr>"
+            for r in p.get("reactions", []) or [])
+        table_html = (f'<table><tr><th>戦略</th><th>コメント</th><th>懸念度</th></tr>{rows}</table>'
+                      if rows else '<div class="skip-box">コメントなし</div>')
+        blocks += f"""
+          <div class="item" style="margin-top:14px;"><strong>{icon} {_e(p.get('persona'))}</strong></div>
+          {table_html}
+          <div class="highlight-box">👉 {_e(p.get('overall_recommendation'))}</div>
+        """
+    convergence = s.get("convergence_note", "")
+    convergence_html = (f'<div class="highlight-box" style="border-left-color:#d69e2e;background:#fffbeb;">'
+                        f'🤝 {_e(convergence)}</div>' if convergence else "")
+    return (blocks or '<div class="skip-box">討議データなし</div>') + convergence_html
+
+
 def _sec_progress(s):
     """軸5-①: 前回分析との比較（進捗トラッキング）"""
     return f"""
@@ -549,6 +589,8 @@ def generate_strategy_report(result, out_dir=None):
                         result.get("selected_case_records"))),
         card("🔍 課題分析", _guard(stages.get("issues", {}), _sec_issues)),
         card("🎯 戦略提言（大前式）", _guard(stages.get("strategy", {}), _sec_strategy), "strategy"),
+        card("🎭 複数ペルソナ討議（CFO/CTO/投資家/破壊者）", _guard(stages.get("personas", {}), _sec_personas))
+        if "personas" in stages else "",
         card("📈 前回分析との比較（進捗トラッキング）", _guard(stages.get("progress", {}), _sec_progress))
         if "progress" in stages else "",
     ]

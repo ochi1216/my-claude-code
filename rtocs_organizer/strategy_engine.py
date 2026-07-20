@@ -36,7 +36,8 @@ STAGE_LABELS = [
     ("cases", "⑧ 他業種事例分析"),
     ("issues", "⑨ 課題分析"),
     ("strategy", "⑩ 戦略策定"),
-    ("progress", "⑪ 前回分析との比較（進捗トラッキング）"),
+    ("personas", "⑪ 複数ペルソナ討議（CFO/CTO/投資家/破壊者）"),
+    ("progress", "⑫ 前回分析との比較（進捗トラッキング）"),
 ]
 
 DEFAULT_REPORTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "strategy_reports")
@@ -423,7 +424,8 @@ class StrategyEngine:
             stages[key] = {"error": f"取得失敗: {e}"}
             self.progress_cb(key, label, "error")
 
-    def run_pipeline(self, company_name, user_constraints=None, stop_before_issues=False):
+    def run_pipeline(self, company_name, user_constraints=None, stop_before_issues=False,
+                     enable_persona_debate=False):
         """user_constraints: 経営者自身が明示する制約条件（任意のフリーテキスト）。
         課題分析・戦略策定（ディープモードの改訂パス含む）に必ず反映させる。
 
@@ -431,6 +433,10 @@ class StrategyEngine:
         デフォルトOFF・選択制）、会社分析〜他業種事例分析までの前半ステージのみ実行して
         結果を返す。呼び出し側が内容を確認・修正した後、continue_pipeline() に同じ結果
         dictを渡すことで課題分析・戦略策定の後半ステージを実行できる。
+
+        enable_persona_debate=True の場合（軸2-⑤: 複数ペルソナ討議。デフォルトOFF・選択制）、
+        戦略策定の直後にCFO/CTO/アクティビスト投資家/破壊者の4視点で戦略提言を討議させる
+        追加ステージを実行する（追加API呼び出し1回）。
         """
         stages = {}
         user_constraints = (user_constraints or "").strip()
@@ -588,6 +594,7 @@ class StrategyEngine:
             result["_pending_continuation"] = {
                 "company_name": company_name,
                 "constraints_block": constraints_block,
+                "enable_persona_debate": enable_persona_debate,
             }
             result["_stopped_before_issues"] = True
             result["costs"] = {
@@ -597,7 +604,7 @@ class StrategyEngine:
             }
             return result
 
-        self._run_late_stages(stages, result, company_name, constraints_block)
+        self._run_late_stages(stages, result, company_name, constraints_block, enable_persona_debate)
         return result
 
     def continue_pipeline(self, result, additional_note=None):
@@ -620,11 +627,14 @@ class StrategyEngine:
             )
             result["user_constraints"] = "\n".join(
                 s for s in (result.get("user_constraints", ""), additional_note) if s).strip()
-        self._run_late_stages(result["stages"], result, ctx["company_name"], constraints_block)
+        self._run_late_stages(result["stages"], result, ctx["company_name"], constraints_block,
+                              ctx.get("enable_persona_debate", False))
         return result
 
-    def _run_late_stages(self, stages, result, company_name, constraints_block):
-        """⑨課題分析・⑩戦略策定（ディープモードは批判・改訂パス付き）を実行し、costsを確定する。"""
+    def _run_late_stages(self, stages, result, company_name, constraints_block,
+                         enable_persona_debate=False):
+        """⑨課題分析・⑩戦略策定（ディープモードは批判・改訂パス付き）・⑪複数ペルソナ討議（選択制）を
+        実行し、costsを確定する。"""
         labels = dict(STAGE_LABELS)
 
         def _all_analysis():
@@ -661,7 +671,25 @@ class StrategyEngine:
         self._run_stage("strategy", labels["strategy"], stage7, stages)
         _assess_financial_feasibility(stages.get("strategy", {}), result.get("market_data"))
 
-        # ⑪ 前回分析との比較（軸5-①: 進捗トラッキング。同企業の過去レポートが見つかった場合のみ実行）
+        # ⑪ 複数ペルソナ討議（軸2-⑤: 選択制・デフォルトOFF。ONの場合のみ実行し、OFFの場合は
+        # stagesに"personas"キー自体が存在しない＝レポート側でカードごと非表示になる）
+        if enable_persona_debate:
+            def stage_personas():
+                strategy_out = stages.get("strategy", {})
+                if not isinstance(strategy_out, dict) or not strategy_out.get("strategies"):
+                    return {"skipped": "戦略提言が生成されなかったため討議をスキップ"}
+                strategies_summary = json.dumps(
+                    [{"title": s.get("title"), "mode": s.get("mode"), "rationale": s.get("rationale"),
+                      "risks": s.get("risks"), "feasibility_flag": s.get("feasibility_flag")}
+                     for s in strategy_out.get("strategies", [])],
+                    ensure_ascii=False)
+                return self.client.generate_json(
+                    P.STAGE_PERSONA_DEBATE.format(company=company_name,
+                                                  strategies_summary=strategies_summary),
+                    stage="personas")
+            self._run_stage("personas", labels["personas"], stage_personas, stages)
+
+        # ⑫ 前回分析との比較（軸5-①: 進捗トラッキング。同企業の過去レポートが見つかった場合のみ実行）
         def stage_progress():
             s1 = stages.get("company", {})
             disp_name = (s1.get("official_name", company_name)
