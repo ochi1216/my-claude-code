@@ -9,9 +9,6 @@ Private Const APP_NAME As String = "OutlookSearchFolderViewToggle"
 Private Const SECTION_REGISTRY As String = "Registry"
 Private Const SECTION_GLOBAL As String = "Global"
 Private Const DEDICATED_VIEW_NAME As String = "SFVT_Managed"
-' Outlookの表示フィルター構文はVBAの True/False キーワードを受け付けないため、
-' Yes/Noフィールドは 1/0 で指定する。
-Private Const UNREAD_FILTER As String = "[Unread] = 1"
 
 ' FolderSwitch は連続発火しうるため、登録済みかどうかをO(1)で
 ' 判定できるようメモリ上にも索引を持つ。
@@ -21,8 +18,11 @@ Public Function DedicatedViewName() As String
     DedicatedViewName = DEDICATED_VIEW_NAME
 End Function
 
+' 簡易記法([Unread] = 0/1)がこの環境の解析エンジンで
+' 受け付けられなかったため、Outlookが内部で使う正式なプロパティ名を
+' 直接指定するDASL記法に変更した。
 Public Function UnreadFilterText() As String
-    UnreadFilterText = UNREAD_FILTER
+    UnreadFilterText = "@SQL=" & Chr(34) & "urn:schemas:httpmail:read" & Chr(34) & " = 0"
 End Function
 
 ' StoreID・EntryIDは長い16進文字列で、そのままレジストリの「値の名前」に
