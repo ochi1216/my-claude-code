@@ -68,17 +68,24 @@ Public Sub RegisterCurrentFolder()
     originalViewName = originalView.Name
     Dim originalFilter As String
     originalFilter = originalView.Filter
+    Dim originalXML As String
+    originalXML = originalView.XML
+    Dim originalViewType As OlViewType
+    originalViewType = originalView.ViewType
 
     ' 専用ビューを複製する。元のビュー(originalView)はこの後も
-    ' 一切変更しない。
+    ' 一切変更しない。Viewオブジェクトに複製メソッドは無いため、
+    ' 新規ビューを作成し、XML定義(表示項目・並び順・フィルター等)を
+    ' まるごとコピーする。
     On Error Resume Next
     fld.Views.Item(modSearchFolderRegistry.DedicatedViewName).Delete
     On Error GoTo 0
 
-    originalView.SaveAs modSearchFolderRegistry.DedicatedViewName, olViewSaveOptionThisFolderOnlyMe
-
     Dim dedicatedView As View
-    Set dedicatedView = fld.Views.Item(modSearchFolderRegistry.DedicatedViewName)
+    Set dedicatedView = fld.Views.Add(modSearchFolderRegistry.DedicatedViewName, originalViewType, olViewSaveOptionThisFolderOnlyMe)
+    dedicatedView.XML = originalXML
+    dedicatedView.Save
+
     expl.CurrentView = dedicatedView
 
     modSearchFolderRegistry.RegisterFolder fld, originalViewName, originalFilter
