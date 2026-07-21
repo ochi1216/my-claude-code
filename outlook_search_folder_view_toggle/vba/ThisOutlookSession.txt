@@ -1,0 +1,33 @@
+' ThisOutlookSession は Outlook VBAプロジェクトに最初から存在する特殊モジュール。
+' 新規インポートはできないため、VBAエディタ(Alt+F11)で既存の
+' 「ThisOutlookSession」を開き、このファイルの中身をそのまま貼り付ける。
+
+Option Explicit
+
+Private mWatchers As Collection
+
+Private Sub Application_Startup()
+    Set mWatchers = New Collection
+    AttachWatcher Application.ActiveExplorer
+    modSearchViewController.ApplyStartupMode
+End Sub
+
+Private Sub Application_NewExplorer(ByVal Explorer As Explorer)
+    AttachWatcher Explorer
+End Sub
+
+Private Sub AttachWatcher(ByVal expl As Explorer)
+    If expl Is Nothing Then Exit Sub
+
+    Dim w As New clsExplorerWatcher
+    Set w.WatchedExplorer = expl
+    mWatchers.Add w
+End Sub
+
+' 導入直後、Outlookをすでに起動した状態でコードを貼り付けた場合は
+' Application_Startup が発火しないため、このマクロを一度手動で
+' 実行して初期化する（以後は再起動しても自動的に動く）。
+Public Sub SFVT_ManualInitialize()
+    Application_Startup
+    MsgBox "初期化しました。", vbInformation
+End Sub
