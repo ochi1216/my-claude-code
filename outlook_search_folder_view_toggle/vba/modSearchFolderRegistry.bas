@@ -9,7 +9,9 @@ Private Const APP_NAME As String = "OutlookSearchFolderViewToggle"
 Private Const SECTION_REGISTRY As String = "Registry"
 Private Const SECTION_GLOBAL As String = "Global"
 Private Const DEDICATED_VIEW_NAME As String = "SFVT_Managed"
-Private Const UNREAD_FILTER As String = "[Unread] = True"
+' Outlookの表示フィルター構文はVBAの True/False キーワードを受け付けないため、
+' Yes/Noフィールドは 1/0 で指定する。
+Private Const UNREAD_FILTER As String = "[Unread] = 1"
 
 ' FolderSwitch は連続発火しうるため、登録済みかどうかをO(1)で
 ' 判定できるようメモリ上にも索引を持つ。
