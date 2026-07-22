@@ -27,7 +27,8 @@ my-claude-code/
 ├── consolidated_html_summary_manager_20260708_01.py    ベースライン（統合マネージャー本体）
 ├── consolidated_html_summary_manager_20260711_02.py    スキップモード手動固定の保持機能
 ├── consolidated_html_summary_manager_20260716_01.py    mode4追加・mode2/自動判定変更
-├── consolidated_html_summary_manager_20260722_01.py    mode1のワンショット化（最新版）
+├── consolidated_html_summary_manager_20260722_01.py    mode1のワンショット化
+├── consolidated_html_summary_manager_20260722_02.py    Track 0のGeminiモデル修正（最新版）
 └── docs/
     ├── PROJECT_STATUS.md                               本ファイル
     ├── SESSION_HISTORY.md                               セッション履歴
@@ -147,6 +148,7 @@ handlePartEnd() → 読了後、skipModeに応じて次のcurrentPartを決定 o
 - consolidated_html_summary_manager: ベースライン取り込み、スキップモード手動固定のファイル切替/停止までの保持（VERSION 20260711_02）、mode4（title+summary+conclusion）追加、mode2の見出しのみ読み上げ化、自動判定優先順位の変更（VERSION 20260716_01）、mode1のワンショット化（1カード読了後に直前のモードへ自動復帰。VERSION 20260722_01。別スレッドで開発され、本セッションに取り込み・統合）
 - 本ドキュメント一式（`CLAUDE.md`・`docs/`）の初期セットアップ
 - youtube_summary_listのChromeログインエラー（「Couldn't sign you in」）の原因調査・対処方法の案内（自動操作検知が原因。手動プロファイルログイン＋デスクトップショートカットで解消確認済み）
+- Track 0全体概況生成のGeminiモデル不整合を修正（`gemini-2.0-flash`→`gemini-2.5-flash`、VERSION 20260722_02）
 
 ### 作業中
 
@@ -166,7 +168,7 @@ handlePartEnd() → 読了後、skipModeに応じて次のcurrentPartを決定 o
   - `config/playlists.json`は存在するがコードから未参照（プレイリストIDの実体は`get_playlist_config()`内のハードコード）
   - BATファイルは`dir /b /o-n`の名前降順で最初の1件を実行するため、ファイル命名次第で意図しないバージョンが動く可能性がある
 - 上記のうちHANDOVER記載の「argparse choicesに'V'が未登録」「all_playlists_var初期値」の2件は、`youtube_summary_list_20260711_01.py`時点で修正済みであることを確認済み（詳細は`SESSION_HISTORY.md` S01参照）
-- **Gemini APIモデルの不整合（要確認・consolidated_html_summary_manager）**: オンデマンド生成（ブラウザ側、485行目付近）は`gemini-2.5-flash`/`gemini-2.5-flash-lite`を使用しているが、`_generate_overview_file`（Track 0全体概況生成、Python側、320行目付近）は`gemini-2.0-flash`を使い続けている。越智さん側の記録では「gemini-2.0-flash等の旧モデルはシャットダウン済みで使用禁止」とのことなので、Track 0生成が失敗する可能性がある。**未修正・要対応**（20260722_01時点のコードで実際に確認済み）
+- ~~Gemini APIモデルの不整合~~: `_generate_overview_file`（Track 0全体概況生成、Python側、320行目付近）が`gemini-2.0-flash`のままだった問題は、VERSION 20260722_02で`gemini-2.5-flash`に修正済み
 - **落とし穴カタログ（consolidated_html_summary_manager、実際にハマった不具合の記録）**:
   1. `summary_database.json`キャッシュ: パーサーを修正しても、既にarchive済みのHTMLは再パースされない。「コードは正しいのに表示されない」時はまずDBキャッシュを疑う。対処: DBファイル削除、または対象HTMLをarchiveからSummaryフォルダに戻してbat再実行
   2. JSスコープエラーで全画面真っ白: `renderFileList`のfileループ内で`item`を参照（未定義）→JSエラーで描画全停止。「何も表示されない」時はまずF12コンソール確認
