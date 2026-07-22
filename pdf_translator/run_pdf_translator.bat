@@ -1,87 +1,92 @@
 @echo off
-chcp 65001 >nul 2>&1
-rem PDF Gemini 翻訳ツール 起動用バッチファイル
-rem このファイルをダブルクリックすると、初回のみ仮想環境(venv)を作成して
-rem 依存パッケージをインストールし、ツールを起動します。
+rem PDF Gemini Translator - launcher script.
+rem Double-click this file to set up (first run only: creates a venv and
+rem installs dependencies) and start the tool.
 rem
-rem 日本語Windowsのcmd.exeは既定でShift-JISコードページのため、UTF-8で保存された
-rem このファイル内の日本語テキストを if (...) のような括弧ブロックの中に置くと、
-rem マルチバイト文字の一部が )  などの制御文字として誤解釈され、構文エラーで
-rem ウィンドウが一瞬で閉じることがある。これを避けるため、日本語を含む行は
-rem すべて括弧ブロックの外（goto によるジャンプ先）に置いている。
+rem NOTE: This file intentionally contains ONLY ASCII text. Japanese Windows
+rem cmd.exe reads .bat files using the system codepage (Shift-JIS/CP932),
+rem not UTF-8. A UTF-8-encoded file mixed with Shift-JIS parsing corrupts
+rem multi-byte Japanese bytes together with the ASCII keywords next to them
+rem (e.g. "goto" was being mangled into "oto"), causing cryptic
+rem "not recognized as an internal or external command" errors and an
+rem instant window close. `chcp 65001` does NOT fix this, because it only
+rem changes console output/input encoding, not how cmd.exe parses the
+rem script's own bytes. Keeping this file pure ASCII avoids the problem
+rem entirely, regardless of the Windows locale.
 
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
-rem ファイル名は pdf_translator_yyyymmdd_NN.py の形式（バージョンアップ時も
-rem 旧ファイルは残したまま新ファイルが追加される運用のため、名前順で並べ替えて
-rem 最新（＝辞書順で最後）のファイルを自動的に起動対象にする。
+rem Script files follow pdf_translator_yyyymmdd_NN.py naming (old versions
+rem are kept side by side on upgrade), so pick the newest one by sorting
+rem filenames in descending order (works because the date/seq are
+rem fixed-width, so name order == chronological order).
 set "TARGET_SCRIPT="
 for /f "delims=" %%f in ('dir /b /o-n "pdf_translator_????????_??.py" 2^>nul') do (
     if not defined TARGET_SCRIPT set "TARGET_SCRIPT=%%f"
 )
 if not defined TARGET_SCRIPT goto :no_script
 
-echo 起動対象: %TARGET_SCRIPT%
+echo Target script: %TARGET_SCRIPT%
 
 where python >nul 2>nul
 if errorlevel 1 goto :no_python
 
 if exist venv goto :venv_ready
-echo 初回セットアップ: 仮想環境を作成しています...
+echo First-time setup: creating virtual environment...
 python -m venv venv
 if errorlevel 1 goto :venv_failed
 
 :venv_ready
 call venv\Scripts\activate.bat
 
-echo 依存パッケージを確認しています...
+echo Checking dependencies...
 pip install -q -r requirements.txt
 if errorlevel 1 goto :pip_failed
 
 if "%GEMINI_API_KEY%"=="" goto :warn_no_api_key
 
 :run_tool
-echo PDF Gemini 翻訳ツールを起動します...
+echo Starting PDF Gemini Translator...
 python "%TARGET_SCRIPT%"
 if errorlevel 1 goto :run_failed
 
 goto :end
 
 :no_script
-echo [エラー] pdf_translator_yyyymmdd_NN.py の形式のファイルが見つかりません。
+echo [ERROR] No file matching pdf_translator_yyyymmdd_NN.py was found.
 pause
 exit /b 1
 
 :no_python
-echo [エラー] Python が見つかりません。
-echo Python 3.9以上をインストールし、PATHに追加してから再実行してください。
+echo [ERROR] Python was not found.
+echo Please install Python 3.9 or later and add it to PATH, then try again.
 pause
 exit /b 1
 
 :venv_failed
-echo [エラー] 仮想環境の作成に失敗しました。
+echo [ERROR] Failed to create the virtual environment.
 pause
 exit /b 1
 
 :pip_failed
-echo [エラー] 依存パッケージのインストールに失敗しました。
+echo [ERROR] Failed to install dependencies.
 pause
 exit /b 1
 
 :warn_no_api_key
 echo.
-echo [警告] 環境変数 GEMINI_API_KEY が設定されていません。
-echo このまま起動すると起動直後にエラーになります。
-echo 例: setx GEMINI_API_KEY "your-api-key"
-echo 設定後は一度コマンドプロンプトを開き直す必要があります。
+echo [WARNING] The GEMINI_API_KEY environment variable is not set.
+echo The tool will show an error immediately after it starts.
+echo Example: setx GEMINI_API_KEY "your-api-key"
+echo (After running setx, you must open a NEW Command Prompt window.)
 echo.
 pause
 goto :run_tool
 
 :run_failed
 echo.
-echo [エラー] ツールの実行中に問題が発生しました。上記のメッセージを確認してください。
+echo [ERROR] Something went wrong while running the tool. See the messages above.
 pause
 goto :end
 
