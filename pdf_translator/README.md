@@ -49,7 +49,7 @@ Gemini呼び出しロジック（自動モデル検出・タイムアウト・�
 3. スクリプトを実行する（`pdf_translator_yyyymmdd_NN.py` の最新版）。
 
    ```
-   python pdf_translator_20260722_04.py
+   python pdf_translator_20260722_05.py
    ```
 
 ### 使い方
