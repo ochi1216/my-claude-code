@@ -19,3 +19,5 @@
   - 出力ファイル名は末尾2文字の言語コード付き（`元ファイル名_ja.pdf` / `_en.pdf` など）
 - 既知の制限（スキャン画像PDF非対応、ブロック単位翻訳による文脈欠落の可能性、背景色近似）
   をREADMEに明記。
+- Windows向け起動用バッチファイル `run_pdf_translator.bat` を追加（初回のみvenv作成と
+  `pip install -r requirements.txt` を自動実行、`GEMINI_API_KEY` 未設定時は警告表示）。
