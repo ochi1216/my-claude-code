@@ -26,7 +26,8 @@ my-claude-code/
 ├── youtube_summary_list_20260711_01.py                 お気に入りチャンネル動画をHTML先頭に配置
 ├── consolidated_html_summary_manager_20260708_01.py    ベースライン（統合マネージャー本体）
 ├── consolidated_html_summary_manager_20260711_02.py    スキップモード手動固定の保持機能
-├── consolidated_html_summary_manager_20260716_01.py    mode4追加・mode2/自動判定変更（最新版）
+├── consolidated_html_summary_manager_20260716_01.py    mode4追加・mode2/自動判定変更
+├── consolidated_html_summary_manager_20260722_01.py    mode1のワンショット化（最新版）
 └── docs/
     ├── PROJECT_STATUS.md                               本ファイル
     ├── SESSION_HISTORY.md                               セッション履歴
@@ -55,17 +56,58 @@ my-claude-code/
 - お気に入り／未読／プレイリスト種別によるフィルタ・ソート・既読管理（localStorage）
 - 保持期間（`RETENTION_DAYS=7`）に基づくアーカイブ・自動クリーンアップ
 - Gemini APIによる全体概況（Track 0）生成、RSS記事のオンデマンド結論・ポイント生成
-- **スキップモード（読み上げモード）0〜4**（VERSION 20260716_01時点）:
+- **スキップモード（読み上げモード）0〜4**（VERSION 20260722_01時点）:
   - mode0（▶▶・標準）: title → summary → 次へ
-  - mode1（▶・一時）: title → summary → points（あれば）→ 次へ
-  - mode2（▶・固定、青塗りつぶし）: title → summary → **主なポイントの見出しのみ**（本文非読み上げ・アコーディオン非展開）→ 次へ
+  - mode1（▶・**ワンショット**）: title → summary → points（あれば）→ 次へ。**1カード読了後、mode1に切り替える直前にいたモードへ自動的に復帰する**（`skipModeBeforeOneShot`に退避）。停止(⏹)→再開(▶️)をまたいでも復帰予約は保持される（20260722_01で仕様変更。旧仕様は「一時」で復帰先が固定ではなかった）
+  - mode2（▶・固定、青塗りつぶし）: title → summary → **主なポイントの見出しのみ**（本文非読み上げ・アコーディオン非展開）→ 次へ。従来通り永続固定
   - mode3（▶▶▶・タイトルのみ）: title → 次へ
   - mode4（▶・緑枠）: title → summary → conclusion（あれば）→ 次へ
-- 手動でモードを選択した場合、mode2以外は「同一ファイルを聴いている間 or 再生停止まwhile」保持。mode2は従来通りファイル切替・停止に関わらず永続的に保持
+- 手動でモードを選択した場合、**mode1・mode2以外**は「同一ファイルを聴いている間 or 再生停止まで」保持（sticky機構）。mode2は従来通りファイル切替・停止に関わらず永続的に保持。mode1は上記の専用ワンショット機構を使うため、sticky機構の対象外
+
+#### consolidated_html_summary_manager: Python側の主要関数
+
+| 関数 | 役割 | 注意点 |
+|---|---|---|
+| `parse_youtube_card(card)` | `video-card`をパース | `channel-info`内のspanを**色コードで識別**: 登録者数=`#e53e3e`、動画時間=`#2b6cb0`、お気に入り★=`#d4a017`。spanを`extract()`してから`get_text()`でチャンネル名取得 |
+| `parse_rss_card(card)` | `thread-card`をパース | meta_div検索は`"flex-wrap:wrap" in s or "flex-wrap: wrap" in s`（スペース有無両対応が必須）。概要セクションは`sec-title`に「概要」を含むsection→`sum-box`内のclassなし`<div>`群 |
+| `extract_data()` | 全HTMLをパース→DBマージ→archive移動 | `summary_database.json`にキャッシュされる。**パーサー修正後は再パースされない**（詳細はKnown Issues参照） |
+
+#### consolidated_html_summary_manager: itemフィールド（flatQueueのitem）
+
+```
+共通: is_error, type('youtube'|'rss'), title, summary, conclusion, points, keywords[], url
+YouTube: thumbnail, channel, subscriber, duration, is_favorite
+RSS: source, category, author, likes, char_count, outline[]
+```
+
+#### consolidated_html_summary_manager: JS側の主要構造・読み上げフロー（20260722_01時点）
+
+```
+// グローバル状態
+let flatQueue = [];              // 読み上げ順の平坦キュー（各エントリ: file, item, fIdx, iIdx, is_first, filename）
+let currentFlatIndex = -1;       // 現在位置
+let currentPart = '';            // 'file_intro'|'title'|'summary'|'conclusion'|'points'|'point_titles'
+let skipMode = 0;                // 0〜4
+let skipModeManualOverride = false;   // mode0/3/4のsticky保持フラグ
+let skipModeOverrideFilename = null;  // 上記stickyの対象ファイル名
+let skipModeBeforeOneShot = null;     // mode1専用: 切替直前のモードを退避
+
+advanceAuto()
+  → skipMode===1ならワンショット復帰処理を先に実行
+  → currentFlatIndex++ → currentPart決定 → applyAutoSkipMode()
+  → is_first && isPlaying なら playChime(cb) 経由、それ以外は playCurrentPart()
+
+playCurrentPart() → 各currentPartに応じたテキストを読み上げ
+handlePartEnd() → 読了後、skipModeに応じて次のcurrentPartを決定 or advanceAuto()
+```
+
+※ `flatQueue`のエントリには`filename`フィールドが必須（`fIdx`は`filteredData`依存でフィルタ状態によってズレるため、ファイル名比較には使えない）。
 
 ## 4. Confirmed Specifications
 
-- **自動判定の優先順位**（`applyAutoSkipMode`、20260716_01時点）:
+- **自動判定の優先順位**（`applyAutoSkipMode`、20260722_01時点）:
+  0. `skipMode===2`（▶固定）→ 何もしない（無条件・永続保護）
+  0. `skipMode===1`（ワンショット中）→ 何もしない（復帰予約を保護。これが無いと停止→再開時に復帰前へ上書きされる）
   1. `summary_V_*` / `summary_BBT_*` → mode0
   2. お気に入りチャンネル → mode0
   3. `summary_Short_*` / `summary_N_*` → mode3
@@ -76,14 +118,35 @@ my-claude-code/
 - **UI変更禁止**: 明示的指示なしにUI・カラー変更は行わない（ライトテーマ維持）
 - **3フェーズ開発ワークフロー**: Design Proposal（提案・Q&Aのみ）→ Architecture Audit（承認ゲート表・デビルズチェック・副作用リスクTop3・ロールバック条件・不足情報）→ Implementation Patch（明示的承認後のみコード生成）
 - **プレイリスト上の並び順（`playlist_order`）が唯一の順序制御**（youtube_summary_list、配信日時等によるソートは未実装）
+- **changeSkipModeのsticky/ワンショット制御**（consolidated_html_summary_manager）:
+  - `newMode===1`への切替時: 現在のskipModeが1でなければ`skipModeBeforeOneShot`に退避
+  - `newMode`が1以外への手動切替時: `skipModeBeforeOneShot`を破棄（ワンショット待ちのキャンセル）
+  - sticky保持（`skipModeManualOverride`）は**mode0/3/4のみ対象**。mode1は専用のワンショット機構、mode2は永続固定を使うため、両方ともsticky機構からは除外
+- **スクロール設計（確定アーキテクチャ・変更禁止級。consolidated_html_summary_manager）**:
+  - `updateHighlighting()`はスクロール責務を持たない。スクロールは`scrollToCurrentItem(targetEl)`に完全委譲
+  - 非表示要素（フィルタ切替直後等）はMutationObserverでDOM確定を検知してからスクロール（3秒タイムアウト安全装置付き）
+  - 教訓: setTimeout/requestAnimationFrameのタイマーベース解は全て失敗した。DOMイベント駆動（MutationObserver）が正解だった
+- **チャイム仕様（確定。consolidated_html_summary_manager）**: Web Audio API、660Hz→880Hzの上昇2音（各0.25秒、計0.6秒）。`ctx.resume().then()`必須（Autoplay Policy対策）、`.catch()`必須、`safetyTimer`（700ms）でonended非発火を救済。`isChimePlaying`フラグで`playCurrentPart`の`cancel()`と`handlePartEnd`のfile_intro分岐を抑止
+- **UIカラー・強調ルール（確定。consolidated_html_summary_manager）**:
+
+  | 対象 | 条件 | ボーダー | 背景 |
+  |---|---|---|---|
+  | 要旨/概要/ポイントタイトルの各エリア | RSS category==='Followed Note' または YouTube is_favorite===true | `#d4a017`（金） | `#fef9c3`（薄金） |
+  | 同上・通常 | — | `#3182ce`（青） | `#f8fafc`（白） |
+  | ★マーク | is_favorite | `color:#d4a017` | — |
+
+  ※ file-card（HTMLサマリ全体カード）への金ボーダーは誤実装として撤回済み。強調は個々のアイテムエリア単位で行う。
+- **インジケーター仕様（確定。consolidated_html_summary_manager）**: 動画時間（YouTube）は5段階絵文字（`⬜⬜⬜⬜⬜`≤3分 〜 `🟩🟩🟩🟩🟩`>60分、`buildDurationIndicator`）。文字数（RSS）も同様に5段階（`buildCharCountIndicator`）
+- **Gemini API仕様（consolidated_html_summary_manager、オンデマンド「主なポイントを生成」ボタン）**: モデルリスト`['gemini-2.5-flash', 'gemini-2.5-flash-lite']`（503/429でフォールバック）、`tools: [{ url_context: {} }]`で記事URLを読ませる、レスポンスは**全parts結合が必須**（Thinkingモードで`parts[0]`=思考、`parts[1]`=実回答になるケースがあるため）
 
 ## 5. Current Status
 
 ### 完了済み
 
 - youtube_summary_list: ベースライン取り込み、お気に入りチャンネル動画のHTML先頭配置（VERSION 20260711_01）
-- consolidated_html_summary_manager: ベースライン取り込み、スキップモード手動固定のファイル切替/停止までの保持（VERSION 20260711_02）、mode4（title+summary+conclusion）追加、mode2の見出しのみ読み上げ化、自動判定優先順位の変更（VERSION 20260716_01）
+- consolidated_html_summary_manager: ベースライン取り込み、スキップモード手動固定のファイル切替/停止までの保持（VERSION 20260711_02）、mode4（title+summary+conclusion）追加、mode2の見出しのみ読み上げ化、自動判定優先順位の変更（VERSION 20260716_01）、mode1のワンショット化（1カード読了後に直前のモードへ自動復帰。VERSION 20260722_01。別スレッドで開発され、本セッションに取り込み・統合）
 - 本ドキュメント一式（`CLAUDE.md`・`docs/`）の初期セットアップ
+- youtube_summary_listのChromeログインエラー（「Couldn't sign you in」）の原因調査・対処方法の案内（自動操作検知が原因。手動プロファイルログイン＋デスクトップショートカットで解消確認済み）
 
 ### 作業中
 
@@ -103,6 +166,21 @@ my-claude-code/
   - `config/playlists.json`は存在するがコードから未参照（プレイリストIDの実体は`get_playlist_config()`内のハードコード）
   - BATファイルは`dir /b /o-n`の名前降順で最初の1件を実行するため、ファイル命名次第で意図しないバージョンが動く可能性がある
 - 上記のうちHANDOVER記載の「argparse choicesに'V'が未登録」「all_playlists_var初期値」の2件は、`youtube_summary_list_20260711_01.py`時点で修正済みであることを確認済み（詳細は`SESSION_HISTORY.md` S01参照）
+- **Gemini APIモデルの不整合（要確認・consolidated_html_summary_manager）**: オンデマンド生成（ブラウザ側、485行目付近）は`gemini-2.5-flash`/`gemini-2.5-flash-lite`を使用しているが、`_generate_overview_file`（Track 0全体概況生成、Python側、320行目付近）は`gemini-2.0-flash`を使い続けている。越智さん側の記録では「gemini-2.0-flash等の旧モデルはシャットダウン済みで使用禁止」とのことなので、Track 0生成が失敗する可能性がある。**未修正・要対応**（20260722_01時点のコードで実際に確認済み）
+- **落とし穴カタログ（consolidated_html_summary_manager、実際にハマった不具合の記録）**:
+  1. `summary_database.json`キャッシュ: パーサーを修正しても、既にarchive済みのHTMLは再パースされない。「コードは正しいのに表示されない」時はまずDBキャッシュを疑う。対処: DBファイル削除、または対象HTMLをarchiveからSummaryフォルダに戻してbat再実行
+  2. JSスコープエラーで全画面真っ白: `renderFileList`のfileループ内で`item`を参照（未定義）→JSエラーで描画全停止。「何も表示されない」時はまずF12コンソール確認
+  3. flex-wrapスペース問題: HTML側`flex-wrap: wrap`（スペースあり）とコード側検索文字列の不一致でmeta_div取得失敗→source/likes等が全部空になった
+  4. Thinkingモードのparts分割: `parts[0]`のみ取得だと長文記事で`[POINTS]`タグを見逃す（短文は成功するため「時々失敗する」ように見える）
+  5. channel-infoのspan順序: ★スパンが最初のspanになると`find("span")`が★を掴む。色コード（style属性内の16進値）での識別が堅牢
+  6. `speechSynthesis.cancel()`の割り込み: チャイムcallback内のspeak()や自動進行を殺す。`isChimePlaying`フラグ＋条件付きcancelで解決
+  7. AudioContext Autoplay Policy: `resume()`なしだとチャイムが「鳴ったり鳴らなかったり」する
+  8. 「18番」誤読: Web Speech APIが「十八番=おはこ」等と誤読・非決定的（未解決・下記参照）
+  9. タイトル内番号とqData.iIdxの不一致: ソート順変更でタイトル内番号とカード並び順が一致しなくなることがある
+  10. パッチ適用の積み忘れ: 複数バージョンにまたがるパッチで、前の修正が後のベースに含まれず退行することがある（★表示消失・真っ白化の実例あり）。**変更前に必ず該当箇所をReadして現状のコードと想定バージョンが一致するか確認すること**
+- **未解決の課題（consolidated_html_summary_manager）**:
+  - 「18番」→「おはこ/はちばん」誤読（Web Speech APIの非決定的な誤読、3回に2回程度発生。読点挿入・漢数字化等の案は出たが未採用）
+  - タイトル→要旨の間の無音間隔の短縮（原因は`playCurrentPart`冒頭の`cancel()`。対策案はあるが「今は放置」の判断で保留中）
 
 ## 7. Test and Execution
 
@@ -145,3 +223,4 @@ my-claude-code/
 
 - スキップモードの自動判定・手動固定ロジックは複数バージョンにわたり変更されてきた経緯があるため、変更前に必ず`docs/SESSION_HISTORY.md`で直近の仕様変更履歴を確認すること
 - mode2の意味・挙動はVERSION 20260716_01で「pointsの本文読み上げ」から「見出しのみ読み上げ」に変更されている（過去の資料・コメントに古い説明が残っている場合は本ファイルの記述を優先する）
+- mode1の挙動はVERSION 20260722_01で「一時的（次に上書きされるまでの単なる一回読み）」から「ワンショット（1カード読了後、切り替える直前にいたモードへ自動復帰）」に変更されている
