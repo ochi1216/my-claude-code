@@ -3,8 +3,24 @@ rem PDF Gemini 翻訳ツール 起動用バッチファイル
 rem このファイルをダブルクリックすると、初回のみ仮想環境(venv)を作成して
 rem 依存パッケージをインストールし、ツールを起動します。
 
-setlocal
+setlocal enabledelayedexpansion
 cd /d "%~dp0"
+
+rem ファイル名は pdf_translator_yyyymmdd_NN.py の形式（バージョンアップ時も
+rem 旧ファイルは残したまま新ファイルが追加される運用のため、名前順で並べ替えて
+rem 最新（＝辞書順で最後）のファイルを自動的に起動対象にする。
+set "TARGET_SCRIPT="
+for /f "delims=" %%f in ('dir /b /o-n "pdf_translator_????????_??.py" 2^>nul') do (
+    if not defined TARGET_SCRIPT set "TARGET_SCRIPT=%%f"
+)
+
+if not defined TARGET_SCRIPT (
+    echo [エラー] pdf_translator_yyyymmdd_NN.py の形式のファイルが見つかりません。
+    pause
+    exit /b 1
+)
+
+echo 起動対象: !TARGET_SCRIPT!
 
 where python >nul 2>nul
 if errorlevel 1 (
@@ -45,7 +61,7 @@ if "%GEMINI_API_KEY%"=="" (
 )
 
 echo PDF Gemini 翻訳ツールを起動します...
-python pdf_translator_20260722_01.py
+python "!TARGET_SCRIPT!"
 
 if errorlevel 1 (
     echo.
