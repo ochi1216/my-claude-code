@@ -882,7 +882,7 @@ def render_project_burn_chart(
             c1, c2 = st.columns(2)
             with c1:
                 render_breakdown(
-                    period_sub, "Cost Category", "コスト種別（内部労務 vs 外部購買）",
+                    period_sub, "Cost Category", f"コスト種別（内部労務 vs 外部購買）― {clicked_period}のみ",
                     key=f"{key_prefix}_click_costcat",
                 )
             with c2:
@@ -896,8 +896,11 @@ def render_project_burn_chart(
                         ext, "FSI Description", "外部購買内訳（FSI Description別）",
                         key=f"{key_prefix}_click_fsi",
                     )
+
+            st.markdown(f"###### {clicked_period} の明細（{len(period_sub):,}行）")
+            render_filterable_table(period_sub, key=f"{key_prefix}_click_table")
     else:
-        st.caption("💡 バーをクリックすると、その期のコスト種別・外部購買（FSI Description別）内訳を表示できます。")
+        st.caption("💡 バーをクリックすると、その期のコスト種別・外部購買内訳・明細を表示できます。")
 
 
 # --------------------------------------------------------------------------- #
@@ -951,7 +954,7 @@ def tab_project(
     render_breakdown(sub, "Organization", "組織(Organization)別", key="proj_org")
 
     # 内部労務 vs 外部購買
-    render_breakdown(sub, "Cost Category", "コスト種別（内部労務 vs 外部購買）", key="proj_costcat")
+    render_breakdown(sub, "Cost Category", "コスト種別（内部労務 vs 外部購買）― プロジェクト全体", key="proj_costcat")
 
     # コスト種別 深掘り（このプロジェクトに絞った上でFunction/Func.Category/B4P category/
     # FSI Descriptionで深掘り＋フィルタ・並び替え付き明細）
