@@ -152,3 +152,19 @@ Cost Categoryの深掘り機能を追加（当初「A: Function/Func.Category」
   （4軸切替＋フィルタ・並び替え付き明細テーブル）を追加。既存の「外部購買明細（PO単位）」
   セクションはPO単位という別の切り口のため、そのまま残置
 - 選択中の分類軸・項目（`pdd_axis`/`pdd_value`）も設定保存の対象に追加
+
+## [20260722_09] - 2026-07-23
+
+**追加ファイル:** `project_cost_analyzer_20260722_09.py`（`20260722_08`からのコピー＋機能追加）
+
+コスト種別深掘りの明細テーブルについて、ユーザーより2点要望があり対応:
+
+- **フィルタ対象列をテーブルの列順（Index順）で全列に拡張**: これまでProject Name／PM／
+  Cost element name／Profit Center／Fiscal Yearの5列のみで、Company Codeが対象外だった。
+  金額列（`Val/COArea Crcy`、連続値のため複数選択フィルタに不向き）を除く全12列を、
+  `DETAIL_TABLE_COLUMNS`の並び順のまま`DETAIL_FILTER_COLUMNS`とし、Company Code等も
+  フィルタできるようにした（例: Company Code=CN69 かつ Fiscal Year=2025、のようなAND絞り込み）
+- **「表示する列」を追加し、非表示にした列はフィルタからも連動して消えるようにした**:
+  明細テーブルの直上に列選択の複数選択ウィジェットを新設。列を外すとテーブル表示だけでなく、
+  フィルタ欄・並び替え列の選択肢からもその列が同時に消える（Streamlit標準の`st.dataframe`
+  列非表示アイコンはPython側から状態を取得できないため、独自の列選択ウィジェットとして実装）
