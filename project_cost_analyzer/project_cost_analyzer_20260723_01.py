@@ -142,7 +142,6 @@ SETTINGS_DEFAULTS = {
     "bd_pmcat_pie": False,
     "bd_func_pie": False,
     "bd_ce_pie": False,
-    "proj_func_pie": False,
     "proj_org_pie": False,
     "proj_costcat_pie": False,
     "dd_axis": None,
@@ -827,7 +826,9 @@ def render_project_burn_chart(
     fig.add_scatter(x=ts_disp["period_label"], y=ts_disp["累計"], name="累計", mode="lines+markers", yaxis="y2")
 
     layout_kwargs = dict(
-        xaxis_title="会計年度-期",
+        # type="category"を明示しないと、"YYYY-MM"形式の文字列がPlotly側で日付軸と誤認識され、
+        # クリック時のx値が"2025-04-01"のような日付文字列になりperiod_labelと一致しなくなるため
+        xaxis=dict(title="会計年度-期", type="category"),
         yaxis=dict(title=f"月次コスト ({CURRENCY})"),
         yaxis2=dict(title=f"累計 ({CURRENCY})", overlaying="y", side="right"),
         legend=dict(orientation="h"),
@@ -848,7 +849,10 @@ def render_project_burn_chart(
         layout_kwargs["margin"] = dict(t=220)
 
     fig.update_layout(**layout_kwargs)
-    st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_burn_chart")
+    event = st.plotly_chart(
+        fig, use_container_width=True, key=f"{key_prefix}_burn_chart",
+        on_select="rerun", selection_mode="points",
+    )
 
     if (ts_disp["月次コスト"] < 0).any():
         st.caption("⚠️ マイナスの期は会計調整（accrual戻し等）を含みます。")
@@ -856,6 +860,44 @@ def render_project_burn_chart(
     hidden = ml[~ml["period_label"].isin(visible_periods)] if not ml.empty else ml
     if not full_width and not hidden.empty:
         st.caption("※ 実コスト発生分の範囲外のマイルストーンは非表示です。上のトグルをONにすると表示されます。")
+
+    # 月次コストのバーをクリックすると、その期のコスト種別内訳（内部労務 vs 外部購買）と
+    # 外部購買のFSI Description別内訳を表示する（バーは常にcurve_number=0の1本目のトレース）
+    points = (event.get("selection") or {}).get("points", []) if event else []
+    bar_points = [p for p in points if p.get("curve_number") == 0]
+    if bar_points:
+        clicked_period = bar_points[0].get("x")
+        if clicked_period not in visible_periods:
+            # 稀にPlotly側で"YYYY-MM"が日付として解釈され"YYYY-MM-DD"で返ることがあるための保険
+            try:
+                parsed = pd.to_datetime(clicked_period)
+                clicked_period = f"{parsed.year}-{parsed.month:02d}"
+            except (ValueError, TypeError):
+                pass
+        period_sub = sub[sub["period_label"] == clicked_period]
+        st.markdown(f"##### 🔍 {clicked_period} のコスト内訳（クリックで表示）")
+        if period_sub.empty:
+            st.caption("この期の明細がありません。")
+        else:
+            c1, c2 = st.columns(2)
+            with c1:
+                render_breakdown(
+                    period_sub, "Cost Category", "コスト種別（内部労務 vs 外部購買）",
+                    key=f"{key_prefix}_click_costcat",
+                )
+            with c2:
+                ext = period_sub[period_sub["Cost Category"].isin(EXTERNAL_CATEGORIES)].dropna(
+                    subset=["FSI Description"]
+                )
+                if ext.empty:
+                    st.caption("この期の外部購買明細（FSI Description）はありません。")
+                else:
+                    render_breakdown(
+                        ext, "FSI Description", "外部購買内訳（FSI Description別）",
+                        key=f"{key_prefix}_click_fsi",
+                    )
+    else:
+        st.caption("💡 バーをクリックすると、その期のコスト種別・外部購買（FSI Description別）内訳を表示できます。")
 
 
 # --------------------------------------------------------------------------- #
@@ -906,11 +948,7 @@ def tab_project(
     render_project_burn_chart(sub, matched_row, milestone_cols, key_prefix="proj")
 
     # コスト構造
-    c1, c2 = st.columns(2)
-    with c1:
-        render_breakdown(sub, "Function", "Function別", key="proj_func")
-    with c2:
-        render_breakdown(sub, "Organization", "組織(Organization)別", key="proj_org")
+    render_breakdown(sub, "Organization", "組織(Organization)別", key="proj_org")
 
     # 内部労務 vs 外部購買
     render_breakdown(sub, "Cost Category", "コスト種別（内部労務 vs 外部購買）", key="proj_costcat")
@@ -936,22 +974,6 @@ def tab_project(
         po_disp = po.copy()
         po_disp["Cost"] = po_disp["Cost"].map(usd)
         st.dataframe(po_disp, use_container_width=True, hide_index=True, height=260)
-
-    # 工数投下（FY2026のみ）
-    st.markdown("#### 工数投下（Man month / FY2026）")
-    mm = sub.dropna(subset=["Man month"])
-    if mm.empty or mm["Man month"].sum() == 0:
-        st.caption("このプロジェクトには工数(Man month)データがありません（工数はFY2026以降のみ記録）。")
-    else:
-        mmf = (
-            mm.dropna(subset=["Function"]).groupby("Function")["Man month"].sum()
-            .sort_values(ascending=False).reset_index()
-        )
-        st.plotly_chart(
-            px.bar(mmf, x="Man month", y="Function", orientation="h"),
-            use_container_width=True,
-            key="proj_manmonth_chart",
-        )
 
 
 # --------------------------------------------------------------------------- #
