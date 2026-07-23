@@ -7,3 +7,6 @@ venv/
 po_database_organizer/config.json
 po_database_organizer/token_cache.json
 po_database_organizer/cache/
+
+# Project Cost Analyzerのローカル設定（環境依存のファイルパス等を含むため）
+project_cost_analyzer/.pca_settings.json
