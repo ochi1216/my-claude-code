@@ -1,5 +1,44 @@
 # CHANGELOG — outlook_total_organizer
 
+## VERSION 20260716_04
+
+### 追加・修正
+	**Outlook再起動を検知したときだけ、フラグ/「Just Do It」タグ付き既読メールを未読に戻す機能を追加**: OutlookのVBA（`ThisOutlookSession.Application_Startup`→`Flag_unread_setup`→`ProcessFolder`）は、Outlook起動時に一度だけ「フラグが立っている、または『Just Do It』カテゴリが付いていて、既読になっているメール」を強制的に未読へ戻している。これはOutlookを再起動したときにしか働かないため、Outlookをつけっぱなしで使い続けると、フラグ付きメールを一度読むとそのまま既読で放置されてしまう問題があった。本ツールが「Outlookが再起動されたこと」自体を検知し、そのときだけ同じ処理を代わりに行うようにした（Outlookの状態が正＝マスター、オーガナイザーは従＝スレーブ。再起動を検知しない限り何もしない＝ユーザーが自分で既読にした分には介入しない）。
+	再起動検知はWMI（`win32com.client.GetObject("winmgmts:")`経由でOUTLOOK.EXEプロセスの起動時刻を取得）で行い、新規の外部ライブラリは追加していない。検知結果は`json/outlook_restart_state.json`に保存し、前回チェック時と比較する。
+	書き戻しの対象は受信トレイと「Captioo」フォルダー（VBAと同じ範囲）。「Captioo」フォルダーが見つからない場合は受信トレイのみで処理を継続する。
+	「検索/整理」タブでのメール取得時は、再起動を検知したら自動的に書き戻しを実行する。
+	「📋 アクション一覧を生成」時は、新設したチェックボックス（初期状態はOFF）がONの場合のみ、再起動検知に伴う書き戻しと、影響を受けたスレッドの進捗（`json/action_status.json`の`progress`のみ。優先度・コメントは変更しない）の「未着手」へのリセットを行う。OFF（デフォルト）の場合は従来通り何も変更しない。
+	アクションダッシュボード上で、「Just Do It」カテゴリを既存の🚩フラグバッジと同一の判定・表示に統合した（`group_by_thread`の`is_flagged`判定を拡張。専用の別バッジは新設していない）。
+
+### 変更関数
+	`OutlookMailManager._get_outlook_process_creation_marker`（新規、WMI経由でOutlookプロセスの起動時刻マーカーを取得）
+	`OutlookMailManager.check_and_update_outlook_restart_state`（新規、前回チェック時との比較で再起動を検知）
+	`OutlookMailManager._find_captioo_folder`（新規、`get_project_mails`のフォルダ検索ステップ1-2を流用して「Captioo」フォルダーを検索）
+	`OutlookMailManager.sync_forced_unread_from_outlook_state`（新規、受信トレイ+Captiooフォルダーを走査し対象メールを未読に書き戻す）
+	`OutlookMailManager._item_to_dict`（既存の「Just Do It」カテゴリ判定を共通関数`_mail_has_just_do_it_category`に切り出し。動作は変更なし）
+	`OutlookMailManager.group_by_thread`（`is_flagged`判定に「Just Do It」カテゴリを追加）
+	`MailManagerGUI._run_search`（「検索/整理」タブの検索実行時に再起動検知→書き戻しフックを追加）
+	`MailManagerGUI._ui_action_tab`（新規チェックボックス`chk_action_sync_vba`を追加）
+	`MailManagerGUI._run_action_dashboard`（チェックボックスON時のみ再起動検知→書き戻しを実行し、影響スレッドを`summarize_action_dashboard`に渡す）
+	`MailSummarizer.summarize_action_dashboard`（`reset_conversation_ids`引数を追加。指定されたスレッドの保存済み進捗を「未着手」にリセットする処理を追加。引数省略時・空集合時は従来と同じ動作）
+
+### 新規追加：
+	`_mail_has_just_do_it_category`（モジュール関数、カテゴリ文字列に「Just Do It」が含まれるか大文字小文字を問わず判定）
+	`load_outlook_restart_state` / `save_outlook_restart_state`（`json/outlook_restart_state.json`の読み書き、既存の`load_action_status`/`save_action_status`と同じ方式）
+
+変更ファイル：
+	`outlook_total_organizer_20260716_04.py`（`_20260716_03`からのコピー＋今回の変更。`_20260716_03`はそのまま残置）
+
+動作確認時の注意：
+	本ツールはWindows専用（win32com依存）のため、本セッションの実行環境（Linuxコンテナ）ではOutlook実機での動作検証ができていない。`ast.parse`による構文チェック、`_20260716_03`との`diff`による変更範囲の確認、および「Just Do It」判定・再起動マーカー比較・進捗リセットの各ロジックをOutlook非依存のスタンドアロンコードで検証済み。以下は実機（Windows＋Outlook）でのご確認が必要：
+	・WMI経由でOutlookプロセスの起動時刻が正しく取得できるか
+	・実際にOutlookを再起動した際に、書き戻しが1回だけ正しく発動するか
+	・「Captioo」フォルダーが実際に見つかるか
+	・チェックボックスON時に、進捗リセットで非表示だったアクションが正しく再表示されるか
+
+変更しないこと（宣誓）：
+	送信済みアイテム関連（`include_sent`等）・既存の「セッション内だけ未読に見せる」表示専用ロジック（`is_forced_unread_target`/`effective_unread`/`session_marked_read_entry_ids`、`mark_mails_read`）・`_search_ad`/`_search_rss`（今回のフックを追加しない）・`get_project_mails`自体（Captiooフォルダー検索は新規の独立ヘルパーとして実装し、既存メソッドは変更しない）・AI解析キャッシュ（`analysis_cache/action_dashboard.json`）の無効化ロジック（`mail_count`ベースのまま）・R19Projフィルタ・フラグマークのCSS/表示ロジック自体・チェックボックスOFF時のアクションダッシュボード生成の既存動作
+
 ## VERSION 20260716_03
 
 ### 追加・修正
