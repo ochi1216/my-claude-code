@@ -53,6 +53,10 @@ DEFAULT_PATH = (
     r"C:\Users\nx023836\Documents\PythonScripts\PM_organizer\ProjectCost"
     r"\BG ICS Project cost summary_20260722.xlsm"
 )
+DEFAULT_SCHEDULE_PATH = (
+    r"C:\Users\nx023836\Nexperia\ICS R19 R&D - Project Management\PRM_full_documents\work"
+    r"\R19_Program_Pipeline_202606270701.xlsx"
+)
 
 INT_COLS = ["Cost Element", "SPARC ID", "Period", "Fiscal Year", "Order Type", "S4 FSItem"]
 NUMERIC_COLS = ["Total Quantity", AMOUNT_COL, "Man month"]
@@ -126,7 +130,7 @@ PIPELINE_FILTER_COLUMNS = ["Nick Name", "Project ID", "Stage", "Type", "Track", 
 # 次回起動時に復元する設定のキーと既定値（選択系ウィジェットのkeyと一致させること）
 SETTINGS_DEFAULTS = {
     "s_path": DEFAULT_PATH,
-    "s_schedule_path": "",
+    "s_schedule_path": DEFAULT_SCHEDULE_PATH,
     "s_profit_centers": [],
     "s_fiscal_years": [],
     "s_statuses": [],
@@ -147,6 +151,8 @@ SETTINGS_DEFAULTS = {
     "pdd_value": None,
     "sch_project": None,
     "sch_sparc_id": None,
+    "proj_overlay_full_width": False,
+    "sch_overlay_full_width": False,
 }
 
 
@@ -734,54 +740,64 @@ def tab_portfolio(df: pd.DataFrame, default_stacked: bool) -> None:
     )
 
 
-def render_cost_schedule_overlay(
-    sub: pd.DataFrame, pipeline_row: pd.Series, milestone_cols: list[str]
+def render_project_burn_chart(
+    sub: pd.DataFrame,
+    pipeline_row: pd.Series | None,
+    milestone_cols: list[str] | None,
+    key_prefix: str,
 ) -> None:
-    """コストのバーンチャートに、マイルストーン実績を会計期間換算で重ねた統合グラフ。
+    """月次コスト・累計のバーンチャート。1つのグラフに一本化し、`pipeline_row`が渡された場合は
+    マイルストーン実績を会計期間換算で重ねて表示する（`pipeline_row`が無ければコストのみ）。
 
     会計年度の期首月が未確認のため、暦日付→period_labelの絶対変換はしない。
     PS（IOオープン日）を基点に「基点からの経過月数」で相対的に位置合わせする
     （SAP会計期間は1期=暦1ヶ月・連番という前提のみを使う）。PSが無いプロジェクトは、
     そのプロジェクトの最初のマイルストーン実績日を基点日付として代用する。
     表示幅トグルはこの関数のローカル表示のみに影響し、`sub`自体は変更しない
-    （呼び出し元のプロジェクト深掘りタブ本体の集計・フィルタには影響させない）。
+    （呼び出し元タブ本体の集計・フィルタには影響させない）。
+    `key_prefix`は、同一画面内（プロジェクト深掘りタブ・コスト×スケジュールタブの両方）から
+    呼び出してもウィジェットkey・グラフkeyが衝突しないようにするための接頭辞。
     """
+    st.markdown("#### バーンチャート（月次コスト・累計" + ("・マイルストーン実績)" if pipeline_row is not None else "）"))
+
     cost_periods = sorted(sub["period_label"].dropna().unique())
     if not cost_periods:
+        st.caption("コストデータがありません。")
         return
     first_cost_period = cost_periods[0]
 
-    chart_milestones = [m for m in milestone_cols if m not in MILESTONE_CHART_EXCLUDE]
-    ml = milestones_long(pipeline_row, chart_milestones).dropna(subset=["実績日"])
+    ml = pd.DataFrame(columns=["マイルストーン", "実績日", "period_label"])
+    full_width = False
 
-    ps_date = pipeline_row.get("PS")
-    if pd.notna(ps_date):
-        anchor_date = ps_date
-        anchor_label = "PS（IOオープン日）"
-    elif not ml.empty:
-        anchor_date = ml["実績日"].min()
-        anchor_label = "最初のマイルストーン実績日（PS未記録のため代用）"
-    else:
-        return
+    if pipeline_row is not None and milestone_cols is not None:
+        chart_milestones = [m for m in milestone_cols if m not in MILESTONE_CHART_EXCLUDE]
+        ml_raw = milestones_long(pipeline_row, chart_milestones).dropna(subset=["実績日"])
 
-    def date_to_period(d: pd.Timestamp) -> str:
-        months = (d.year - anchor_date.year) * 12 + (d.month - anchor_date.month)
-        return shift_period_label(first_cost_period, months)
+        ps_date = pipeline_row.get("PS")
+        anchor_date, anchor_label = None, None
+        if pd.notna(ps_date):
+            anchor_date, anchor_label = ps_date, "PS（IOオープン日）"
+        elif not ml_raw.empty:
+            anchor_date, anchor_label = ml_raw["実績日"].min(), "最初のマイルストーン実績日（PS未記録のため代用）"
 
-    ml = ml.copy()
-    ml["period_label"] = ml["実績日"].apply(date_to_period)
+        if anchor_date is not None:
+            def date_to_period(d: pd.Timestamp) -> str:
+                months = (d.year - anchor_date.year) * 12 + (d.month - anchor_date.month)
+                return shift_period_label(first_cost_period, months)
 
-    st.markdown("###### コスト×マイルストーン 統合表示（会計年度-期を合わせて表示）")
-    st.caption(
-        f"基点: {anchor_label} = {anchor_date.strftime('%Y-%m-%d')} を「{first_cost_period}」に"
-        "対応づけ、以降は暦1ヶ月=1期として相対的に位置合わせしています"
-        "（会計年度の期首月は未確認のため厳密な絶対変換ではありません）。"
-    )
+            ml = ml_raw.copy()
+            ml["period_label"] = ml["実績日"].apply(date_to_period)
 
-    st.session_state.setdefault("proj_overlay_full_width", False)
-    full_width = st.toggle(
-        "マイルストーンベース表示（最後のマイルストーンまで幅を広げる）", key="proj_overlay_full_width"
-    )
+            st.caption(
+                f"基点: {anchor_label} = {anchor_date.strftime('%Y-%m-%d')} を「{first_cost_period}」に"
+                "対応づけ、以降は暦1ヶ月=1期として相対的に位置合わせしています"
+                "（会計年度の期首月は未確認のため厳密な絶対変換ではありません）。"
+            )
+            st.session_state.setdefault(f"{key_prefix}_overlay_full_width", False)
+            full_width = st.toggle(
+                "マイルストーンベース表示（最後のマイルストーンまで幅を広げる）",
+                key=f"{key_prefix}_overlay_full_width",
+            )
 
     ts = (
         sub.groupby("period_label")[AMOUNT_COL].sum().reset_index().sort_values("period_label")
@@ -804,26 +820,39 @@ def render_cost_schedule_overlay(
     ts_disp["累計"] = ts_disp["月次コスト"].cumsum()
 
     visible_periods = set(ts_disp["period_label"])
-    ml_visible = ml[ml["period_label"].isin(visible_periods)]
+    ml_visible = ml[ml["period_label"].isin(visible_periods)] if not ml.empty else ml
 
     fig = go.Figure()
     fig.add_bar(x=ts_disp["period_label"], y=ts_disp["月次コスト"], name="月次コスト")
     fig.add_scatter(x=ts_disp["period_label"], y=ts_disp["累計"], name="累計", mode="lines+markers", yaxis="y2")
-    if not ml_visible.empty:
-        fig.add_scatter(
-            x=ml_visible["period_label"], y=[0] * len(ml_visible), mode="markers+text",
-            text=ml_visible["マイルストーン"], textposition="top center",
-            marker=dict(size=10, color="#2E7D32"), name="マイルストーン実績",
-        )
-    fig.update_layout(
+
+    layout_kwargs = dict(
         xaxis_title="会計年度-期",
         yaxis=dict(title=f"月次コスト ({CURRENCY})"),
         yaxis2=dict(title=f"累計 ({CURRENCY})", overlaying="y", side="right"),
         legend=dict(orientation="h"),
     )
-    st.plotly_chart(fig, use_container_width=True, key="proj_overlay_chart")
+    if not ml_visible.empty:
+        # マイルストーンのラベルは棒の高さと重なって読めなくなるため、y=0上には置かず、
+        # プロット領域の上（yref="paper"）に縦書きで配置し、点線でどの期かを示す
+        fig.add_scatter(x=[], y=[], mode="markers", marker=dict(size=10, color="#2E7D32"), name="マイルストーン実績")
+        grouped = ml_visible.groupby("period_label")["マイルストーン"].apply(lambda s: " / ".join(s)).reset_index()
+        for _, r in grouped.iterrows():
+            fig.add_vline(x=r["period_label"], line_width=1, line_dash="dot", line_color="rgba(46,125,50,0.6)")
+            fig.add_annotation(
+                x=r["period_label"], y=1.02, yref="paper", yanchor="bottom",
+                text=r["マイルストーン"], showarrow=False, textangle=-90,
+                font=dict(size=10, color="#2E7D32"), align="left",
+            )
+        layout_kwargs["margin"] = dict(t=110)
 
-    hidden = ml[~ml["period_label"].isin(visible_periods)]
+    fig.update_layout(**layout_kwargs)
+    st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_burn_chart")
+
+    if (ts_disp["月次コスト"] < 0).any():
+        st.caption("⚠️ マイナスの期は会計調整（accrual戻し等）を含みます。")
+
+    hidden = ml[~ml["period_label"].isin(visible_periods)] if not ml.empty else ml
     if not full_width and not hidden.empty:
         st.caption("※ 実コスト発生分の範囲外のマイルストーンは非表示です。上のトグルをONにすると表示されます。")
 
@@ -863,35 +892,17 @@ def tab_project(
     m4.metric("対象期間", f"{sub['period_label'].min()} 〜 {sub['period_label'].max()}")
     st.caption(f"PM: {', '.join(pms) if pms else '—'} ／ 参加組織: {', '.join(orgs) if orgs else '—'}")
 
-    # バーンチャート（月次バー + 累計ライン）
-    st.markdown("#### バーンチャート（月次コスト と 累計）")
-    ts = (
-        sub.groupby("period_label")[AMOUNT_COL].sum().reset_index().sort_values("period_label")
-        .rename(columns={AMOUNT_COL: "月次コスト"})
-    )
-    ts["累計"] = ts["月次コスト"].cumsum()
-
-    fig = go.Figure()
-    fig.add_bar(x=ts["period_label"], y=ts["月次コスト"], name="月次コスト")
-    fig.add_scatter(x=ts["period_label"], y=ts["累計"], name="累計", mode="lines+markers", yaxis="y2")
-    fig.update_layout(
-        xaxis_title="会計年度-期",
-        yaxis=dict(title=f"月次コスト ({CURRENCY})"),
-        yaxis2=dict(title=f"累計 ({CURRENCY})", overlaying="y", side="right"),
-        legend=dict(orientation="h"),
-    )
-    st.plotly_chart(fig, use_container_width=True, key="proj_burn_chart")
-    if (ts["月次コスト"] < 0).any():
-        st.caption("⚠️ マイナスの期は会計調整（accrual戻し等）を含みます。")
-
-    # コスト×スケジュール統合表示（Pipelineが読み込まれ、SPARC IDで紐付く場合のみ）
+    # バーンチャート（月次バー + 累計ライン）。紐付くPipelineレコードがあればマイルストーンも重ねる
+    matched_row = None
     if pipeline_df is not None and milestone_cols is not None and SPARC_ID_COL in sub.columns:
         sparc_ids = sorted(int(i) for i in sub[SPARC_ID_COL].dropna().unique())
         matched = pipeline_df[pipeline_df[SPARC_ID_COL].isin(sparc_ids)] if sparc_ids else pipeline_df.iloc[0:0]
         if not matched.empty:
             if len(matched) > 1:
                 st.caption("※ SPARC IDが複数のPipelineレコードに一致したため、先頭の1件を表示しています。")
-            render_cost_schedule_overlay(sub, matched.iloc[0], milestone_cols)
+            matched_row = matched.iloc[0]
+
+    render_project_burn_chart(sub, matched_row, milestone_cols, key_prefix="proj")
 
     # コスト構造
     c1, c2 = st.columns(2)
@@ -1065,47 +1076,10 @@ def tab_schedule(cost_df: pd.DataFrame, pipeline_df: pd.DataFrame | None, milest
     st.markdown(f"##### 🧭 {row['Nick Name']}（Project ID: {row['Project ID']} ／ SPARC ID: {row[SPARC_ID_COL]}）")
     st.caption(f"PM（Pipeline側）: {row['PM'] or '—'} ／ Type: {row['Type'] or '—'} ／ Track: {row['Track'] or '—'}")
 
-    st.markdown("###### マイルストーン実績（カレンダー日付）とコスト推移（会計年度-期）の対比")
+    render_project_burn_chart(sub, row, milestone_cols, key_prefix="sch")
+
+    st.markdown("###### マイルストーン一覧（全" + str(len(milestone_cols)) + "種）")
     ml = milestones_long(row, milestone_cols)
-    # 優先順位の低いサブマイルストーンはコストと重ねる時系列図からは除外する（一覧テーブルのmlは全件のまま）
-    chart_milestones = [m for m in milestone_cols if m not in MILESTONE_CHART_EXCLUDE]
-    achieved = ml[ml["マイルストーン"].isin(chart_milestones)].dropna(subset=["実績日"]).sort_values("実績日")
-    if achieved.empty:
-        st.caption("実績日が記録されているマイルストーンがありません。")
-    else:
-        fig_ms = go.Figure()
-        fig_ms.add_scatter(
-            x=achieved["実績日"], y=[0] * len(achieved), mode="markers+text",
-            text=achieved["マイルストーン"], textposition="top center",
-            marker=dict(size=10, color="#2E7D32"), name="達成済み",
-        )
-        fig_ms.add_vline(x=pd.Timestamp.now(), line_dash="dot", line_color="gray", annotation_text="本日")
-        fig_ms.update_yaxes(visible=False, range=[-1, 1])
-        fig_ms.update_layout(xaxis_title="マイルストーン実績日", height=220, showlegend=True)
-        st.plotly_chart(fig_ms, use_container_width=True, key="sch_timeline_chart")
-
-    ts = (
-        sub.groupby("period_label")[AMOUNT_COL].sum().reset_index().sort_values("period_label")
-        .rename(columns={AMOUNT_COL: "月次コスト"})
-    )
-    ts["累計"] = ts["月次コスト"].cumsum()
-    fig_cost = go.Figure()
-    fig_cost.add_bar(x=ts["period_label"], y=ts["月次コスト"], name="月次コスト")
-    fig_cost.add_scatter(x=ts["period_label"], y=ts["累計"], name="累計", mode="lines+markers", yaxis="y2")
-    fig_cost.update_layout(
-        xaxis_title="会計年度-期",
-        yaxis=dict(title=f"月次コスト ({CURRENCY})"),
-        yaxis2=dict(title=f"累計 ({CURRENCY})", overlaying="y", side="right"),
-        legend=dict(orientation="h"),
-    )
-    st.plotly_chart(fig_cost, use_container_width=True, key="sch_cost_chart")
-    st.caption(
-        "※ マイルストーン実績（カレンダー日付）とコスト推移（会計年度-期）は軸の単位が異なります"
-        "（会計年度の期首月が未確認のため、暦日付への厳密な換算は行っていません）。両者を並べて"
-        "概観する用途としてご利用ください。"
-    )
-
-    st.markdown("###### マイルストーン一覧")
     ml_disp = ml.copy()
     ml_disp["実績日"] = ml_disp["実績日"].apply(lambda d: d.strftime("%Y-%m-%d") if pd.notna(d) else "未達成")
     ml_disp["達成"] = ml_disp["達成"].map({True: "✅", False: "—"})
@@ -1132,12 +1106,25 @@ def main() -> None:
             st.session_state[k] = v
         st.session_state["_seeded"] = True
 
-    # --- サイドバー: データ読み込み ---
+    # --- サイドバー: データ読み込み（ウィジェット生成） ---
+    # KOB1・スケジュール双方の入力ウィジェットを、KOB1の読み込み成否に関わらず必ず同じ実行回で
+    # 生成する（スケジュール側の生成をKOB1読み込み成功後まで遅らせると、session_stateへの
+    # 初期値セットとウィジェット初生成が別々のスクリプト実行にまたがり、Streamlit側の癖で
+    # 初回だけ入力欄の表示が空になることがあったため。ステータス表示（caption等）は
+    # ウィジェットではないためこの制約を受けず、それぞれの処理ブロックの直後に置いてよい）。
     st.sidebar.header("データ読み込み")
     uploaded = st.sidebar.file_uploader("KOB1を含むExcelファイル (.xlsm/.xlsx)", type=["xlsm", "xlsx"])
     st.sidebar.text_input("またはローカルパスを指定", key="s_path")
     force_reload = st.sidebar.checkbox("キャッシュを無視して再読み込み", value=False)
 
+    st.sidebar.header("プロジェクトスケジュール読み込み")
+    st.sidebar.caption("現在対応形式: Pipelineシート（Excel、シート名 `data_*`）")
+    sch_uploaded = st.sidebar.file_uploader(
+        "Pipelineシートを含むExcelファイル (.xlsx)", type=["xlsx", "xlsm"], key="sch_uploader"
+    )
+    st.sidebar.text_input("またはローカルパスを指定", key="s_schedule_path")
+
+    # --- サイドバー: KOB1読み込み処理 ---
     source = uploaded if uploaded is not None else st.session_state["s_path"]
     if not source:
         st.info("サイドバーからファイルをアップロードするか、パスを指定してください。")
@@ -1158,15 +1145,8 @@ def main() -> None:
 
     st.sidebar.caption("📦 " + ("キャッシュから読み込みました（高速）" if was_cached else "元Excelを新規パースし保存しました"))
 
-    # --- サイドバー: プロジェクトスケジュール（Program Pipelineシート）読み込み ---
-    st.sidebar.header("プロジェクトスケジュール読み込み")
-    st.sidebar.caption("現在対応形式: Pipelineシート（Excel、シート名 `data_*`）")
-    sch_uploaded = st.sidebar.file_uploader(
-        "Pipelineシートを含むExcelファイル (.xlsx)", type=["xlsx", "xlsm"], key="sch_uploader"
-    )
-    st.sidebar.text_input("またはローカルパスを指定", key="s_schedule_path")
+    # --- サイドバー: スケジュール読み込み処理 ---
     sch_source = sch_uploaded if sch_uploaded is not None else st.session_state["s_schedule_path"]
-
     pipeline_df, milestone_cols = None, None
     if sch_source and (not isinstance(sch_source, str) or Path(sch_source).exists()):
         try:
