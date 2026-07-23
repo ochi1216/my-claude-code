@@ -2,7 +2,7 @@
 コスト分析を行うStreamlitダッシュボード。
 
 使い方:
-    streamlit run project_cost_analyzer_20260722_14.py
+    streamlit run project_cost_analyzer_20260723_01.py
 
 4つの視点をタブで切り替えて分析する:
     1. 🏛 事業部俯瞰      … 全Profit Center（R03/R04/R07/R0N/R0S/R19）を横断俯瞰（ディレクター視点）
