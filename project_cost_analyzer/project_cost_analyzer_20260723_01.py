@@ -834,17 +834,18 @@ def render_project_burn_chart(
     )
     if not ml_visible.empty:
         # マイルストーンのラベルは棒の高さと重なって読めなくなるため、y=0上には置かず、
-        # プロット領域の上（yref="paper"）に縦書きで配置し、点線でどの期かを示す
-        fig.add_scatter(x=[], y=[], mode="markers", marker=dict(size=10, color="#2E7D32"), name="マイルストーン実績")
+        # プロット領域の上（yref="paper"）に縦書きで大きめ・高コントラストで配置し、
+        # 点線でどの期かを示す
+        fig.add_scatter(x=[], y=[], mode="markers", marker=dict(size=12, color="#66BB6A"), name="マイルストーン実績")
         grouped = ml_visible.groupby("period_label")["マイルストーン"].apply(lambda s: " / ".join(s)).reset_index()
         for _, r in grouped.iterrows():
-            fig.add_vline(x=r["period_label"], line_width=1, line_dash="dot", line_color="rgba(46,125,50,0.6)")
+            fig.add_vline(x=r["period_label"], line_width=1, line_dash="dot", line_color="rgba(102,187,106,0.7)")
             fig.add_annotation(
-                x=r["period_label"], y=1.02, yref="paper", yanchor="bottom",
+                x=r["period_label"], y=1.03, yref="paper", yanchor="bottom",
                 text=r["マイルストーン"], showarrow=False, textangle=-90,
-                font=dict(size=10, color="#2E7D32"), align="left",
+                font=dict(size=16, color="#66BB6A", weight="bold"), align="left",
             )
-        layout_kwargs["margin"] = dict(t=110)
+        layout_kwargs["margin"] = dict(t=220)
 
     fig.update_layout(**layout_kwargs)
     st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_burn_chart")
