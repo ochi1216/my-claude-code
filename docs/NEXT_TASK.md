@@ -6,41 +6,44 @@ Project Cost developer開発
 
 ## Current Session
 
-S01
+S02（未開始）
 
 ## Current Session Title
 
-Project Cost developer開発 S01 - KOB1の分析ツール
+Project Cost developer開発 S02 - KOB1分析ツールの継続改善（次タスク未定）
 
 ## Current Objective
 
-Project CostのKOB1シート（SAPのプロジェクトコスト実績明細）から、該当プロジェクトの
-コスト分析を行うツールを開発する。
+未定。ユーザーから次のタスク指示を受ける。
 
 ## Background
 
-- ユーザーより、KOB1シートを含むExcelファイル（`BG ICS Project cost summary_20260722.xlsm`、
-  KOB1シート83,318行・30列）が提供された。
-- 当初はSupabaseへのデータ登録を検討したが、社内の機密性の高いコストデータを外部サービスへ
-  一括送信する操作がClaude Code Webの自動判定（安全分類器）によりブロックされたため、
-  ローカル環境で完結する構成（Excel直接読み込み→ローカル集計→Streamlitダッシュボード）に
-  方針転換した。
-- ユーザーは分析対象ファイルを、実運用時に読み込むローカルパスとして
-  `C:\Users\nx023836\Documents\PythonScripts\PM_organizer\ProjectCost\BG ICS Project cost summary_20260722.xlsm`
-  に配置した。
+S01で`project_cost_analyzer/`フォルダにKOB1コスト分析用Streamlitダッシュボードを
+新規開発した（最新版: `project_cost_analyzer_20260722_13.py`）。3タブ構成
+（事業部俯瞰／プロジェクト深掘り／ファンクション横断）に加え、Function/Func.Category/
+B4P category/FSI Descriptionの4軸で深掘りできる「コスト種別深掘り」機能、フィルタ・
+並び替え付き明細テーブル、明細の可視化グラフ、設定の永続化などを実装済み。
+詳細は`docs/PROJECT_STATUS.md`・`docs/SESSION_HISTORY.md`のS01記録を参照。
 
 ## Scope
 
-- KOB1シートの読み込み・型整備
-- プロジェクト単位でのコスト集計・可視化（Streamlitダッシュボード）
-- 予算(Budget/Committed)との対比分析（`Project cost against BC`シート等との突き合わせ）は
-  今回のスコープ外（未着手）
+未定。ユーザーの次回指示に従う。
+
+参考: S01時点で保留・未着手のまま残っている既知の候補（指示があった場合の対応候補であり、
+ユーザーの指示なしに着手しないこと）:
+
+- 予算(Budget/Committed)との対比分析（`Project cost against BC`シート等との突き合わせ）
+- Cost Elementの独自グルーピング（提案時の案D、未採用）
+- 自動テストスイート（pytest等）の整備
+- ユーザーのWindows実機での`run_dashboard.bat`経由の動作確認結果のフィードバック反映
 
 ## Files That May Be Changed
 
-- `project_cost_analyzer/` 配下のファイル一式
-- リポジトリ直下 `README.md`（新ツールへのリンク追記）
-- `docs/PROJECT_STATUS.md` / `docs/SESSION_HISTORY.md` / `docs/NEXT_TASK.md`（セッション終了時）
+- `project_cost_analyzer/` 配下のファイル一式（新しい変更は次バージョン`_14`以降として
+  旧版を残したまま追加する）
+- リポジトリ直下 `README.md`（必要な場合のみ）
+- `docs/PROJECT_STATUS.md` / `docs/SESSION_HISTORY.md` / `docs/NEXT_TASK.md`
+  （セッション終了時）
 
 ## Files That Must Not Be Changed
 
@@ -49,31 +52,22 @@ Project CostのKOB1シート（SAPのプロジェクトコスト実績明細）�
 
 ## Task
 
-1. KOB1シートを読み込み、プロジェクト別・期間別・コスト要素別等でコストを集計する
-   Streamlitダッシュボードを作成する（完了）。
-2. 実データで集計値の整合性を検証する（完了）。
-3. 実際にダッシュボードを起動し、ブラウザで表示・フィルタ動作を確認する（完了）。
-4. 追加の分析軸（予算対比など）が必要か、ユーザーの指示を確認する（対応待ち）。
+ユーザーから次のタスク指示を受ける。
 
 ## Completion Criteria
 
-- KOB1シートのデータを読み込み、プロジェクト単位でコスト集計・可視化できること（達成）
-- 集計値（プロジェクト別合計・期間別合計）が全体合計と一致すること（達成、テスト済み）
-- 既存の他ツールに意図しない影響がないこと（達成、他フォルダは無変更）
-- 必要なテストを実施すること（達成、下記「Required Tests」参照）
+未定（次回タスク指示に応じて設定する）。
 
 ## Required Tests
 
-- 実データ（KOB1シート83,318行）でのコアロジック検証: プロジェクト別集計・期間別集計の
-  合計値が全体合計と一致することを確認済み
-- Streamlitアプリを実際に起動し、Playwright経由でブラウザから実データを読み込ませ、
-  サマリーカード・プロジェクト別内訳・期間別コスト推移グラフの表示、および
-  プロジェクト名フィルタの動作を確認済み
+未定。ただしS01の慣行に倣い、実データでのコアロジック検証とStreamlit実起動＋
+Playwrightでの実機確認を継続することが望ましい。
 
 ## Known Risks
 
-- Streamlitのmultiselectウィジェットに対する自動操作（Playwright）でのテストは、
-  キー入力のタイミングにより意図しない複数選択が発生することがあった（アプリ本体の
-  不具合ではなく自動操作側の癖と判断）。実際のユーザー操作（クリックでの単一選択）では
-  問題にならない想定だが、次回セッションで手動確認できるとより確実。
-- 予算対比分析など、KOB1以外のシート（`Project cost against BC`等）を使う機能は未着手。
+- Streamlitのselectboxで`session_state`経由の値復元を行う際、プルダウンの表示ラベルが
+  更新されない癖がある（`_06`で対処済みのパターンを新規箇所にも踏襲すること）
+- Plotly円グラフは既定で反時計回りのため、新規に円グラフを追加する際は
+  `sort=False`+`direction="clockwise"`の指定を忘れないこと
+- `st.dataframe`標準の列非表示機能はアプリ独自の「表示する列」と連動しない
+  （Streamlit側の制約のため回避不可、注記で対応済み）
