@@ -429,7 +429,11 @@ def _to_excel_bytes(sheets: dict[str, pd.DataFrame]) -> bytes:
 # 期間別コスト推移（棒グラフ、積み上げトグル対応）
 # --------------------------------------------------------------------------- #
 def render_period_bar(
-    df: pd.DataFrame, key_prefix: str, default_stacked: bool, clickable: bool = False
+    df: pd.DataFrame,
+    key_prefix: str,
+    default_stacked: bool,
+    clickable: bool = False,
+    title: str = "期間別コスト推移",
 ) -> str | None:
     """期間別コスト推移の棒グラフ（積み上げトグル対応）。
 
@@ -437,8 +441,14 @@ def render_period_bar(
     クリックされた値を返す（未クリック・非クリック指定時はNone）。積み上げ時は
     stack_colの値ごとに複数の棒トレースが並ぶが、いずれも同じperiod_label軸のため
     トレース番号によらずクリックされた点のx値をそのまま使う。
+
+    title: 見出し文言。既定は「期間別コスト推移」だが、`render_filterable_table`の
+    「この明細をグラフ化」のように、クリック非対応（clickable=False）の別スコープの
+    グラフを同一画面内に複数配置する場合、事業部俯瞰／プロジェクト深掘りタブの
+    クリック対応チャートと見出しが同一だとユーザーがどちらをクリックすべきか
+    混同するため、呼び出し元ごとに異なる見出しを指定する。
     """
-    st.subheader("期間別コスト推移")
+    st.subheader(title)
     c1, c2 = st.columns([1, 2])
     st.session_state.setdefault(f"{key_prefix}_stacked", default_stacked)
     stacked = c1.toggle("積み上げ表示", key=f"{key_prefix}_stacked")
@@ -600,7 +610,11 @@ def render_filterable_table(df: pd.DataFrame, key: str) -> None:
 
     if not work.empty:
         with st.expander("📊 この明細をグラフ化", expanded=False):
-            render_period_bar(work, key_prefix=f"{key}_ts", default_stacked=False)
+            st.caption("※ この表の絞り込み結果のみが対象です。クリックでの絞り込みには対応していません。")
+            render_period_bar(
+                work, key_prefix=f"{key}_ts", default_stacked=False,
+                title="この明細の期間別コスト推移（クリック非対応）",
+            )
 
             viz_options = [c for c in visible_cols if c in DETAIL_FILTER_COLUMNS]
             if viz_options:
