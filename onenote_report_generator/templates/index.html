@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>OneNote Report Generator 20260706_01_01</title>
+    <style>
+        body { font-family: 'Segoe UI', Meiryo, sans-serif; margin: 0; background: #f0f2f5; }
+        .container { max-width: 800px; margin: 40px auto; background: white; border-radius: 8px; padding: 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
+        .auth-box { background: #fff3cd; border: 1px solid #ffc107; border-radius: 5px; padding: 15px; margin: 20px 0; }
+        .auth-box.ok { background: #d4edda; border-color: #28a745; }
+        .auth-box.err { background: #f8d7da; border-color: #dc3545; }
+        label { font-weight: bold; color: #34495e; display: block; margin-top: 15px; }
+        select { width: 100%; padding: 8px; margin: 5px 0; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        input[type=number] { width: 80px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+        .range-row { display: flex; gap: 10px; align-items: center; margin: 5px 0 10px; }
+        .btn { padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        .btn-primary { background: #3498db; color: white; width: 100%; font-size: 16px; padding: 15px; margin-top: 20px; }
+        .btn-primary:hover { background: #2980b9; }
+        .btn-primary:disabled { background: #95a5a6; cursor: not-allowed; }
+        .btn-danger { background: #e74c3c; color: white; }
+        .progress-box { background: #ecf0f1; border-radius: 5px; padding: 15px; margin: 15px 0; display: none; }
+        .progress-track { background: #bdc3c7; border-radius: 5px; height: 12px; margin: 10px 0; }
+        .progress-bar { background: #3498db; height: 12px; border-radius: 5px; width: 0%; transition: width 0.3s; }
+        .status-msg { color: #2980b9; font-weight: bold; }
+        .status-msg.err { color: #e74c3c; }
+        .reports-section { margin-top: 30px; border-top: 2px solid #ecf0f1; padding-top: 20px; }
+        .report-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 5px; border-bottom: 1px solid #eee; font-size: 13px; }
+        .report-item:hover { background: #f8f9fa; }
+        .auth-code { font-family: monospace; font-size: 13px; margin-top: 10px; line-height: 1.8; }
+        small { color: #888; }
+        /* ==========================================
+           ブックマーク機能 CSS（VERSION 20260529_01_01追加）
+           ========================================== */
+        .bm-bar { display:flex; align-items:center; gap:8px; margin: 18px 0 0; }
+        .bm-bar select { flex:1; margin:0; }
+        .bm-bar .btn { white-space:nowrap; padding:8px 14px; }
+        .btn-bookmark { background:#8e44ad; color:white; }
+        .btn-bookmark:hover { background:#7d3c98; }
+        .btn-bm-del { background:#e74c3c; color:white; padding:8px 12px; }
+        .bm-label-input { width:100%; padding:7px; border:1px solid #ccc;
+                           border-radius:4px; box-sizing:border-box; margin:6px 0 0; font-size:13px; }
+        .bm-toast { position:fixed; bottom:24px; right:24px; background:#2c3e50; color:white;
+                     padding:12px 20px; border-radius:6px; font-size:13px; opacity:0;
+                     transition:opacity 0.3s; pointer-events:none; z-index:999; }
+        .bm-toast.show { opacity:1; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>📓 OneNote Report Generator</h1>
+    <small>VERSION 20260706_01_01</small>
+
+    <div class="auth-box" id="authBox">
+        <strong>🔐 認証状態：</strong><span id="authStatus">確認中...</span>
+        <div class="auth-code" id="authCode" style="display:none;"></div>
+    </div>
+
+    <div id="mainForm">
+        <!-- ブックマーク復元バー（VERSION 20260529_01_01追加） -->
+        <div class="bm-bar">
+            <select id="bmSelect" onchange="onBmSelectChange()">
+                <option value="">📌 ブックマークを選択して復元...</option>
+            </select>
+            <button class="btn btn-bm-del" id="bmDeleteBtn"
+                    onclick="deleteBookmark()" disabled title="選択中のブックマークを削除">🗑</button>
+        </div>
+
+        <label>① サイト</label>
+        <select id="siteSelect" onchange="loadNotebooks()" disabled>
+            <option value="">-- 認証後に読み込まれます --</option>
+        </select>
+
+        <label>② ノートブック</label>
+        <select id="notebookSelect" onchange="loadSections()" disabled>
+            <option value="">-- サイトを選択してください --</option>
+        </select>
+
+        <label>③ セクション</label>
+        <select id="sectionSelect" onchange="loadPages()" disabled>
+            <option value="">-- ノートブックを選択してください --</option>
+        </select>
+
+        <label>④ ページ範囲</label>
+        <div class="range-row">
+            <select id="rangeType" onchange="updatePageRange()">
+                <option value="latest1">最新1ページのみ</option>
+                <option value="latestN">直近Nページ</option>
+                <option value="all">セクション内全ページ（最大60）</option>
+            </select>
+            <input type="number" id="pageCount" value="4" min="1" max="60" style="display:none;"
+                   onchange="updatePageRange()">
+        </div>
+
+        <label>⑤ 対象ページ一覧（OneNote表示順）</label>
+        <select id="pageList" multiple style="height:160px;" disabled>
+            <option>-- セクションを選択してください --</option>
+        </select>
+        <small>※ページ範囲を変更すると自動選択されます。個別選択も可能です（Ctrl+クリック）</small>
+
+        <!-- ブックマーク保存UI（VERSION 20260529_01_01追加） -->
+        <div style="margin-top:18px;">
+            <input type="text" id="bmLabelInput" class="bm-label-input"
+                   placeholder="⭐ ブックマーク名（空欄で自動生成）" maxlength="60">
+            <button class="btn btn-bookmark" id="bmSaveBtn"
+                    onclick="saveBookmark()" disabled style="width:100%;margin-top:6px;">
+                ⭐ この選択をブックマークに保存
+            </button>
+        </div>
+
+        <button class="btn btn-primary" id="generateBtn" onclick="startGenerate()" disabled>
+            🚀 レポート生成開始
+        </button>
+    </div>
+
+    <div class="progress-box" id="progressBox">
+        <div class="status-msg" id="statusMsg">処理中...</div>
+        <div class="progress-track">
+            <div class="progress-bar" id="progressBar"></div>
+        </div>
+        <div id="progressText" style="font-size:13px; color:#666;"></div>
+    </div>
+
+    <div class="reports-section">
+        <h3>📁 生成済みレポート</h3>
+        <button class="btn btn-danger" onclick="cleanup()">🗑 7日以上前を削除</button>
+        <div id="reportsList" style="margin-top:10px;"></div>
+    </div>
+</div>
+
+<!-- トースト通知（VERSION 20260529_01_01追加） -->
+<div class="bm-toast" id="bmToast"></div>
+
+<script>
+let allPages        = [];
+let currentSiteId   = "";
+let authPollTimer   = null;
+let statusPollTimer = null;
+let _bmList         = [];   // ブックマーク一覧キャッシュ（VERSION 20260529_01_01追加）
+
+async function checkAuth() {
+    const res  = await fetch('/api/auth/status');
+    const data = await res.json();
+    if (data.authenticated) {
+        setAuthenticated();
+    } else {
+        document.getElementById('authStatus').textContent = '要ログイン';
+        document.getElementById('authCode').style.display = 'block';
+        document.getElementById('authCode').innerHTML = data.message || '';
+        authPollTimer = setInterval(pollAuth, 3000);
+    }
+}
+
+async function pollAuth() {
+    const res  = await fetch('/api/auth/poll');
+    const data = await res.json();
+    if (data.authenticated) {
+        clearInterval(authPollTimer);
+        setAuthenticated();
+    } else if (data.error) {
+        clearInterval(authPollTimer);
+        document.getElementById('authBox').classList.add('err');
+        document.getElementById('authStatus').textContent = '認証エラー: ' + data.error;
+    }
+}
+
+function setAuthenticated() {
+    document.getElementById('authBox').classList.add('ok');
+    document.getElementById('authStatus').textContent = '認証済み ✅';
+    document.getElementById('authCode').style.display = 'none';
+    loadSites();
+}
+
+async function loadSites() {
+    const res   = await fetch('/api/sites');
+    const sites = await res.json();
+    const sel   = document.getElementById('siteSelect');
+    sel.innerHTML = '<option value="">-- 選択してください --</option>';
+    sites.forEach(s => {
+        sel.innerHTML += '<option value="' + s.site_id + '">' + s.displayName + '</option>';
+    });
+    sel.disabled = false;
+}
+
+async function loadNotebooks() {
+    const sel     = document.getElementById('siteSelect');
+    currentSiteId = sel.value;
+    if (!currentSiteId) return;
+    const res  = await fetch('/api/notebooks?site_id=' + encodeURIComponent(currentSiteId));
+    const data = await res.json();
+    const nbSel = document.getElementById('notebookSelect');
+    nbSel.innerHTML = '<option value="">-- 選択してください --</option>';
+    data.forEach(nb => nbSel.innerHTML += '<option value="' + nb.id + '">' + nb.displayName + '</option>');
+    nbSel.disabled = false;
+    document.getElementById('sectionSelect').innerHTML = '<option value="">-- ノートブックを選択してください --</option>';
+    document.getElementById('sectionSelect').disabled = true;
+    document.getElementById('pageList').innerHTML = '<option>-- セクションを選択してください --</option>';
+    document.getElementById('pageList').disabled = true;
+    document.getElementById('generateBtn').disabled = true;
+}
+
+async function loadSections() {
+    const nbId = document.getElementById('notebookSelect').value;
+    if (!nbId) return;
+    const res  = await fetch('/api/sections/' + nbId + '?site_id=' + encodeURIComponent(currentSiteId));
+    const data = await res.json();
+    const sel  = document.getElementById('sectionSelect');
+    sel.innerHTML = '<option value="">-- 選択してください --</option>';
+    data.forEach(s => sel.innerHTML += '<option value="' + s.id + '" data-name="' + s.displayName + '">' + s.displayName + '</option>');
+    sel.disabled = false;
+    document.getElementById('pageList').innerHTML = '<option>-- セクションを選択してください --</option>';
+    document.getElementById('pageList').disabled = true;
+    document.getElementById('generateBtn').disabled = true;
+}
+
+async function loadPages() {
+    const secSel = document.getElementById('sectionSelect');
+    if (!secSel.value) return;
+    const res    = await fetch('/api/pages/' + secSel.value + '?site_id=' + encodeURIComponent(currentSiteId));
+    allPages     = await res.json();
+    const list   = document.getElementById('pageList');
+    list.innerHTML = '';
+    allPages.forEach((p, i) => {
+        const dt = new Date(p.createdDateTime).toLocaleDateString('ja-JP');
+        list.innerHTML += '<option value="' + i + '">' + dt + '　' + p.title + '</option>';
+    });
+    list.disabled = false;
+    document.getElementById('generateBtn').disabled = false;
+    document.getElementById('bmSaveBtn').disabled = false;  // VERSION 20260529_01_01追加
+    updatePageRange();
+}
+
+function updatePageRange() {
+    const type     = document.getElementById('rangeType').value;
+    const cntInput = document.getElementById('pageCount');
+    const list     = document.getElementById('pageList');
+    cntInput.style.display = type === 'latestN' ? 'inline' : 'none';
+    const opts = list.options;
+    for (let i = 0; i < opts.length; i++) opts[i].selected = false;
+    if (type === 'latest1') {
+        if (opts.length > 0) opts[opts.length - 1].selected = true;
+    } else if (type === 'latestN') {
+        const n = Math.min(parseInt(cntInput.value) || 4, 60);
+        for (let i = Math.max(0, opts.length - n); i < opts.length; i++) opts[i].selected = true;
+    } else {
+        const max = Math.min(opts.length, 60);
+        for (let i = 0; i < max; i++) opts[i].selected = true;
+    }
+}
+
+async function startGenerate() {
+    const nbSel   = document.getElementById('notebookSelect');
+    const nbName  = nbSel.options[nbSel.selectedIndex] ? nbSel.options[nbSel.selectedIndex].text : 'Notebook';
+    const secSel  = document.getElementById('sectionSelect');
+    const secName = secSel.options[secSel.selectedIndex] ? secSel.options[secSel.selectedIndex].dataset.name : 'General';
+    const list    = document.getElementById('pageList');
+    const selected = Array.from(list.selectedOptions).map(o => allPages[parseInt(o.value)]);
+    if (selected.length === 0) { alert('ページを選択してください'); return; }
+
+    document.getElementById('generateBtn').disabled = true;
+    document.getElementById('progressBox').style.display = 'block';
+    document.getElementById('statusMsg').className = 'status-msg';
+
+    await fetch('/generate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            page_ids:      selected,
+            section_name:  secName,
+            notebook_name: nbName,
+            site_id:       currentSiteId
+        })
+    });
+    statusPollTimer = setInterval(pollStatus, 1500);
+}
+
+async function pollStatus() {
+    const res  = await fetch('/status');
+    const data = await res.json();
+    document.getElementById('statusMsg').textContent = data.message;
+    const pct = data.total > 0 ? Math.round(data.progress / data.total * 100) : 0;
+    document.getElementById('progressBar').style.width = pct + '%';
+    document.getElementById('progressText').textContent =
+        data.total > 0 ? data.progress + ' / ' + data.total + ' ページ処理済み' : '';
+    if (data.state === 'done') {
+        clearInterval(statusPollTimer);
+        document.getElementById('generateBtn').disabled = false;
+        const fname = data.report_path.split(/[\\/]/).pop();
+        if (fname) await fetch('/reports/open/' + encodeURIComponent(fname));
+        loadReports();
+    } else if (data.state === 'error') {
+        clearInterval(statusPollTimer);
+        document.getElementById('generateBtn').disabled = false;
+        document.getElementById('statusMsg').classList.add('err');
+    }
+}
+
+async function loadReports() {
+    const res   = await fetch('/reports');
+    const files = await res.json();
+    const div   = document.getElementById('reportsList');
+    if (files.length === 0) {
+        div.innerHTML = '<p style="color:#888">レポートはまだありません</p>';
+        return;
+    }
+    div.innerHTML = files.map(f =>
+        '<div class="report-item">' +
+            '<span>' + f + '</span>' +
+            '<button class="btn" style="background:#8e44ad;color:white;padding:5px 12px;"' +
+                ' onclick="openReport(\'' + f + '\')">開く</button>' +
+        '</div>'
+    ).join('');
+}
+
+async function openReport(filename) {
+    await fetch('/reports/open/' + encodeURIComponent(filename));
+}
+
+async function cleanup() {
+    if (!confirm('7日以上前のレポートを削除しますか？')) return;
+    const res  = await fetch('/reports/cleanup', {method: 'POST'});
+    const data = await res.json();
+    alert(data.deleted + ' 件削除しました');
+    loadReports();
+}
+
+// ==========================================
+// ブックマーク機能 JS
+// VERSION 20260529_01_01: 新規追加
+// VERSION 20260706_01_01: Array.isArrayガード追加
+// ==========================================
+
+function showToast(msg, isError) {
+    isError = isError || false;
+    const el = document.getElementById('bmToast');
+    el.textContent = msg;
+    el.style.background = isError ? '#c0392b' : '#2c3e50';
+    el.classList.add('show');
+    setTimeout(function() { el.classList.remove('show'); }, 3000);
+}
+
+async function loadBookmarks() {
+    try {
+        const res = await fetch('/api/bookmarks');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        _bmList = await res.json();
+        const sel = document.getElementById('bmSelect');
+        sel.innerHTML = '<option value="">📌 ブックマークを選択して復元...</option>';
+        _bmList.forEach(function(bm) {
+            sel.innerHTML += '<option value="' + bm.id + '">' + bm.label + '</option>';
+        });
+    } catch(e) {
+        console.error('[BM] loadBookmarks失敗:', e);
+    }
+}
+
+function onBmSelectChange() {
+    const sel    = document.getElementById('bmSelect');
+    const delBtn = document.getElementById('bmDeleteBtn');
+    delBtn.disabled = (sel.value === '');
+    if (sel.value) {
+        const bm = _bmList.find(function(b) { return b.id === sel.value; });
+        if (bm) restoreBookmark(bm);
+    }
+}
+
+// VERSION 20260706_01_01: Array.isArrayガードを3箇所追加
+async function restoreBookmark(bm) {
+    const TIMEOUT_MS = 10000;
+
+    function fetchWithTimeout(url, opts) {
+        opts = opts || {};
+        return Promise.race([
+            fetch(url, opts),
+            new Promise(function(_, rej) {
+                setTimeout(function() { rej(new Error('タイムアウト (10秒)')); }, TIMEOUT_MS);
+            })
+        ]);
+    }
+
+    try {
+        // ① ノートブック取得
+        currentSiteId = bm.site_id;
+        document.getElementById('siteSelect').value = bm.site_id;
+        const nbSel = document.getElementById('notebookSelect');
+        nbSel.innerHTML = '<option value="">読み込み中...</option>';
+        nbSel.disabled  = true;
+
+        const nbRes  = await fetchWithTimeout(
+            '/api/notebooks?site_id=' + encodeURIComponent(bm.site_id)
+        );
+        const nbData = await nbRes.json();
+        // [20260706_01_01] ガード①: 配列でない場合（認証切れ・APIエラー）は即スロー
+        if (!Array.isArray(nbData)) {
+            throw new Error(nbData.error || 'ノートブック取得失敗（認証切れの可能性があります）');
+        }
+        nbSel.innerHTML = '<option value="">-- 選択してください --</option>';
+        nbData.forEach(function(nb) {
+            nbSel.innerHTML += '<option value="' + nb.id + '">' + nb.displayName + '</option>';
+        });
+        nbSel.value    = bm.notebook_id;
+        nbSel.disabled = false;
+
+        // ② セクション取得
+        const secSel = document.getElementById('sectionSelect');
+        secSel.innerHTML = '<option value="">読み込み中...</option>';
+        secSel.disabled  = true;
+
+        const secRes  = await fetchWithTimeout(
+            '/api/sections/' + bm.notebook_id + '?site_id=' + encodeURIComponent(bm.site_id)
+        );
+        const secData = await secRes.json();
+        // [20260706_01_01] ガード②: 配列でない場合は即スロー
+        if (!Array.isArray(secData)) {
+            throw new Error(secData.error || 'セクション取得失敗（認証切れの可能性があります）');
+        }
+        secSel.innerHTML = '<option value="">-- 選択してください --</option>';
+        secData.forEach(function(s) {
+            secSel.innerHTML +=
+                '<option value="' + s.id + '" data-name="' + s.displayName + '">' + s.displayName + '</option>';
+        });
+        secSel.value    = bm.section_id;
+        secSel.disabled = false;
+
+        // ③ ページ取得
+        const pgList = document.getElementById('pageList');
+        pgList.innerHTML = '<option>読み込み中...</option>';
+        pgList.disabled  = true;
+
+        const pgRes  = await fetchWithTimeout(
+            '/api/pages/' + bm.section_id + '?site_id=' + encodeURIComponent(bm.site_id)
+        );
+        allPages = await pgRes.json();
+        // [20260706_01_01] ガード③: 配列でない場合は即スロー
+        if (!Array.isArray(allPages)) {
+            throw new Error(allPages.error || 'ページ取得失敗（認証切れの可能性があります）');
+        }
+        pgList.innerHTML = '';
+        allPages.forEach(function(p, i) {
+            const dt = new Date(p.createdDateTime).toLocaleDateString('ja-JP');
+            pgList.innerHTML += '<option value="' + i + '">' + dt + '　' + p.title + '</option>';
+        });
+        pgList.disabled = false;
+        document.getElementById('generateBtn').disabled = false;
+        document.getElementById('bmSaveBtn').disabled   = false;
+
+        // ④ rangeTypeとページ選択を明示的に上書き（updatePageRange()自動呼出による上書きを防止）
+        document.getElementById('rangeType').value = bm.range_type || 'latest1';
+        const cntInput = document.getElementById('pageCount');
+        cntInput.style.display = (bm.range_type === 'latestN') ? 'inline' : 'none';
+        cntInput.value = bm.page_count || 4;
+
+        const savedIds = new Set((bm.page_ids || []).map(function(p) { return p.id; }));
+        const opts     = pgList.options;
+        for (let i = 0; i < opts.length; i++) {
+            opts[i].selected = savedIds.has(allPages[i] && allPages[i].id);
+        }
+
+        showToast('✅ 「' + bm.label + '」を復元しました');
+
+    } catch(e) {
+        // 失敗時: UIをクリア状態に戻す
+        document.getElementById('siteSelect').value = '';
+        currentSiteId = '';
+        document.getElementById('notebookSelect').innerHTML =
+            '<option value="">-- サイトを選択してください --</option>';
+        document.getElementById('notebookSelect').disabled = true;
+        document.getElementById('sectionSelect').innerHTML =
+            '<option value="">-- ノートブックを選択してください --</option>';
+        document.getElementById('sectionSelect').disabled = true;
+        document.getElementById('pageList').innerHTML =
+            '<option>-- セクションを選択してください --</option>';
+        document.getElementById('pageList').disabled = true;
+        document.getElementById('generateBtn').disabled = true;
+        document.getElementById('bmSaveBtn').disabled   = true;
+        document.getElementById('bmSelect').value = '';
+        document.getElementById('bmDeleteBtn').disabled = true;
+        showToast('❌ 復元失敗: ' + e.message, true);
+        console.error('[BM] restoreBookmark失敗:', e);
+    }
+}
+
+async function saveBookmark() {
+    const nbSel  = document.getElementById('notebookSelect');
+    const secSel = document.getElementById('sectionSelect');
+    const pgList = document.getElementById('pageList');
+
+    const selectedPages = Array.from(pgList.selectedOptions).map(function(o) {
+        return allPages[parseInt(o.value)];
+    });
+    if (selectedPages.length === 0) {
+        showToast('❌ ページを選択してからブックマークしてください', true);
+        return;
+    }
+
+    const saveBtn = document.getElementById('bmSaveBtn');
+    saveBtn.disabled = true;
+
+    try {
+        const siteSelEl = document.getElementById('siteSelect');
+        const body = {
+            label:         document.getElementById('bmLabelInput').value.trim(),
+            site_id:       currentSiteId,
+            site_name:     siteSelEl.options[siteSelEl.selectedIndex] ? siteSelEl.options[siteSelEl.selectedIndex].text : '',
+            notebook_id:   nbSel.value,
+            notebook_name: nbSel.options[nbSel.selectedIndex] ? nbSel.options[nbSel.selectedIndex].text : '',
+            section_id:    secSel.value,
+            section_name:  secSel.options[secSel.selectedIndex] ? secSel.options[secSel.selectedIndex].dataset.name : '',
+            page_ids:      selectedPages,
+            range_type:    document.getElementById('rangeType').value,
+            page_count:    parseInt(document.getElementById('pageCount').value) || 4
+        };
+
+        const res  = await fetch('/api/bookmarks', {
+            method:  'POST',
+            headers: {'Content-Type': 'application/json'},
+            body:    JSON.stringify(body)
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+
+        document.getElementById('bmLabelInput').value = '';
+        showToast('⭐ 「' + data.label + '」を保存しました');
+        await loadBookmarks();
+
+    } catch(e) {
+        showToast('❌ 保存失敗: ' + e.message, true);
+        console.error('[BM] saveBookmark失敗:', e);
+    } finally {
+        saveBtn.disabled = false;
+    }
+}
+
+async function deleteBookmark() {
+    const sel = document.getElementById('bmSelect');
+    const bm  = _bmList.find(function(b) { return b.id === sel.value; });
+    if (!bm) return;
+    if (!confirm('「' + bm.label + '」を削除しますか？')) return;
+
+    const delBtn = document.getElementById('bmDeleteBtn');
+    delBtn.disabled = true;
+
+    try {
+        const res = await fetch('/api/bookmarks/' + encodeURIComponent(bm.id), {method: 'DELETE'});
+        if (!res.ok) {
+            const d = await res.json();
+            throw new Error(d.error || 'HTTP ' + res.status);
+        }
+        showToast('🗑 「' + bm.label + '」を削除しました');
+        await loadBookmarks();
+        document.getElementById('bmDeleteBtn').disabled = true;
+    } catch(e) {
+        showToast('❌ 削除失敗: ' + e.message, true);
+        console.error('[BM] deleteBookmark失敗:', e);
+        delBtn.disabled = false;
+    }
+}
+
+window.onload = function() { checkAuth(); loadReports(); loadBookmarks(); };
+</script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+flask>=3.0
+beautifulsoup4>=4.12
+msal>=1.24
+requests>=2.31
+google-genai>=0.3
