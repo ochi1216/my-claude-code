@@ -6,10 +6,10 @@ set PYTHONIOENCODING=utf-8
 rem ========================================
 rem YouTube Playlist Remove Auto Runner
 rem Target: youtube_list_remove_yyyymmdd_rr.py
-rem VERSION 20260525_01_01
+rem VERSION 20260726_01
 rem Purpose:
 rem   - Use fixed debug port 9222
-rem   - Use isolated Chrome profile ChromeDebugProfile9223
+rem   - Use isolated Chrome profile ChromeDebugProfile_20260725
 rem   - Avoid Documents sync/monitoring area
 rem   - Avoid killing normal Chrome as much as possible
 rem   - Use fixed Python313 path to avoid PATH / uv environment mismatch
@@ -34,7 +34,7 @@ set "LOG_FILE=%LOG_DIR%\remove_log_%TIMESTAMP%.log"
 
 echo ========================================= >> "%LOG_FILE%" 2>&1
 echo YouTube Playlist Remove Auto Execution >> "%LOG_FILE%" 2>&1
-echo VERSION: 20260525_01_01 >> "%LOG_FILE%" 2>&1
+echo VERSION: 20260726_01 >> "%LOG_FILE%" 2>&1
 echo Start: %date% %time% >> "%LOG_FILE%" 2>&1
 echo Working Directory: %CD% >> "%LOG_FILE%" 2>&1
 echo Python EXE: %PYTHON_EXE% >> "%LOG_FILE%" 2>&1
@@ -74,7 +74,7 @@ rem ========================================
 rem Settings
 rem ========================================
 set "DEBUG_PORT=9222"
-set "CHROME_PROFILE_NAME=ChromeDebugProfile9223"
+set "CHROME_PROFILE_NAME=ChromeDebugProfile_20260725"
 set "CHROME_USER_DATA=%LOCALAPPDATA%\%CHROME_PROFILE_NAME%"
 set "INITIAL_URL=https://www.youtube.com/feed/playlists"
 

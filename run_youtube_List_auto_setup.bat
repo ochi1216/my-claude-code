@@ -6,10 +6,10 @@ set PYTHONIOENCODING=utf-8
 rem ========================================
 rem YouTube Playlist Add / List Setup Auto Runner
 rem Target: Youtube_List_Setup_*.py
-rem VERSION 20260515_01_01
+rem VERSION 20260726_01
 rem Purpose:
 rem   - Use fixed debug port 9222
-rem   - Use isolated Chrome profile ChromeDebugProfile9223
+rem   - Use isolated Chrome profile ChromeDebugProfile_20260725
 rem   - Avoid Documents sync/monitoring area for Chrome profile
 rem   - Avoid killing normal Chrome as much as possible
 rem ========================================
@@ -28,7 +28,7 @@ set "LOG_FILE=%LOG_DIR%\list_setup_log_%TIMESTAMP%.log"
 
 echo ========================================= >> "%LOG_FILE%" 2>&1
 echo YouTube Playlist Add / List Setup Auto Execution >> "%LOG_FILE%" 2>&1
-echo VERSION: 20260515_01_01 >> "%LOG_FILE%" 2>&1
+echo VERSION: 20260726_01 >> "%LOG_FILE%" 2>&1
 echo Start: %date% %time% >> "%LOG_FILE%" 2>&1
 echo ========================================= >> "%LOG_FILE%" 2>&1
 
@@ -36,7 +36,7 @@ rem ========================================
 rem Settings
 rem ========================================
 set "DEBUG_PORT=9222"
-set "CHROME_PROFILE_NAME=ChromeDebugProfile9223"
+set "CHROME_PROFILE_NAME=ChromeDebugProfile_20260725"
 set "CHROME_USER_DATA=%LOCALAPPDATA%\%CHROME_PROFILE_NAME%"
 set "INITIAL_URL=https://www.youtube.com/feed/subscriptions"
 set "PYTHON_EXE=C:\Users\nx023836\AppData\Local\Programs\Python\Python313\python.exe"

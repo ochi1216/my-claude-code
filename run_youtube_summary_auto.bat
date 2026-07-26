@@ -5,7 +5,7 @@ set PYTHONIOENCODING=utf-8
 
 rem ========================================
 rem YouTube Summary Auto Runner
-rem VERSION 20260515_01_01
+rem VERSION 20260726_01
 rem Purpose:
 rem   - Use isolated Chrome profile
 rem   - Fixed debug port 9222
@@ -27,7 +27,7 @@ set "LOG_FILE=%LOG_DIR%\run_log_%TIMESTAMP%.log"
 
 echo ========================================= >> "%LOG_FILE%" 2>&1
 echo YouTube Summary Auto Execution >> "%LOG_FILE%" 2>&1
-echo VERSION: 20260515_01_01 >> "%LOG_FILE%" 2>&1
+echo VERSION: 20260726_01 >> "%LOG_FILE%" 2>&1
 echo Start: %date% %time% >> "%LOG_FILE%" 2>&1
 echo ========================================= >> "%LOG_FILE%" 2>&1
 
@@ -35,7 +35,7 @@ rem ========================================
 rem Settings
 rem ========================================
 set "DEBUG_PORT=9222"
-set "CHROME_PROFILE_NAME=ChromeDebugProfile9223"
+set "CHROME_PROFILE_NAME=ChromeDebugProfile_20260725"
 set "CHROME_USER_DATA=%LOCALAPPDATA%\%CHROME_PROFILE_NAME%"
 set "INITIAL_URL=https://www.youtube.com/feed/subscriptions"
 
