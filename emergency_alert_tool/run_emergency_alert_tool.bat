@@ -31,11 +31,22 @@ echo [INFO] Installing/checking dependencies...
 pip install -r requirements.txt
 
 if not exist "config.json" (
-    echo [ERROR] config.json was not found.
-    echo         Copy config.example.json to config.json and fill in
-    echo         tenant_id / client_id / sender_upn / staff / supervisors, etc.
-    pause
-    exit /b 1
+    if exist "config.example.json" (
+        echo [INFO] config.json was not found. Creating it from config.example.json...
+        copy /y "config.example.json" "config.json" >nul
+        echo [ACTION REQUIRED] config.json has been created with placeholder values.
+        echo                   Open config.json in a text editor and fill in
+        echo                   tenant_id / client_id / sender_upn / staff / supervisors, etc.
+        echo                   Then run this script again.
+        pause
+        exit /b 1
+    ) else (
+        echo [ERROR] Neither config.json nor config.example.json was found.
+        echo         Make sure config.example.json is in this same folder,
+        echo         or copy your own config.json here.
+        pause
+        exit /b 1
+    )
 )
 
 if "%EMERGENCY_ALERT_CLIENT_SECRET%"=="" (
