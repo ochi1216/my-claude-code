@@ -46,7 +46,7 @@ def make_supervisors():
     ]
 
 
-def make_config(tmp_path, poll_interval=30):
+def make_config(tmp_path, poll_interval=30, dry_run=False):
     return eat.Config(
         tenant_id="tenant",
         client_id="client",
@@ -60,6 +60,7 @@ def make_config(tmp_path, poll_interval=30):
         database_path=str(tmp_path / "test.db"),
         staff=make_staff(18),
         supervisors=make_supervisors(),
+        dry_run=dry_run,
     )
 
 
@@ -336,3 +337,54 @@ def test_dashboard_shows_response_status(app_client):
     assert resp.status_code == 200
     assert "回答済み".encode() in resp.data
     assert "未回答".encode() in resp.data  # 他の17名は未回答
+
+
+# ---------------------------------------------------------------------------
+# dry_run（Microsoft 365未接続でも全体フローを確認するためのモード）
+# ---------------------------------------------------------------------------
+
+def test_logging_notifier_does_not_raise():
+    notifier = eat.LoggingNotifier()
+    notifier.send_mail("someone@example.com", "件名", "<p>本文</p>")  # 例外が出ないことを確認するのみ
+
+
+def test_build_notifier_returns_logging_notifier_when_dry_run(tmp_path):
+    config = make_config(tmp_path, dry_run=True)
+    assert isinstance(eat.build_notifier(config), eat.LoggingNotifier)
+
+
+def test_build_notifier_returns_graph_notifier_by_default(tmp_path):
+    config = make_config(tmp_path, dry_run=False)
+    assert isinstance(eat.build_notifier(config), eat.GraphNotifier)
+
+
+def test_internal_test_trigger_dispatches_without_real_earthquake(tmp_path):
+    config = make_config(tmp_path, dry_run=True)
+    store = eat.Store(config.database_path)
+    app = eat.create_app(config, store=store, notifier=eat.LoggingNotifier())
+    app.testing = True
+    client = app.test_client()
+
+    resp = client.post("/internal/test-trigger", json={"prefecture": "大阪府", "intensity": "6強"})
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["alert_id"] is not None
+    assert data["prefecture"] == "大阪府"
+    assert data["intensity"] == "6強"
+    assert len(store.list_tokens(data["alert_id"])) == 18
+
+
+def test_internal_test_trigger_uses_config_defaults(tmp_path):
+    config = make_config(tmp_path, dry_run=True)
+    store = eat.Store(config.database_path)
+    app = eat.create_app(config, store=store, notifier=eat.LoggingNotifier())
+    app.testing = True
+    client = app.test_client()
+
+    resp = client.post("/internal/test-trigger")
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["prefecture"] == config.target_prefectures[0]
+    assert data["intensity"] == config.intensity_threshold

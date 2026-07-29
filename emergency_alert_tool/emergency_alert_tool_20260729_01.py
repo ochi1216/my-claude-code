@@ -146,6 +146,7 @@ class Config:
     database_path: str
     staff: list  # list[StaffMember]
     supervisors: list  # list[StaffMember]
+    dry_run: bool = False
 
     @classmethod
     def load(cls, path: str) -> "Config":
@@ -166,6 +167,7 @@ class Config:
             database_path=raw.get("database_path", "emergency_alert.db"),
             staff=[StaffMember(**s) for s in raw["staff"]],
             supervisors=[StaffMember(**s) for s in raw["supervisors"]],
+            dry_run=bool(raw.get("dry_run", False)),
         )
 
 
@@ -227,6 +229,19 @@ class GraphNotifier:
             timeout=15,
         )
         resp.raise_for_status()
+
+
+class LoggingNotifier:
+    """実際にはメールを送信せず、送信内容をログに出力するテスト用Notifier。
+
+    Microsoft 365側（Azure ADアプリ登録・クライアントシークレット等）の
+    準備が整う前に、トリガー判定〜スタッフ通知〜回答〜上司通知までの
+    一連の流れを動作確認するために使う（`config.json` の `dry_run: true`）。
+    """
+
+    def send_mail(self, to_email: str, subject: str, body_html: str) -> None:
+        logger.info("[DRY-RUN] メール送信をスキップしました。宛先=%s 件名=%s", to_email, subject)
+        logger.info("[DRY-RUN] 本文:\n%s", body_html)
 
 
 # ---------------------------------------------------------------------------
@@ -509,12 +524,17 @@ th,td{border:1px solid #ccc;padding:.5em 1em;text-align:left;}
 """
 
 
-def create_app(config: Config, store: Optional[Store] = None, notifier: Optional[GraphNotifier] = None) -> Flask:
+def build_notifier(config: Config) -> "GraphNotifier | LoggingNotifier":
+    if config.dry_run:
+        logger.warning("dry_run が有効です。メールは送信されず、ログに出力されるだけです。")
+        return LoggingNotifier()
+    return GraphNotifier(config.tenant_id, config.client_id, config.client_secret, config.sender_upn)
+
+
+def create_app(config: Config, store: Optional[Store] = None, notifier=None) -> Flask:
     app = Flask(__name__)
     store = store or Store(config.database_path)
-    notifier = notifier or GraphNotifier(
-        config.tenant_id, config.client_id, config.client_secret, config.sender_upn
-    )
+    notifier = notifier or build_notifier(config)
     service = AlertService(config, store, notifier)
 
     app.config["ALERT_SERVICE"] = service
@@ -530,6 +550,23 @@ def create_app(config: Config, store: Optional[Store] = None, notifier: Optional
         events = quake_client.fetch_latest()
         alert_id = service.check_and_dispatch(events)
         return {"alert_id": alert_id}
+
+    @app.post("/internal/test-trigger")
+    def internal_test_trigger():
+        """本物の地震を待たずに、トリガー〜18名通知の流れを手動で試すためのエンドポイント。
+
+        本番運用では想定していない検証用の入口であり、外部公開しないこと。
+        """
+        payload = request.get_json(silent=True) or {}
+        prefecture = payload.get("prefecture") or config.target_prefectures[0]
+        intensity = payload.get("intensity") or config.intensity_threshold
+        event = EEWEvent(
+            event_id=f"test-{secrets.token_hex(4)}",
+            reported_at=datetime.now(timezone.utc).isoformat(),
+            areas=[AreaIntensity(prefecture=prefecture, max_intensity=intensity)],
+        )
+        alert_id = service.check_and_dispatch([event])
+        return {"alert_id": alert_id, "prefecture": prefecture, "intensity": intensity}
 
     @app.get("/respond/<token>")
     def respond_form(token):
@@ -608,7 +645,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO)
     config = Config.load(args.config)
     store = Store(config.database_path)
-    notifier = GraphNotifier(config.tenant_id, config.client_id, config.client_secret, config.sender_upn)
+    notifier = build_notifier(config)
 
     if args.mode == "poll":
         poll_forever(config, store, notifier)

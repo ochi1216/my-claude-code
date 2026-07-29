@@ -116,11 +116,48 @@ python emergency_alert_tool_20260729_01.py --config config.json --mode web --por
 python emergency_alert_tool_20260729_01.py --config config.json --mode poll
 ```
 
-手動で1回だけ判定を実行したい場合（動作確認用）:
+手動で1回だけ判定を実行したい場合（動作確認用。実際の地震速報データを取得しにいく）:
 
 ```bash
 curl -X POST http://localhost:5000/internal/check
 ```
+
+### Microsoft 365未接続の状態で全体フローを試す（dry_run）
+
+Azure ADアプリ登録・クライアントシークレットの準備がまだでも、
+トリガー〜18名への通知〜回答フォーム〜上司3名への即時通知、という
+一連の流れをこの場で確認できる。
+
+1. `config.json` の `"dry_run": false` を `"dry_run": true` に変更する
+   （本番運用時は必ず `false` に戻すこと）。
+2. ツールを起動し直す。
+3. 本物の地震を待たずに、その場でトリガーを発生させる:
+
+   ```bash
+   curl -X POST http://localhost:5000/internal/test-trigger
+   ```
+
+   対象都府県・震度を指定したい場合:
+
+   ```bash
+   curl -X POST http://localhost:5000/internal/test-trigger \
+        -H "Content-Type: application/json" \
+        -d "{\"prefecture\": \"大阪府\", \"intensity\": \"6強\"}"
+   ```
+
+4. `dry_run` が有効な間、実際のメール送信は行われず、代わりにコンソールへ
+   `[DRY-RUN] メール送信をスキップしました。宛先=... 件名=...` という
+   ログと、回答フォームへのリンクを含む本文が出力される。
+5. ログに出力されたリンク（`http://.../respond/<token>`）をブラウザで開き、
+   3項目をクリックして送信する。
+6. 送信すると、コンソールに上司3名分の `[DRY-RUN]` ログが即座に出力される
+   （実際の通知メールと同じ宛先・件名・本文）。
+7. `http://localhost:5000/dashboard/<alert_id>` で回答状況も確認できる
+   （`alert_id` は `/internal/test-trigger` のレスポンスに含まれる）。
+
+`/internal/test-trigger` は動作確認専用のエンドポイントであり、本番運用では
+外部に公開しないこと（ファイアウォール等で `/internal/` 配下へのアクセスを
+社内ネットワークに限定することを推奨する）。
 
 ## テスト
 

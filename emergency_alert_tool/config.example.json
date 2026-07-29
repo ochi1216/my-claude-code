@@ -8,6 +8,7 @@
   "quake_api_url": "https://api.p2pquake.net/v2/history?codes=556&limit=5",
   "poll_interval_seconds": 30,
   "response_base_url": "http://localhost:5000",
+  "dry_run": false,
   "database_path": "emergency_alert.db",
   "staff": [
     {"id": "staff01", "name": "スタッフ01", "email": "staff01@example.com"},
