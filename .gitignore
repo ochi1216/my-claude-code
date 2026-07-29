@@ -7,3 +7,7 @@ venv/
 po_database_organizer/config.json
 po_database_organizer/token_cache.json
 po_database_organizer/cache/
+
+# 緊急連絡ツールのローカル設定・DB
+emergency_alert_tool/config.json
+emergency_alert_tool/*.db

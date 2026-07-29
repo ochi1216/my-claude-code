@@ -1,0 +1,37 @@
+{
+  "tenant_id": "<YOUR_TENANT_ID>",
+  "client_id": "<YOUR_CLIENT_ID>",
+  "client_secret_env": "EMERGENCY_ALERT_CLIENT_SECRET",
+  "sender_upn": "emergency-alert@example.com",
+  "target_prefectures": ["大分県", "大阪府", "東京都"],
+  "intensity_threshold": "5弱",
+  "quake_api_url": "https://api.p2pquake.net/v2/history?codes=556&limit=5",
+  "poll_interval_seconds": 30,
+  "response_base_url": "http://localhost:5000",
+  "database_path": "emergency_alert.db",
+  "staff": [
+    {"id": "staff01", "name": "スタッフ01", "email": "staff01@example.com"},
+    {"id": "staff02", "name": "スタッフ02", "email": "staff02@example.com"},
+    {"id": "staff03", "name": "スタッフ03", "email": "staff03@example.com"},
+    {"id": "staff04", "name": "スタッフ04", "email": "staff04@example.com"},
+    {"id": "staff05", "name": "スタッフ05", "email": "staff05@example.com"},
+    {"id": "staff06", "name": "スタッフ06", "email": "staff06@example.com"},
+    {"id": "staff07", "name": "スタッフ07", "email": "staff07@example.com"},
+    {"id": "staff08", "name": "スタッフ08", "email": "staff08@example.com"},
+    {"id": "staff09", "name": "スタッフ09", "email": "staff09@example.com"},
+    {"id": "staff10", "name": "スタッフ10", "email": "staff10@example.com"},
+    {"id": "staff11", "name": "スタッフ11", "email": "staff11@example.com"},
+    {"id": "staff12", "name": "スタッフ12", "email": "staff12@example.com"},
+    {"id": "staff13", "name": "スタッフ13", "email": "staff13@example.com"},
+    {"id": "staff14", "name": "スタッフ14", "email": "staff14@example.com"},
+    {"id": "staff15", "name": "スタッフ15", "email": "staff15@example.com"},
+    {"id": "staff16", "name": "スタッフ16", "email": "staff16@example.com"},
+    {"id": "staff17", "name": "スタッフ17", "email": "staff17@example.com"},
+    {"id": "staff18", "name": "スタッフ18", "email": "staff18@example.com"}
+  ],
+  "supervisors": [
+    {"id": "boss01", "name": "上司01", "email": "boss01@example.com"},
+    {"id": "boss02", "name": "上司02", "email": "boss02@example.com"},
+    {"id": "boss03", "name": "上司03", "email": "boss03@example.com"}
+  ]
+}
