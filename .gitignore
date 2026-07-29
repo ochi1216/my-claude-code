@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 venv/
 .venv/
+.pytest_cache/
 
 # SharePoint連携ツールのローカル設定・認証キャッシュ
 po_database_organizer/config.json
