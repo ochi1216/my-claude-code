@@ -30,7 +30,8 @@ my-claude-code/
 │   ├── README.md
 │   ├── CHANGELOG.md
 │   ├── requirements.txt
-│   ├── weekly_pdf_diff_20260729_01.py   # CLIエントリポイント（Phase 1: 解析のみ）
+│   ├── weekly_pdf_diff_20260729_01.py   # CLIエントリポイント旧版（保持のみ）
+│   ├── weekly_pdf_diff_20260729_02.py   # CLIエントリポイント現行版（GUI選択対応）
 │   ├── run_weekly_pdf_diff.bat          # Windows起動バッチ（最新版を自動選択）
 │   ├── pdf_reader.py
 │   ├── weekly_splitter.py
@@ -89,10 +90,13 @@ S01完了分: `weekly_pdf_diff/IMPLEMENTATION_PLAN.md` 作成済み。Phase 1
 （`pdf_reader.py` / `weekly_splitter.py`）を実装し、合成PDFでの単体テスト3件
 （すべてPASS）に加え、実PDF（89ページ）に対する一時実行でも16件のWeekly境界と
 日付を全て正しく検出できることを確認済み。CLIエントリポイント
-`weekly_pdf_diff_20260729_01.py`（Weekly区切り解析のみ、`--output-dir`へ
-`*_weekly_index.json`を出力）と、Windows起動バッチ `run_weekly_pdf_diff.bat`
+`weekly_pdf_diff_20260729_02.py`（Weekly区切り解析のみ、`*_weekly_index.json`を
+選択PDFと同じフォルダの`output/`へ出力。PDFパス省略時はtkinterのファイル選択
+ダイアログを表示）と、Windows起動バッチ `run_weekly_pdf_diff.bat`
 （フォルダ内の最新版 `.py` を自動選択して実行、Shift_JIS(CP932)保存で
-文字化け対策済み）を追加。Phase 2以降（セクション階層化・差分抽出・青太字描画・
+文字化け対策済み）を追加。旧版`_01`は開発ルールにより削除せず保持。
+単体テストはCLIエントリポイントもファイル名から最新版を動的に読み込む方式に
+しており、バージョンアップ時にテスト側の書き換えは不要。Phase 2以降（セクション階層化・差分抽出・青太字描画・
 レポート出力）は未着手のため、現時点のCLIでは解析結果JSONの出力のみ可能。
 
 ## Known Issues

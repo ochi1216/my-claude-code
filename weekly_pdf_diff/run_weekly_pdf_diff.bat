@@ -48,12 +48,8 @@ echo ============================================================
 echo.
 
 if "%~1"=="" (
-    echo 使い方: このバッチファイルへPDFファイルをドラッグ^&ドロップするか、
-    echo         コマンドラインから引数としてPDFパスを渡してください。
-    echo 例: run_weekly_pdf_diff.bat "C:\path\to\Hello_Ochi_San.pdf"
+    echo PDFファイルが指定されていません。ファイル選択画面を開きます...
     echo.
-    pause
-    exit /b 1
 )
 
 "%PYTHON%" "%SCRIPT_DIR%%LATEST%" %*
