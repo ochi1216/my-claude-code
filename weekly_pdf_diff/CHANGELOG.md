@@ -13,3 +13,6 @@
 - `run_weekly_pdf_diff.bat` を追加（フォルダ内の最新の
   `weekly_pdf_diff_yyyymmdd_NN.py` を自動選択して起動。Shift_JIS(CP932)保存で
   日本語版Windowsでの文字化けを回避）
+- `run_weekly_pdf_diff.bat` 修正: PDF未指定でダブルクリックした場合、使い方を
+  表示した後もPythonを実行してargparseのエラーが二重に出ていた不具合を修正。
+  使い方表示後は `pause` して終了するようにした

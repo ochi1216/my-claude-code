@@ -52,6 +52,8 @@ if "%~1"=="" (
     echo         コマンドラインから引数としてPDFパスを渡してください。
     echo 例: run_weekly_pdf_diff.bat "C:\path\to\Hello_Ochi_San.pdf"
     echo.
+    pause
+    exit /b 1
 )
 
 "%PYTHON%" "%SCRIPT_DIR%%LATEST%" %*
