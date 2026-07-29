@@ -30,6 +30,7 @@ Microsoft 365環境（Microsoft Graph API）を前提とする。
 | `emergency_alert_tool_20260729_01.py` | 本体（判定ロジック・Graph通知・Flaskアプリ・ポーリング） |
 | `config.example.json` | 設定ファイルのサンプル（実運用時は `config.json` としてコピーし、秘密情報以外を記入） |
 | `requirements.txt` | 依存パッケージ |
+| `run_emergency_alert_tool.bat` | Windows用の起動バッチファイル（同じフォルダに`config.json`を置いて実行） |
 | `tests/test_emergency_alert_tool.py` | pytestによる自動テスト |
 | `CHANGELOG.md` | 変更履歴 |
 
@@ -85,6 +86,22 @@ export EMERGENCY_ALERT_CLIENT_SECRET="<クライアントシークレット>"
 ```
 
 ### 4. 実行
+
+#### Windows（バッチファイル）
+
+`run_emergency_alert_tool.bat` と同じフォルダに `config.json` を配置し、
+バッチファイルをダブルクリック（またはコマンドプロンプトから実行）する。
+
+```bat
+run_emergency_alert_tool.bat
+```
+
+初回実行時に仮想環境(`venv`)の作成と依存パッケージのインストールを自動で行い、
+そのままWebサーバ（回答フォーム・ダッシュボード・ポーリング）を起動する。
+`config.json` が無い場合や `EMERGENCY_ALERT_CLIENT_SECRET` が未設定の場合は
+画面にメッセージが表示される。終了する場合はウィンドウ上で `Ctrl+C` を押す。
+
+#### コマンドラインから直接実行する場合
 
 Webサーバ（回答フォーム・ダッシュボード）と、地震速報フィードの
 ポーリングを同時に起動する場合:

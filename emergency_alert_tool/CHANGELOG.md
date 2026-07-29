@@ -2,6 +2,17 @@
 
 このフォルダ内の変更履歴。バージョンアップ時は旧ファイルを残したまま新ファイルを追加し、ここに変更点を追記する。
 
+## [20260729_02] - 2026-07-29
+
+**追加ファイル:** `run_emergency_alert_tool.bat`
+**変更ファイル:** `README.md`
+
+- Windows用の起動バッチファイル `run_emergency_alert_tool.bat` を追加。
+  同じフォルダに配置して実行すると、仮想環境の作成・依存パッケージの
+  インストール・`config.json`/環境変数の存在チェックを行った上で、
+  Webサーバ（回答フォーム・ダッシュボード・ポーリング）を起動する。
+- README.md にWindows（バッチファイル）での起動手順を追記。
+
 ## [20260729_01] - 2026-07-29
 
 **追加ファイル:** `emergency_alert_tool_20260729_01.py`, `config.example.json`, `requirements.txt`, `README.md`, `tests/test_emergency_alert_tool.py`
