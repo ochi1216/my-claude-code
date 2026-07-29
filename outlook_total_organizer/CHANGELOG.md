@@ -1,5 +1,81 @@
 # CHANGELOG — outlook_total_organizer
 
+## VERSION 20260729_06
+
+### 追加・修正
+	**ステータスバーに「今どれぐらい進んでいるか」の進捗表示を追加**: 「作業中のステータスが、待ち長い」というご指摘を受けた。特に新設した「📈 振り返り」タブは、最大6か月分×現行/アーカイブ両ストアを1か月ずつ順に処理するため、従来の「メッセージ＋経過秒数」だけの表示では、全体のうちどこまで進んだのかが分からなかった。ステータスバーの表示に`[現在/合計 (割合%)]`の進捗プレフィックスを追加できるようにし、以下の箇所に反映した。
+	・振り返りタブ: 月ごとのメール/予定表取得、AIによる月次統合、それぞれで「[2/6 (33%)] 取得中: ...」のように何か月目を処理中か表示されるようにした。
+	・統括コックピットv2の生成: プロジェクトごとの集計進捗。
+	・アクションダッシュボードの生成: 対象スレッドのAI抽出進捗。
+	いずれも既存の`progress_callback(current, total, message)`が元々受け取っていた`current`/`total`を、これまでは捨てて`message`しか表示していなかった箇所に限定して反映しており、進捗値自体の計算ロジックは変更していない。
+	**あわせて発見・修正した不具合**: 進捗表示の`(割合%)`という文字列自体に半角スペース＋開き括弧(" (")が含まれるようになったため、経過秒数を追記する`_update_timer`が使っていた「現在の表示テキストを" ("で分割してベース部分を取り出す」という実装のままだと、進捗プレフィックスの括弧の時点で誤って切り詰められ、メッセージ本文（受信トレイ名やアーカイブ表示など）が消えてしまうことが実装中の検証で判明した。`_update_timer`が文字列を再パースする方式をやめ、`_set_status`が確定したテキストを`self._status_base_text`に保存しておき、`_update_timer`はそれを参照するだけにする方式に変更して解消した。
+
+### 変更関数
+	`MailManagerGUI._set_status`（`current`/`total`引数を追加し、指定時は`[現在/合計 (割合%)]`を先頭に付与。確定したテキストを`self._status_base_text`に保存するよう変更）
+	`MailManagerGUI._update_timer`（ベーステキストの取得方法を、表示中テキストの文字列分割から`self._status_base_text`参照に変更。進捗プレフィックスの括弧との誤動作を解消）
+	`MailManagerGUI._run_review`（月ごとのメール/予定表取得ループで、月インデックスをその場でcurrent/totalとして`_set_status`に渡すよう変更）
+	`MailManagerGUI._run_cockpit_v2` / `_run_action_dashboard`（`progress_callback`のcurrent/totalを`_set_status`に渡すよう変更。表示以外のロジックは変更なし）
+
+### 新規追加：
+	なし
+
+### 削除：
+	なし
+
+変更ファイル：
+	`outlook_total_organizer_20260729_06.py`（`_20260729_05`からのコピー＋今回の変更。`_20260729_05`はそのまま残置）
+
+動作確認時の注意：
+	本ツールはWindows専用（win32com依存）のため、本セッションの実行環境（Linuxコンテナ）ではOutlook実機・Tkinter GUIでの動作検証ができていない。以下を実施済み: `ast.parse`構文チェック、`_20260729_05`との`diff`で変更範囲がステータス表示関連のみ(35行)であることを確認。`_set_status`/`_update_timer`のロジックをtkinterに依存しないスタンドアロンのモッククラス(`FakeLabel`/`FakeRoot`)に切り出し、(1)進捗指定なしの場合は従来通りメッセージのみ表示されること、(2)進捗指定時に`[2/6 (33%)]`形式で正しく表示されること、(3)括弧を含む進捗プレフィックス付きのテキストでタイマーが1秒ごとに経過秒数を追記しても、括弧を含む元のメッセージ(「受信トレイ(アーカイブ) を取得中...」)が途中で切り詰められずに残ることを検証し、全て合格した(この最後の検証で、旧実装の文字列分割方式のままだと実際にメッセージが切り詰められることを再現したうえで、修正後は再現しないことを確認済み)。
+	実機（Windows＋Outlook）でのご確認が必要: 実際にステータスバーの表示が意図通り見やすくなっているか(特に「📈 振り返りを生成」実行時、6か月選択時の進捗の見え方)。
+
+変更しないこと（宣誓）：
+	振り返りタブ・統括コックピットv2・アクションダッシュボードそれぞれの取得・分析・分類ロジック自体(進捗の"表示"のみを変更し、進捗の"計算"元になっているcurrent/totalの値そのものは変更していない)・その他の既存タブ・既存の`progress_callback`のシグネチャ・APIコスト表示・ステータスバー以外のUI
+
+## VERSION 20260729_05
+
+### 追加・修正
+	**新タブ「📈 振り返り」を新設(四半期パフォーマンスレビュー用エグゼクティブサマリー)**: 過去1〜6か月の自分の活動を、MAG Leader(上司)への報告を意識した「実績」単位にAIで統合し、報告優先順位(S/A/B)付きで一覧化する機能を追加した。既存の5タブはすべて「受信メールへの対応」を扱うのに対し、本タブは唯一「自分が送信したメール(=実行した・判断したこと)」を主データ源にする点が根本的に異なる。
+	**2か月より前のメールがオンラインアーカイブに移動済みの環境に対応**: ご利用の環境では2か月より前の受信・送信メールがすべてExchangeのオンラインアーカイブ(インプレースアーカイブ)という別ストアに移動しており、既存コードが使う`namespace.GetDefaultFolder(6/5)`(既定ストアのみを見る)ではまったく取得できないことが判明した。`namespace.Stores`を横断してオンラインアーカイブのストア(`Store.ExchangeStoreType == 3`、フォールバックで表示名一致)を検出し、そのルート配下の受信トレイ・送信済みアイテム・予定表も追加で走査するようにした。
+	**6か月分でも古い月が欠落しない取得方式**: 既存の`get_project_mails`等が使う「直近N日を1000件上限で取得」方式のまま6か月分をまとめて取得すると、新しい方から1000件で打ち切られ古い月が丸ごと欠落する。本タブでは暦月単位でループし、月ごとに`Restrict`する方式にして、この欠落を回避した。
+	**AIによる「L2活動→L3実績」への統合**: 単純な1スレッド=1実績の羅列では四半期レビューに使えないため、AIに複数スレッドを渡し、同じ話題の複数スレッド(例: 同じ施策の8スレッド)を1件の実績に統合させる設計にした。AIに渡す前段階として、Outlook非依存の機械フィルタ`review_activity_qualifies`で「自分の送信が1通も無いスレッド」を除外し、さらに「自分が起点／送信2通以上／添付あり／5人以上宛て」のいずれかを満たすスレッドのみに絞り込んでいる(AI呼び出しコストの抑制と、受動的な受信だけのスレッドを対象外にするため)。
+	**優先順位は加重和スコアではなく決定木で判定**: 統括コックピットv2の解放スコア(加重和)が「実質2成分しか機能しない」失敗をしていたことを踏まえ、本タブでは同じ失敗を繰り返さないよう、Step1(成果確定)→Step2(G1/G2/G3のいずれかに紐づく)→Step3(Tier1関与／Tier2 2名以上／Japan Site全体／定量効果のいずれか一つでもあればS、無ければA)という単純な決定木で判定する`rank_review_achievement`を実装した。ランク内の並びも合成スコアではなく「定量効果の有無→Tier1関与→関与組織数→完了日の新しい順」の単純多段比較(`review_achievement_sort_key`)。UIには常に根拠チップを表示し、なぜそのランクかを常に説明できるようにした。
+	**Tier1/Tier2の機械判定**: ユーザーから提示されたメールアドレスをもとに、Javed(MAG Leader)・Thomas(BG Leader)をTier1(経営層=報告先そのもの)、Alber/John/Alex/Ulysis(各Mgr)をTier2(機能部門長=横のカウンターパート)として定義し、実績に紐づくスレッドのTo/Cc(+手動追加分)から関与を機械的に検出する(`classify_review_tier`)。
+	**ゴールの二重帰属**: 「R19の案件を前に進めた」と「その進め方をR04式に変えた」が同一の実績になり得るというユーザーの指摘を踏まえ、1実績が複数のゴール(G1_project/G2_site/G3_r04)に同時に紐づくことを許容する設計にした。ゴール別ビューでは、該当する全ゴールの見出しの下に同じ実績を重複表示する。
+	**会議(予定表)の取り込み**: 自分が主催した会議を月ごとに取得し(`get_review_calendar_events`)、同じ件名で3回以上開催されている定例会議は「運営実績」として1件に束ね(`bundle_recurring_meetings`)、単発会議はそのまま、件名の部分一致+時期の近さでメール実績と紐付ける(`meeting_matches_activity`)。繰り返し予定を正しく展開するには`IncludeRecurrences=True`の前に開始日時の昇順ソートが必須という、他の取得処理とは逆のOutlook COM挙動に対応した。
+	**月次キャッシュで「生成のたびに全期間を読み込みなおす」問題を回避**: 過ぎた月のメール内容は二度と変わらないため、`analysis_cache/review_monthly/{YYYYMM}.json`にAI統合済みの実績を月単位でキャッシュし、過去の月は無条件に再利用する(再取得・再AI呼び出しをしない)。当月のみ、対象スレッド件数の変化でキャッシュを無効化する。
+	**手動編集機能**: 口頭判断・会議など、メールに残らない実績を画面上のフォームから手動追加できるほか、各実績の🙈非表示・ランクの手動変更・(サーバー側の`/update_review_manual`経由で)文言修正に対応した。人事レビューは「生成物ではなく著作物」という考え方から、AIの機械判定を人が上書きできることを重視した。`review_manual_items.json`にAI再解析とは別管理で保存する。
+	**📋 コピー用テキストを生成ボタン**: 現在表示中(ビュー・ランクフィルタ後)の実績をMarkdown風のテキストに変換し、クリップボードにコピーする機能を追加した(レビューフォーム等への貼り付け用)。
+	**表示は3軸切替(ゴール別[既定]/プロジェクト別/月別タイムライン)**。ゴール別のG2(サイト基盤整備)はさらに機能別(財務・調達／法務・輸出入／IT・自動化／人事・労務／設備・安全)にサブグループ化する。
+	**テスト中に発見した不具合を実装中に修正**: G2内で機能別キーワードに一致しなかった実績を、`.rv-subcat-group`で包まずに中途半端な`<div class="rv-subcat-rows">`だけで囲んでいたため、「📋 コピー用テキストを生成」機能(`.rv-goal-group`/`.rv-subcat-group`の直接の親子関係だけを見て集計するJS)がこれらの実績を無言で取りこぼす不具合があった。Playwrightでの検証中に発見し、`.rv-goal-rows`直下に平置きする形に修正して解消した。
+
+### 変更関数
+	`OutlookMailManager._item_to_dict`（To/Cc各宛先のメールアドレスを`to_emails`/`cc_emails`として新たに保存するよう拡張。既存の`routing`判定ロジック自体は変更なし）
+
+### 新規追加：
+	`OutlookMailManager._find_online_archive_root` / `_find_subfolder_by_names` / `_get_archive_inbox_and_sent`（オンラインアーカイブのストア検出）
+	`OutlookMailManager.get_review_mails_for_month` / `get_review_calendar_events` / `_meeting_to_dict` / `_get_date_from_appointment_start`（暦月単位のメール・予定表取得、現行+アーカイブ横断）
+	モジュール定数 `REVIEW_TIER1` / `REVIEW_TIER2` / `REVIEW_GOAL_ORDER` / `REVIEW_GOAL_LABELS` / `REVIEW_G2_KEYWORDS` / `REVIEW_G2_SUBCAT_LABELS` / `REVIEW_RANK_ORDER` / `REVIEW_RANK_LABELS` / `REVIEW_TYPE_LABELS` / `REVIEW_PROJECT_LABELS`
+	`classify_review_tier` / `classify_review_g2_subcategory` / `rank_review_achievement` / `review_achievement_sort_key` / `meeting_matches_activity` / `bundle_recurring_meetings` / `review_activity_qualifies`（すべてOutlook非依存の純粋関数）
+	`MailSummarizer.summarize_review_month`（月次AI統合＋キャッシュ）/ `generate_review_data`（月次データの機械的な後処理・手動編集マージ）/ `apply_review_manual_overrides`（手動編集マージ部分の共通化。生成時とフォーマット再生成時の両方から呼ぶ）
+	`HTMLReportGenerator.generate_review_report`（振り返りタブのHTML生成。ゴール別/プロジェクト別/月別タイムラインの3ビュー、ランクフィルタ、手動追加フォーム、コピー用テキスト生成）
+	`OutlookRequestHandler.do_POST`の`/update_review_manual`エンドポイント（hide/unhide/set_rank/add/edit_text）
+	`load_review_manual_items` / `save_review_manual_items`、`review_manual_lock`
+	`MailManagerGUI._ui_review_tab` / `_get_review_months` / `_run_review` / `_reformat_review` / `_save_review_result`（新タブ「📈 振り返り」の生成・フォーマット再生成）
+
+### 削除：
+	なし
+
+変更ファイル：
+	`outlook_total_organizer_20260729_05.py`（`_20260729_04`からのコピー＋今回の変更。`_20260729_04`はそのまま残置）
+
+動作確認時の注意：
+	本ツールはWindows専用（win32com依存）のため、本セッションの実行環境（Linuxコンテナ）ではOutlook実機での動作検証ができていない。以下を実施済み: `ast.parse`構文チェック、`_20260729_04`との`diff`で変更範囲が振り返りタブ関連のみ(既存5タブ・既存メソッドへの変更は`_item_to_dict`の宛先保存追加のみ)であることを確認。純粋関数群(`classify_review_tier`/`classify_review_g2_subcategory`/`rank_review_achievement`/`review_achievement_sort_key`/`meeting_matches_activity`/`bundle_recurring_meetings`/`review_activity_qualifies`)をOutlook非依存のスタンドアロン`python3`ハーネスに切り出し、Tier判定・G2分類・ランク決定木の全分岐・ソート順・会議紐付け・定例会議の束ね・L2機械フィルタの全分岐、33件のテストで検証し全て合格した。`apply_review_manual_overrides`も同様に切り出し、非表示・ランク上書き・文言修正・手動追加のマージと、再適用時の非重複性(idempotency)を10件のテストで検証した。`generate_review_report`もPlaywrightで検証し、(1)既定でゴール別ビュー・Bランク非表示、(2)二重帰属実績がG1とG3の両方に正しく重複表示されること、(3)G2の機能別サブグループ化、(4)ランクフィルタの表示切替、(5)3ビューの切替、(6)🙈非表示ボタンで同一実績の全出現箇所が連動して隠れること、(7)ランク変更セレクタが正しいペイロードで`/update_review_manual`を呼び、バッジ表示も即時更新されること、(8)コピー用テキスト生成が非表示中の実績を除外し表示中の実績を含むこと、の21項目を確認し全て合格した(検証中に発見した「G2内で機能別に分類されない実績がコピー用テキストから抜け落ちる」不具合はその場で修正し、再検証で解消を確認済み)。
+	実機（Windows＋Outlook）でのご確認が必要: オンラインアーカイブのストア検出(`ExchangeStoreType`判定・表示名フォールバック)が実際の環境で正しく機能するか、アーカイブ配下の受信トレイ・送信済み・予定表フォルダ名が想定(「受信トレイ」「送信済みアイテム」「予定表」/英語名)と一致するか、6か月分の初回生成にかかる実際の時間、会議のMeetingStatus判定(`is_organizer`)の妥当性、`IncludeRecurrences`による定例会議展開が実データで正しく機能するか、AIによる実績統合・ゴール分類・定量効果抽出の精度、手動追加フォームの実際の使用感。
+
+変更しないこと（宣誓）：
+	既存5タブ(検索/整理・プロジェクト俯瞰・スタッフ俯瞰・統括コックピット・アクション)の表示・操作・データ取得ロジック・既存の`get_project_mails`/`get_relevant_mails_for_period`/`search_mails_fast`の挙動・統括コックピットv2の解放スコア廃止後の分類ロジック・`action_status.json`/`cockpit_v2_acknowledged.json`等の既存ストア・Outlook再起動連動の未読書き戻し・R19Projタグ関連ロジック
+
 ## VERSION 20260729_04
 
 ### 追加・修正
