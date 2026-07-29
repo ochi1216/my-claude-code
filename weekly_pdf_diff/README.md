@@ -15,12 +15,43 @@ Phase 1（PDF読み込み・Weekly境界検出）のみ実装済み。差分抽�
   として抽出する（視覚的なY順にソート済み）。
 - `weekly_splitter.py`: `From:`/`Sent:`/`Subject: Weekly Report` の並びからWeekly境界を
   `(page, y座標)` で検出し、日付を優先順位（Sent:ヘッダー → OneNote印字日時）で解決する。
+- `weekly_pdf_diff_20260729_01.py`: CLIエントリポイント。現状はWeekly区切り解析
+  （`*_weekly_index.json` の出力）のみ行う。差分抽出・青太字描画はまだ実行できない。
+- `run_weekly_pdf_diff.bat`: Windows用の起動バッチ（後述）。
 
 ## セットアップ
 
 ```bash
 pip install -r requirements.txt
 ```
+
+## 実行方法
+
+### コマンドラインから直接
+
+```bash
+python weekly_pdf_diff_20260729_01.py <PDFファイル> [--output-dir output] [--expected-count 16]
+```
+
+### Windowsのバッチファイルから（推奨）
+
+`run_weekly_pdf_diff.bat` をダブルクリックするか、PDFファイルをこのバッチファイルへ
+ドラッグ&ドロップすると実行される。
+
+```
+run_weekly_pdf_diff.bat "C:\path\to\Hello_Ochi_San.pdf"
+```
+
+このバッチファイルは、同じフォルダ内にある `weekly_pdf_diff_yyyymmdd_NN.py` の中から
+**ファイル名（日付・連番）が最も新しいもの**を自動的に選んで実行する。
+今後バージョンアップしたファイル（例: `weekly_pdf_diff_20260805_01.py`）を
+このフォルダに追加するだけで、バッチファイル自体は変更不要で最新版が起動される
+（開発ルールの「旧バージョンを残したまま新バージョンを追加する」運用にそのまま対応）。
+
+**文字化けについて**: `run_weekly_pdf_diff.bat` はShift_JIS(CP932)・BOMなしで
+保存している。日本語版Windowsのコマンドプロンプトは既定でCP932のため、これで
+文字化けしない。エディタで開いて保存し直す場合は、文字コードを「Shift-JIS」
+（BOMなし）のまま保存すること。UTF-8で保存し直すと日本語部分が文字化けする。
 
 ## テスト
 

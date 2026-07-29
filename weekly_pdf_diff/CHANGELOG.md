@@ -8,3 +8,8 @@
 - 合成PDFによる単体テスト3件を追加、全てパス
 - 実PDF（89ページ）に対する検証で、`get_text("dict")`のブロック順が視覚的な
   Y順と一致しないケースを発見し、`pdf_reader.py`でのソート処理により対処
+- `weekly_pdf_diff_20260729_01.py` (CLIエントリポイント, revision 01) を追加。
+  現状はWeekly区切り解析（`*_weekly_index.json`出力）のみ実装
+- `run_weekly_pdf_diff.bat` を追加（フォルダ内の最新の
+  `weekly_pdf_diff_yyyymmdd_NN.py` を自動選択して起動。Shift_JIS(CP932)保存で
+  日本語版Windowsでの文字化けを回避）
