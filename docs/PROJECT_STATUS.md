@@ -86,18 +86,19 @@ my-claude-code/
 
 ## Current Status
 
-S01完了分: `weekly_pdf_diff/IMPLEMENTATION_PLAN.md` 作成済み。Phase 1
-（`pdf_reader.py` / `weekly_splitter.py`）を実装し、合成PDFでの単体テスト3件
-（すべてPASS）に加え、実PDF（89ページ）に対する一時実行でも16件のWeekly境界と
-日付を全て正しく検出できることを確認済み。CLIエントリポイント
-`weekly_pdf_diff_20260729_02.py`（Weekly区切り解析のみ、`*_weekly_index.json`を
-選択PDFと同じフォルダの`output/`へ出力。PDFパス省略時はtkinterのファイル選択
-ダイアログを表示）と、Windows起動バッチ `run_weekly_pdf_diff.bat`
-（フォルダ内の最新版 `.py` を自動選択して実行、Shift_JIS(CP932)保存で
-文字化け対策済み）を追加。旧版`_01`は開発ルールにより削除せず保持。
-単体テストはCLIエントリポイントもファイル名から最新版を動的に読み込む方式に
-しており、バージョンアップ時にテスト側の書き換えは不要。Phase 2以降（セクション階層化・差分抽出・青太字描画・
-レポート出力）は未着手のため、現時点のCLIでは解析結果JSONの出力のみ可能。
+S01完了分: Phase 1〜5すべて実装済み。`weekly_pdf_diff_20260729_03.py`が
+現行版CLIエントリポイントで、基準日以降の各Weeklyを直前のWeeklyと比較し、
+青太字化した別名PDF・差分レポート（CSV/HTML）・Weekly一覧JSONを出力する
+フルパイプラインが動作する。旧版`_01`/`_02`は開発ルールにより削除せず保持。
+Windows起動バッチ`run_weekly_pdf_diff.bat`は最新版`.py`を自動選択して実行する
+（Shift_JIS(CP932)保存で文字化け対策済み）。単体テスト38件・統合テスト1件
+（合成3Weekly PDFでパイプライン全体を検証）が全てPASS。
+
+実PDF（89ページ、14 Weeklyペア）に対するエンドツーエンド実行も確認済みで、
+その過程で単体テストだけでは検出できなかった重大な不具合を3件発見・修正した
+（詳細は`weekly_pdf_diff/CHANGELOG.md`参照）。修正後は正常終了・89ページ維持・
+change_typeの内訳（moved/added/deleted/modifiedが妥当な比率で分布）・
+複数ページの目視確認（PDFをPNG書き出しして確認）で問題ないことを確認済み。
 
 ## Known Issues
 
@@ -109,6 +110,10 @@ S01完了分: `weekly_pdf_diff/IMPLEMENTATION_PLAN.md` 作成済み。Phase 1
 - `page.get_text("dict")` のブロック順が視覚的なY座標順と一致しない実例を発見
   （1ページ目のOneNote日時スタンプ）。`pdf_reader.py`で `(page, y0)` ソートにより
   対処済みだが、他ページでも同様の非直感的な順序が起こり得る前提で設計する必要がある。
+- STR/Reliability/Others配下の罫線なし複数列レイアウト（進捗ステータス表等）は
+  行・列として正確に再構成できておらず、断片単位のTextUnitとして扱われる
+  （詳細はIMPLEMENTATION_PLAN.md）。誤結合は防止済みだが、差分対応付けの精度は
+  本文の箇条書き・番号付き項目より低い。
 
 ## Test and Execution
 
@@ -118,9 +123,10 @@ pip install -r requirements.txt
 python -m pytest tests/ -v
 ```
 
-S01時点: `tests/test_weekly_splitter.py` の3件全てPASS（合成PDFのみ使用）。
-実PDFでの検証はセッション内の一時実行として実施し、結果はIMPLEMENTATION_PLAN.md
-1章に記録。実PDF自体・全文抽出テキストはリポジトリにコミットしていない。
+S01時点: 単体テスト38件・統合テスト1件（計39件）が全てPASS（合成PDFのみ使用）。
+実PDFでの検証はセッション内の一時実行として実施し、結果は
+`weekly_pdf_diff/CHANGELOG.md`と`IMPLEMENTATION_PLAN.md`に記録。実PDF自体・
+出力結果（差分PDF・レポート等）はリポジトリにコミットしていない。
 
 ## Important Restrictions
 
