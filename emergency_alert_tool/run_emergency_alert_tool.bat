@@ -1,23 +1,25 @@
 @echo off
 setlocal
 
-rem emergency_alert_tool 起動用バッチファイル。
-rem このファイルと同じフォルダに config.json を配置してから実行すること。
+rem Launcher for emergency_alert_tool.
+rem Place this file in the same folder as config.json before running.
+rem NOTE: messages are kept in ASCII on purpose to avoid mojibake caused by
+rem the Windows console codepage (e.g. Shift-JIS) misreading UTF-8 text.
 
 cd /d "%~dp0"
 
 where python >nul 2>nul
 if errorlevel 1 (
-    echo [ERROR] python が見つかりません。Python がインストールされ、PATHが通っているか確認してください。
+    echo [ERROR] python was not found. Please install Python and make sure it is on PATH.
     pause
     exit /b 1
 )
 
 if not exist "venv" (
-    echo [INFO] 仮想環境(venv)を作成します...
+    echo [INFO] Creating virtual environment...
     python -m venv venv
     if errorlevel 1 (
-        echo [ERROR] 仮想環境の作成に失敗しました。
+        echo [ERROR] Failed to create the virtual environment.
         pause
         exit /b 1
     )
@@ -25,25 +27,25 @@ if not exist "venv" (
 
 call venv\Scripts\activate.bat
 
-echo [INFO] 依存パッケージを確認・インストールします...
+echo [INFO] Installing/checking dependencies...
 pip install -r requirements.txt
 
 if not exist "config.json" (
-    echo [ERROR] config.json が見つかりません。
-    echo         config.example.json をコピーして config.json を作成し、
-    echo         tenant_id / client_id / sender_upn / staff / supervisors 等を設定してください。
+    echo [ERROR] config.json was not found.
+    echo         Copy config.example.json to config.json and fill in
+    echo         tenant_id / client_id / sender_upn / staff / supervisors, etc.
     pause
     exit /b 1
 )
 
 if "%EMERGENCY_ALERT_CLIENT_SECRET%"=="" (
-    echo [WARN] 環境変数 EMERGENCY_ALERT_CLIENT_SECRET が設定されていません。
-    echo        config.json の client_secret_env で別名を指定している場合は、
-    echo        そちらの環境変数を事前に set しておいてください。
-    echo        設定なしで続行しますが、メール送信(Microsoft Graph)は失敗します。
+    echo [WARN] Environment variable EMERGENCY_ALERT_CLIENT_SECRET is not set.
+    echo        If config.json uses a different name via client_secret_env,
+    echo        set that variable instead before running this script.
+    echo        Continuing without it, but sending mail via Microsoft Graph will fail.
 )
 
-echo [INFO] emergency_alert_tool を起動します（終了する場合はこのウィンドウで Ctrl+C）。
+echo [INFO] Starting emergency_alert_tool. Press Ctrl+C in this window to stop.
 python emergency_alert_tool_20260729_01.py --config config.json --mode web --port 5000
 
 pause
