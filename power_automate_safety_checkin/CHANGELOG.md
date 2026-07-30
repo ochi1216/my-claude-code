@@ -55,3 +55,12 @@
   - 非管理者アカウントでの`Install-PackageProvider`失敗(`-Scope CurrentUser`で解決)
   - 古い`PowerShellGet`(`1.0.0.1`)による`Install-Module`の`Telemetry`型エラー
     (`PowerShellGet`自体の更新+PowerShellウィンドウの再起動で解決)
+
+## [20260730_04] - 2026-07-30
+
+**追加ファイル:** `scripts/provision_sharepoint_20260730_02.ps1`(`_01`は規約により残置)
+
+- 実機検証で、PnP.PowerShellがインストール済み・`Import-Module`単体では動作するにも
+  関わらず、スクリプト実行時には`Connect-PnPOnline`が「認識されないコマンド」として
+  失敗する事象を確認(モジュールの自動読み込みが環境によって効かない)。
+  スクリプト冒頭で明示的に`Import-Module PnP.PowerShell`を行うよう修正。
