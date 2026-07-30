@@ -17,12 +17,18 @@ rem instead, where UTF-8 is handled correctly by PowerShell.
 
 cd /d "%~dp0"
 
-where powershell >nul 2>nul
+rem PnP.PowerShell 3.x requires PowerShell 7.4+ (pwsh), not the built-in
+rem Windows PowerShell 5.1 (powershell.exe). Prefer pwsh; if it is missing,
+rem stop here with instructions instead of failing deep inside a script.
+where pwsh >nul 2>nul
 if errorlevel 1 (
-    echo [ERROR] powershell was not found. This launcher requires Windows PowerShell.
+    echo [ERROR] pwsh (PowerShell 7) was not found.
+    echo         PnP.PowerShell 3.x does not run on Windows PowerShell 5.1.
+    echo         Install PowerShell 7 from https://aka.ms/PSWindows and try again.
     pause
     exit /b 1
 )
+set "PSEXE=pwsh"
 
 rem Find the latest revision of each script by filename (yyyymmdd_NN sorts correctly).
 set "LATEST_PROVISION="
@@ -76,14 +82,14 @@ if not exist "%MEMBERSFILE%" (
     echo [INFO] config\members.json not found, using config\members.example.json (placeholders).
     set "MEMBERSFILE=config\members.example.json"
 )
-powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\%LATEST_PROVISION%" -SiteUrl "%SITEURL%" -MembersFile "%MEMBERSFILE%"
+%PSEXE% -NoProfile -ExecutionPolicy Bypass -File "scripts\%LATEST_PROVISION%" -SiteUrl "%SITEURL%" -MembersFile "%MEMBERSFILE%"
 pause
 goto MENU
 
 :EXPORT_UNPACK
 set /p SOLUTIONNAME=Solution unique name (e.g. EQSafetyCheckin):
 set /p ENVURL=DEV environment URL:
-powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\%LATEST_DEPLOY%" -Action export-unpack -SolutionName "%SOLUTIONNAME%" -EnvironmentUrl "%ENVURL%"
+%PSEXE% -NoProfile -ExecutionPolicy Bypass -File "scripts\%LATEST_DEPLOY%" -Action export-unpack -SolutionName "%SOLUTIONNAME%" -EnvironmentUrl "%ENVURL%"
 pause
 goto MENU
 
@@ -92,9 +98,9 @@ set /p SOLUTIONNAME=Solution unique name (e.g. EQSafetyCheckin):
 set /p ENVURL=Target environment URL (TEST or PROD):
 set /p MANAGEDANSWER=Import as Managed solution? (y/n):
 if /i "%MANAGEDANSWER%"=="y" (
-    powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\%LATEST_DEPLOY%" -Action pack-import -SolutionName "%SOLUTIONNAME%" -EnvironmentUrl "%ENVURL%" -Managed
+    %PSEXE% -NoProfile -ExecutionPolicy Bypass -File "scripts\%LATEST_DEPLOY%" -Action pack-import -SolutionName "%SOLUTIONNAME%" -EnvironmentUrl "%ENVURL%" -Managed
 ) else (
-    powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\%LATEST_DEPLOY%" -Action pack-import -SolutionName "%SOLUTIONNAME%" -EnvironmentUrl "%ENVURL%"
+    %PSEXE% -NoProfile -ExecutionPolicy Bypass -File "scripts\%LATEST_DEPLOY%" -Action pack-import -SolutionName "%SOLUTIONNAME%" -EnvironmentUrl "%ENVURL%"
 )
 pause
 goto MENU

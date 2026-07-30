@@ -42,3 +42,16 @@
   文字化け起動不能事案(UTF-8のバッチファイルがShift-JISコンソールで誤解釈された)
   を踏まえ、表示メッセージを全て英数字(ASCII)に統一し、CRLF改行で保存した。
   この方針をリポジトリ直下の`CLAUDE.md`にも明文化した。
+
+## [20260730_03] - 2026-07-30
+
+**変更ファイル:** `run_power_automate_tools.bat`, `docs/MANUAL_STEPS.md`
+
+- 実機検証の結果、`PnP.PowerShell` 3.x系はWindows標準の「Windows PowerShell 5.1」
+  では動作せず、PowerShell 7.4以降(`pwsh`)が必須であることが判明。
+  `run_power_automate_tools.bat`が`powershell`(5.1)ではなく`pwsh`を呼び出すよう修正。
+  `pwsh`が見つからない場合はエラーメッセージで導線(https://aka.ms/PSWindows)を示す。
+- 実機で遭遇した2つのトラブルと対処法を`docs/MANUAL_STEPS.md`に追記:
+  - 非管理者アカウントでの`Install-PackageProvider`失敗(`-Scope CurrentUser`で解決)
+  - 古い`PowerShellGet`(`1.0.0.1`)による`Install-Module`の`Telemetry`型エラー
+    (`PowerShellGet`自体の更新+PowerShellウィンドウの再起動で解決)

@@ -19,9 +19,25 @@
 
 ### 1. 環境準備(最初の1回のみ)
 
-- [ ] `pac` CLIをインストール(`dotnet tool install --global Microsoft.PowerApps.CLI.Tool`)
+- [ ] **PowerShell 7以降(`pwsh`)をインストール** (https://aka.ms/PSWindows)。
+      `PnP.PowerShell` 3.x系はWindows標準の「Windows PowerShell 5.1」では動作せず、
+      PowerShell 7.4以降が必須(未導入だと`Import-Module`が
+      `Modules_InsufficientPowerShellVersion`エラーで失敗する)。
+      インストール後は、スタートメニューの「PowerShell 7」(pwsh)を使うこと。
+      `run_power_automate_tools.bat`は`pwsh`を自動的に呼び出す。
+- [ ] `pac` CLIをインストール(`dotnet tool install --global Microsoft.PowerApps.CLI.Tool`、
+      または https://aka.ms/PowerAppsCLI のインストーラー)
 - [ ] DEV環境へサインイン: `pac auth create --url <DEV環境URL>`(対話的ブラウザログイン)
-- [ ] `PnP.PowerShell`モジュールをインストール: `Install-Module PnP.PowerShell -Scope CurrentUser`
+- [ ] `pwsh`(PowerShell 7)を起動し、`PnP.PowerShell`モジュールをインストール:
+      `Install-Module PnP.PowerShell -Scope CurrentUser -Force`
+      - 会社のPCで`Install-PackageProvider`等が「管理者権限が必要」と出る場合は、
+        `-Scope CurrentUser`を付けて実行すること(このリポジトリの手順はすべて
+        管理者権限なしで完結する設計)。
+      - 非常に古い`PowerShellGet`(バージョン`1.0.0.1`、Windows標準の初期版)が
+        入っていると、`Install-Module`実行時に`型 ... Telemetry が見つかりません`
+        というエラーで失敗することがある。その場合は
+        `Install-Module -Name PowerShellGet -Force -AllowClobber -Scope CurrentUser`
+        で更新し、**PowerShellウィンドウを閉じて開き直してから**再試行すること。
 
 ### 2. SharePoint(スクリプトで自動化済み・手動確認のみ)
 
