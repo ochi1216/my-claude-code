@@ -42,13 +42,13 @@
 
 .EXAMPLE
     # DEVで構築したSolutionをエクスポート・unpackしてGit管理下に置く
-    ./deploy_solution.ps1 -Action export-unpack `
+    ./deploy_solution_20260730_01.ps1 -Action export-unpack `
         -SolutionName "EQSafetyCheckin" `
         -EnvironmentUrl "https://contoso-dev.crm7.dynamics.com"
 
 .EXAMPLE
     # source管理下のSolutionをpackしてTEST環境へimport
-    ./deploy_solution.ps1 -Action pack-import `
+    ./deploy_solution_20260730_01.ps1 -Action pack-import `
         -SolutionName "EQSafetyCheckin" `
         -EnvironmentUrl "https://contoso-test.crm7.dynamics.com" `
         -Managed

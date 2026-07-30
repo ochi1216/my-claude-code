@@ -23,7 +23,7 @@
 
 .EXAMPLE
     Install-Module PnP.PowerShell -Scope CurrentUser
-    ./provision_sharepoint.ps1 -SiteUrl "https://contoso.sharepoint.com/sites/EQSafetyCheckin" `
+    ./provision_sharepoint_20260730_01.ps1 -SiteUrl "https://contoso.sharepoint.com/sites/EQSafetyCheckin" `
         -MembersFile "../config/members.json"
 #>
 

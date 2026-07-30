@@ -28,11 +28,11 @@ Power AutomateのGUI操作は煩雑になりがちなため、以下を徹底し
 
 | 作業 | 従来 | このプロジェクト |
 | --- | --- | --- |
-| SharePointリスト・列の作成 | 画面で1つずつクリック | `scripts/provision_sharepoint.ps1` で自動生成 |
+| SharePointリスト・列の作成 | 画面で1つずつクリック | `scripts/provision_sharepoint_*.ps1（最新版）` で自動生成 |
 | 拠点・メンバーデータの投入 | 画面で1行ずつ手入力 | `config/*.json` から一括投入 |
 | フローの条件式・変換式 | 画面で都度考えて入力 | `docs/FLOW_LOGIC_SPEC.md` にコピペ用の式を明記 |
 | Adaptive Card | カードデザイナーで組み立て | `cards/*.json` を直接貼り付け |
-| DEV→TEST→PROD展開 | 環境ごとに手作業で再構築 | `scripts/deploy_solution.ps1` (pac CLI) で一発展開 |
+| DEV→TEST→PROD展開 | 環境ごとに手作業で再構築 | `scripts/deploy_solution_*.ps1（最新版）` (pac CLI) で一発展開 |
 
 削減できない最小限の手作業(接続認証・フロー本体の初回構築1回)は
 `docs/MANUAL_STEPS.md` に明記している。
@@ -48,8 +48,8 @@ power_automate_safety_checkin/
 │   ├── channel_alert_card.json # チャネルへの開始通知カード(非対話)
 │   └── checkin_card.json       # 個人への安否確認カード(回答用)
 ├── scripts/
-│   ├── provision_sharepoint.ps1 # SharePoint 5リスト自動作成+データ投入
-│   └── deploy_solution.ps1      # pac CLIによるSolution展開
+│   ├── provision_sharepoint_yyyymmdd_NN.ps1 # SharePoint 5リスト自動作成+データ投入(最新版のみ残す)
+│   └── deploy_solution_yyyymmdd_NN.ps1      # pac CLIによるSolution展開(最新版のみ残す)
 ├── solution/                    # pac CLIでunpackしたフロー定義(初回構築後に生成)
 └── docs/
     ├── FLOW_LOGIC_SPEC.md        # フローのアクション順序・式(コピペ用)
@@ -63,12 +63,12 @@ power_automate_safety_checkin/
 詳細は `docs/MANUAL_STEPS.md` を参照。おおまかな流れ:
 
 1. `pac` CLIと`PnP.PowerShell`をインストール
-2. `scripts/provision_sharepoint.ps1` を実行し、SharePointリストを構築
+2. `scripts/provision_sharepoint_*.ps1（最新版）` を実行し、SharePointリストを構築
 3. `config/members.example.json` を実際のメンバー情報で複製した
    `config/members.json`(コミットしない)を作成し、再度スクリプトを実行してデータ投入
 4. `docs/FLOW_LOGIC_SPEC.md` の通りにDEV環境で3フローを1回だけ構築
 5. Gate B(Teamsアクションの実挙動)を1回検証
-6. `scripts/deploy_solution.ps1` でTEST/PRODへ展開
+6. `scripts/deploy_solution_*.ps1（最新版）` でTEST/PRODへ展開
 
 ## スコープ(P1: このPoCで作るもの)
 

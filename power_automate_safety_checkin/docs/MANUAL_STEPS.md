@@ -25,7 +25,7 @@
 
 ### 2. SharePoint(スクリプトで自動化済み・手動確認のみ)
 
-- [ ] `scripts/provision_sharepoint.ps1`を実行(初回サインインのみ対話的、以降は自動)
+- [ ] `scripts/provision_sharepoint_*.ps1（最新版）`を実行(初回サインインのみ対話的、以降は自動)
 - [ ] 実行結果として表示される列内部名を`evidence/sharepoint_internal_names.json`へ保存(Gate D)
 
 ### 3. コネクタ接続の初回承認(各コネクタにつき1回のみ)
@@ -57,8 +57,8 @@ Power Automate画面で、新規フロー作成時に以下のコネクタへの
 
 ### 6. 以降の変更・環境展開(すべて自動化)
 
-- [ ] `scripts/deploy_solution.ps1 -Action export-unpack ...`でDEVの変更をGit管理下へ
-- [ ] `scripts/deploy_solution.ps1 -Action pack-import ...`でTEST/PRODへ展開
+- [ ] `scripts/deploy_solution_*.ps1（最新版） -Action export-unpack ...`でDEVの変更をGit管理下へ
+- [ ] `scripts/deploy_solution_*.ps1（最新版） -Action pack-import ...`でTEST/PRODへ展開
 - [ ] TEST/PROD環境でのみ、接続参照(Connection Reference)の初回マッピングをGUIで承認
       (import後、フロー一覧から「接続の再認証」を1回クリックするのみ)
 

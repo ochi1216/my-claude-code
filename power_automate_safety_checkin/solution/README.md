@@ -2,7 +2,7 @@
 
 このフォルダは空の状態でコミットされている。
 
-`scripts/deploy_solution.ps1 -Action export-unpack ...` を実行すると、
+`scripts/deploy_solution_*.ps1（最新版） -Action export-unpack ...` を実行すると、
 DEV環境で構築したPower AutomateのSolution一式(フロー定義・接続参照等)が
 `solution/<SolutionName>/` としてunpackされ、ここに配置される。
 
