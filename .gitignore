@@ -11,3 +11,7 @@ po_database_organizer/cache/
 # 緊急連絡ツールのローカル設定・DB
 emergency_alert_tool/config.json
 emergency_alert_tool/*.db
+
+# Power Automate版: pac CLIの作業用一時フォルダ、実メンバー情報
+power_automate_safety_checkin/.pac-work/
+power_automate_safety_checkin/config/members.json

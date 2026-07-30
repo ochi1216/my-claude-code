@@ -1,0 +1,38 @@
+[
+  {
+    "siteCode": "OITA",
+    "siteName": "Japan Oita Site",
+    "prefectureTokens": ["大分県"],
+    "municipalityTokens": [],
+    "thresholdCode": "5-",
+    "thresholdValue": 50,
+    "teamId": "<TEAM_ID_PLACEHOLDER>",
+    "channelId": "<CHANNEL_ID_PLACEHOLDER>",
+    "isActive": true,
+    "testMode": true
+  },
+  {
+    "siteCode": "OSAKA",
+    "siteName": "Japan Osaka Site",
+    "prefectureTokens": ["大阪府"],
+    "municipalityTokens": [],
+    "thresholdCode": "5-",
+    "thresholdValue": 50,
+    "teamId": "<TEAM_ID_PLACEHOLDER>",
+    "channelId": "<CHANNEL_ID_PLACEHOLDER>",
+    "isActive": true,
+    "testMode": true
+  },
+  {
+    "siteCode": "TOKYO",
+    "siteName": "Japan Tokyo Site",
+    "prefectureTokens": ["東京都"],
+    "municipalityTokens": [],
+    "thresholdCode": "5-",
+    "thresholdValue": 50,
+    "teamId": "<TEAM_ID_PLACEHOLDER>",
+    "channelId": "<CHANNEL_ID_PLACEHOLDER>",
+    "isActive": true,
+    "testMode": true
+  }
+]

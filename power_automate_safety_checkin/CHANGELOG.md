@@ -1,0 +1,25 @@
+# CHANGELOG — power_automate_safety_checkin
+
+このフォルダ内の変更履歴。
+
+## [20260730_01] - 2026-07-30
+
+**追加ファイル:** `README.md`, `config/sites.json`, `config/members.example.json`,
+`cards/channel_alert_card.json`, `cards/checkin_card.json`,
+`scripts/provision_sharepoint.ps1`, `scripts/deploy_solution.ps1`,
+`solution/README.md`, `docs/FLOW_LOGIC_SPEC.md`, `docs/MANUAL_STEPS.md`,
+`docs/GATE_STATUS.md`
+
+- Power Automate(標準コネクタのみ)による地震安否確認システムのPoC初版を開始。
+  Python + Microsoft Graph API版がAzure ADアプリ登録・管理者同意の壁に当たったこと、
+  および先行して提示されたPower Automate構想の精査結果(`docs/REVIEW_earthquake_safety_system_0730_02.md`)
+  を踏まえ、手動トリガー版(P1)から着手する。
+- SharePoint 5リスト・全列・拠点3件・メンバー21名(スタッフ18名+上司3名)を
+  PnP PowerShellで自動プロビジョニングするスクリプトを作成(GUIでの手作業を排除)。
+- 非同期アーキテクチャ(カード投げ切り+応答トリガー分離)によるフローロジック仕様を、
+  Power Automate画面へそのまま貼り付けられる形で文書化。
+- pac CLIによるSolutionのexport/unpack/pack/importスクリプトを作成し、
+  DEV→TEST→PRODの環境展開時にフローを再構築する手間を排除。
+- 自動化できない最小限の手作業(接続認証、フロー本体の初回構築、Gate B証拠取得)を
+  `docs/MANUAL_STEPS.md`に明記。
+- PowerShellスクリプトはASTパーサーで構文検証済み(実テナントでの実行は未検証)。
