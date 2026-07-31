@@ -2,6 +2,15 @@
 
 このフォルダ内の変更履歴。
 
+## [20260731_04] - 2026-07-31
+
+- ユーザーがSharePointサイト(MyPrivate)へ4リスト
+  (`EQ_Config_Members`, `EQ_Received_Items`, `EQ_Events`, `EQ_Responses`)を
+  Excelアップロードで登録完了したことを確認。これによりP1完成条件のうち
+  SharePoint側の準備が整い、3フロー(`EQ06_Manual_Drill_DEV`等)のGUI構築へ
+  進めるようになった。Gate D(列内部名の実測)は、フィルタークエリで内部名を
+  使う箇所(`GET_Active_Members`等)に到達した時点で都度確認する方針とする。
+
 ## [20260731_03] - 2026-07-31
 
 **追加ファイル:** `EQ_Config_Members.xlsx`, `EQ_Received_Items.xlsx`,
