@@ -2,6 +2,29 @@
 
 このフォルダ内の変更履歴。
 
+## [20260731_02] - 2026-07-31
+
+**追加ファイル:** `evidence/README.md`
+
+**変更ファイル:** `docs/GATE_STATUS.md`
+
+- S02(Power AutomateフローのGUI構築とGate B/D検証)を開始。
+  Gate B(Teamsカードアクション実測)・Gate D(SharePoint列内部名実測)の
+  結果を格納する`evidence/`ディレクトリを新規作成し、置くべきファイルの
+  一覧・サニタイズ方法(個人メール・Tenant ID・Team ID・Channel IDを
+  マスクする方法)を`evidence/README.md`に明文化した。
+- `GATE_STATUS.md`のGate D行を、SharePointリスト作成手段をExcelアップロード
+  方式へ切替えた実態(S01末の変更)に合わせて修正。
+  `scripts/provision_sharepoint_*.ps1`による自動出力は前提にできないため、
+  「リストの設定」画面からの手動確認・`evidence/sharepoint_internal_names.json`
+  への記録に変更した。
+- ユーザーへ確認した結果、SharePoint 4リストへのExcelアップロードは
+  **まだ未着手**と判明。このため本セッションでは、3フロー
+  (`EQ06_Manual_Drill_DEV` / `EQ04b_On_Response_DEV` / `EQ05_Status_Summary_DEV`)
+  のGUI構築・Gate B/D実測には進めなかった(SharePointの準備が前提のため)。
+  ユーザーが`docs/MANUAL_STEPS.md`§2に沿ってアップロードを完了させた後、
+  フローGUI構築の式・手順提示とトラブル対応を再開する。
+
 ## [20260731_01] - 2026-07-31
 
 **追加ファイル:** `scripts/provision_sharepoint_20260730_03.ps1`(`_01`/`_02`は規約により残置)

@@ -8,7 +8,7 @@ P1(手動トリガー・自動地震検知なし)のスコープに合わせて�
 | A | コネクタ利用可否(RSS/SharePoint/Teamsが全てStandard) | **未確認** | P1ではRSSコネクタ自体を使わないため対象外。SharePoint/TeamsがStandard表示であることを実環境で確認する必要がある |
 | B | Teams Adaptive Cardアクション(非推奨でない・応答データが取得できる) | **未確認・要検証** | 「投稿して応答を待つ」は1:1では非推奨の見込み。本設計は非同期(投げ切り+応答トリガー)を採用しており、`docs/MANUAL_STEPS.md`§5で1回だけ実測する |
 | C | JMA Atom→XML本文取得 | **対象外(P1では不使用)** | 自動地震検知はP2として別途判断。P1は手動トリガーのみのため、このGateはP1の完成条件に含まれない |
-| D | SharePoint内部名 | **スクリプトで対応** | `scripts/provision_sharepoint_*.ps1（最新版）`が列を作成し、実行後に内部名を出力する。実行後に本ファイルを更新すること |
+| D | SharePoint内部名 | **未確認・要実測** | リスト作成手段をExcelアップロード(推奨)へ変更したため、`scripts/provision_sharepoint_*.ps1`による自動出力は使えない。作成後、`docs/MANUAL_STEPS.md`§2の手順で「リストの設定」画面から手動確認し、`evidence/sharepoint_internal_names.json`へ記録する |
 | E | 共同所有・接続継続 | **未確認** | Solutionの共同所有者設定、接続参照の再認証手順は`docs/MANUAL_STEPS.md`のTEST/PROD展開時に確認する |
 
 ## P1完成条件(Definition of Doneの再定義)
