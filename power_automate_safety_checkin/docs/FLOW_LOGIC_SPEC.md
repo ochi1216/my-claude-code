@@ -288,10 +288,12 @@ concat(body('PAR_Response')?['eventId'], '|', body('PAR_Response')?['employeeId'
 
 式: `length(outputs('SP_Get_Existing_Response')?['body/value'])` が `0` より大きいか。
 
-- はい: **`SP_Update_Response`**(既存項目のRevisionを+1、RespondedAt更新、Comment上書き)
+- はい: **`SP_Update_Response`**(既存項目のRevisionを+1、RespondedAt更新、Comment上書き。Titleは変更しない)
 - いいえ: **`SP_Create_Response`**(新規作成、Revision=1)
 
-いずれも書き込む列: EventID, EmployeeID, Email, ResponseCode, SafetyStatus,
+いずれも書き込む列: **Title=`outputs('CMP_ResponseKey')`**(手順6のフィルターで使う重複判定キー。
+書き忘れると2回目以降の`SP_Get_Existing_Response`が常に0件を返し、重複防止が機能しない)、
+EventID, EmployeeID, Email, ResponseCode, SafetyStatus,
 WorkStatus, RespondedAt=`utcNow()`, Comment=`body('PAR_Response')?['comment']`
 
 **8. `CHK_Affected`** — 条件

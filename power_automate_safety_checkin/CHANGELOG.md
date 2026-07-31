@@ -2,6 +2,24 @@
 
 このフォルダ内の変更履歴。
 
+## [20260731_03] - 2026-07-31
+
+**追加ファイル:** `EQ_Config_Members.xlsx`, `EQ_Received_Items.xlsx`,
+`EQ_Events.xlsx`, `EQ_Responses.xlsx`(SharePointアップロード用テンプレート)
+
+**変更ファイル:** `docs/FLOW_LOGIC_SPEC.md`
+
+- SharePointの「Excelから新しいリストを作る」機能がテーブル形式でないと
+  エラーになることが実機検証で判明したため、4リスト分のExcelテンプレートを
+  Excelテーブル(ヘッダー+実例行1件)として作成し、ユーザーへ送付した。
+- `EQ_Responses.xlsx`初版に、`FLOW_LOGIC_SPEC.md`の`SP_Get_Existing_Response`
+  (Title列でのフィルター)と実際の書き込み列一覧との不整合を発見。
+  `Title`列(`ResponseKey`格納用)がExcel側に無く、`FLOW_LOGIC_SPEC.md`の
+  「書き込む列」一覧にも明記されていなかった(書き忘れると重複回答防止が
+  機能しない)。`Title`列を追加し、`FLOW_LOGIC_SPEC.md`のGate 6箇所も修正。
+- `EQ_Responses.xlsx`に、各列の想定型・説明をヘッダーセルのコメントとして付与し、
+  実例行(斜体グレー、アップロード後に削除する旨を明記)とREADMEシートを追加。
+
 ## [20260731_02] - 2026-07-31
 
 **追加ファイル:** `evidence/README.md`
