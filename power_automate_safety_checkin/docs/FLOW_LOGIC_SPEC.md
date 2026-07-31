@@ -37,10 +37,20 @@ Power AutomateのSolution機能で、以下を**環境変数**として登録す
 | 環境変数名 | 内容 | 例 |
 | --- | --- | --- |
 | `eq_SharePointSiteUrl` | SharePointサイトURL | `https://contoso.sharepoint.com/sites/EQSafetyCheckin` |
-| `eq_AlertChannelTeamId` | 既定の通知先Team ID | (SharePointの`EQ_Config_Sites.TeamId`で拠点ごとに上書きされるため既定値のみ) |
 
-拠点ごとのTeam ID / Channel IDは環境変数ではなく `EQ_Config_Sites` リストに保持する
-（AD-03: 設定はフロー外出し）。
+### 拠点(大分・大阪・東京)の設定は「固定値」として扱う
+
+当初はSharePointリスト(`EQ_Config_Sites`)で拠点・震度閾値・通知先を管理する設計だった
+（AD-03: 設定はフロー外出し）が、以下の理由から**SharePointリストは廃止**し、
+`EQ06_Manual_Drill_DEV`内のSwitchアクション(`CMP_Site_Config`)に固定値として持たせる。
+
+- 監視対象(大分県・大阪府・東京都)と閾値(震度5弱)は運用開始後も変わらない想定であり、
+  リストとして外出しするほどの可変性がない。
+- 拠点情報は`TeamId`/`ChannelId`を含み、全員が閲覧できるSharePointリストに置くよりも、
+  フロー内(編集権限を持つ人だけがアクセスできる)に留める方が適切。
+
+スタッフ・上司の名簿(`EQ_Config_Members`)は人の入れ替わりが起きるため、
+引き続きSharePointリストで管理する。
 
 ---
 
@@ -61,38 +71,25 @@ Power AutomateのSolution機能で、以下を**環境変数**として登録す
 
 ### アクション順序
 
-**1. `CFG_Get_Site`** — SharePoint「複数の項目の取得」
+**1. `CMP_Site_Config`** — Switch(スイッチ)アクション
 
-- サイトアドレス: `eq_SharePointSiteUrl`
-- リスト名: `EQ_Config_Sites`
-- フィルタークエリ(OData):
-  ```
-  Title eq '@{triggerBody()['text']}' and IsActive eq 1
-  ```
-  ※ `text` は手動トリガーの`SiteCode`入力の内部名。実際の内部名はGate Bで確認し、
-    `triggerBody()['SiteCode']` 等、実際のキーに置き換えること(推測禁止)。
+切り替える値: `triggerBody()['SiteCode']`
 
-**2. `CHK_Site_Found`** — 条件
+拠点情報はSharePointから取得せず、ここに固定値として持たせる(上記「拠点の設定は
+固定値として扱う」を参照)。各ケースで「作成(Compose)」を1つ置き、以下のJSONを出力する。
+`TeamId`/`ChannelId`は、実際にPower AutomateでTeam/チャネルを用意した後、
+このCompose内の値を直接書き換えること。
 
-式:
-```
-length(outputs('CFG_Get_Site')?['body/value'])
-```
-これが `1` と等しいか判定する。
+| ケース | Compose出力(JSON) |
+| --- | --- |
+| `OITA` | `{"SiteName": "Japan Oita Site", "ThresholdValue": 50, "TeamId": "<OITA_TEAM_ID>", "ChannelId": "<OITA_CHANNEL_ID>"}` |
+| `OSAKA` | `{"SiteName": "Japan Osaka Site", "ThresholdValue": 50, "TeamId": "<OSAKA_TEAM_ID>", "ChannelId": "<OSAKA_CHANNEL_ID>"}` |
+| `TOKYO` | `{"SiteName": "Japan Tokyo Site", "ThresholdValue": 50, "TeamId": "<TOKYO_TEAM_ID>", "ChannelId": "<TOKYO_CHANNEL_ID>"}` |
+| 既定(Default) | **`END_Invalid_Site`**(終了・失敗、"CFG-001: unknown site code") |
 
-- いいえの場合: **`END_Config_Error`**(フローを終了 — 失敗、メッセージ
-  `"CFG-001: Site not found or duplicate for " & SiteCode`)
+**2. `CMP_Intensity_Value`** — Switch(スイッチ)アクション
 
-**3. `CMP_Threshold_Value`** — 作成(Compose)
-
-式:
-```
-int(first(outputs('CFG_Get_Site')?['body/value'])?['AlertThresholdValue'])
-```
-
-**4. `CMP_Intensity_Value`** — Switch(スイッチ)アクション
-
-切り替える値: `triggerBody()['SiteCode']`ではなく `IntensityCode` 入力。
+切り替える値: `IntensityCode` 入力。
 
 各ケースで「作成(Compose)」を1つ置き、以下の数値を出力する。
 
@@ -109,24 +106,24 @@ int(first(outputs('CFG_Get_Site')?['body/value'])?['AlertThresholdValue'])
 | `7` | `70` |
 | 既定(Default) | **`END_Invalid_Intensity`**(終了・失敗、"SRC-003: invalid intensity code") |
 
-**5. `CHK_Threshold_Met`** — 条件
+**3. `CHK_Threshold_Met`** — 条件
 
 式:
 ```
-greaterOrEquals(outputs('CMP_Intensity_Value'), outputs('CMP_Threshold_Value'))
+greaterOrEquals(outputs('CMP_Intensity_Value'), outputs('CMP_Site_Config')?['ThresholdValue'])
 ```
 
 - いいえの場合: **`END_Below_Threshold`**(終了・成功。「閾値未満のためイベントを作成しない」というのは
   正常系であり、失敗ではない)
 
-**6. `CMP_EventID`** — 作成(Compose)
+**4. `CMP_EventID`** — 作成(Compose)
 
 式:
 ```
 concat('EQ-', formatDateTime(utcNow(), 'yyyyMMdd-HHmmss'), '-', triggerBody()['SiteCode'])
 ```
 
-**7. `SP_Create_Event`** — SharePoint「項目の作成」
+**5. `SP_Create_Event`** — SharePoint「項目の作成」
 
 リスト: `EQ_Events`
 
@@ -142,31 +139,31 @@ concat('EQ-', formatDateTime(utcNow(), 'yyyyMMdd-HHmmss'), '-', triggerBody()['S
 | StartedBy | `Manual` |
 | IsTest | `triggerBody()['IsTest']` |
 
-**8. `CMP_OccurredAtJST`** — 作成(Compose)
+**6. `CMP_OccurredAtJST`** — 作成(Compose)
 
 式(UTC→JST、+9時間):
 ```
 convertTimeZone(utcNow(), 'UTC', 'Tokyo Standard Time', 'yyyy/MM/dd HH:mm')
 ```
 
-**9. `TM_Post_Channel_Alert`** — Teams「アダプティブ カードをチャットまたはチャネルに投稿する」
+**7. `TM_Post_Channel_Alert`** — Teams「アダプティブ カードをチャットまたはチャネルに投稿する」
 (非対話・**待たないアクション**を選択すること。「〜して応答を待つ」ではない)
 
-- 投稿先: チーム = `first(outputs('CFG_Get_Site')?['body/value'])?['TeamId']`、
-  チャネル = `first(outputs('CFG_Get_Site')?['body/value'])?['ChannelId']`
+- 投稿先: チーム = `outputs('CMP_Site_Config')?['TeamId']`、
+  チャネル = `outputs('CMP_Site_Config')?['ChannelId']`
 - カードJSON: `cards/channel_alert_card.json` の内容をそのまま貼り付け
 - 変数バインド:
 
   | プレースホルダ | 式 |
   | --- | --- |
   | `TestPrefix` | `if(triggerBody()['IsTest'], '【訓練】', '')` |
-  | `SiteName` | `first(outputs('CFG_Get_Site')?['body/value'])?['SiteName']` |
+  | `SiteName` | `outputs('CMP_Site_Config')?['SiteName']` |
   | `Intensity` | `triggerBody()['IntensityCode']` |
   | `Epicenter` | `triggerBody()['Epicenter']` |
   | `OccurredAtJST` | `outputs('CMP_OccurredAtJST')` |
   | `EventID` | `outputs('CMP_EventID')` |
 
-**10. `GET_Active_Members`** — SharePoint「複数の項目の取得」
+**8. `GET_Active_Members`** — SharePoint「複数の項目の取得」
 
 - リスト: `EQ_Config_Members`
 - フィルタークエリ:
@@ -174,20 +171,20 @@ convertTimeZone(utcNow(), 'UTC', 'Tokyo Standard Time', 'yyyy/MM/dd HH:mm')
   SiteCode eq '@{triggerBody()['SiteCode']}' and IsActive eq 1 and IsManager eq 0
   ```
 
-**11. `CHK_Members_Found`** — 条件
+**9. `CHK_Members_Found`** — 条件
 
 式: `length(outputs('GET_Active_Members')?['body/value'])`が`0`と等しいか。
 
 - はいの場合: **`END_No_Members`**(終了・失敗、"CFG-003: no active members")
 
-**12. `LOOP_Each_Member`** — Apply to each
+**10. `LOOP_Each_Member`** — Apply to each
 
 対象: `outputs('GET_Active_Members')?['body/value']`
 同時実行数(Concurrency Control): **初期値1**(Gate B確認後に引き上げ検討)
 
 ループ内アクション:
 
-**12-1. `TM_Post_CheckIn_Card`** — Teams「アダプティブ カードをチャットまたはチャネルに投稿する」
+**10-1. `TM_Post_CheckIn_Card`** — Teams「アダプティブ カードをチャットまたはチャネルに投稿する」
 (1:1チャット宛て、**待たないアクション**)
 
 - 宛先: `items('LOOP_Each_Member')?['Email']`
@@ -197,18 +194,18 @@ convertTimeZone(utcNow(), 'UTC', 'Tokyo Standard Time', 'yyyy/MM/dd HH:mm')
   | プレースホルダ | 式 |
   | --- | --- |
   | `EventID` | `outputs('CMP_EventID')` |
-  | `SiteName` | `first(outputs('CFG_Get_Site')?['body/value'])?['SiteName']` |
+  | `SiteName` | `outputs('CMP_Site_Config')?['SiteName']` |
   | `Intensity` | `triggerBody()['IntensityCode']` |
   | `OccurredAtJST` | `outputs('CMP_OccurredAtJST')` |
   | `EmployeeID` | `items('LOOP_Each_Member')?['Title']` |
 
-**13. `END_Success`** — フローを終了(成功)
+**11. `END_Success`** — フローを終了(成功)
 
 ---
 
 ### エラー処理(SCOPE_Try/Catch/Finally)
 
-引継ぎ資料の指示通り、上記1〜13全体を `SCOPE_Try` で包み、`SCOPE_Catch`
+引継ぎ資料の指示通り、上記1〜11全体を `SCOPE_Try` で包み、`SCOPE_Catch`
 (実行条件: 直前がFailedまたはTimed outまたはSkippedの場合に実行)で
 `SP_Log_Error`(EQ_Received_Itemsへ ProcessingStatus=`Error` で記録)を行う。
 

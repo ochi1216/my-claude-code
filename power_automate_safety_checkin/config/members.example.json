@@ -17,7 +17,7 @@
   {"employeeId": "emp16", "displayName": "スタッフ16", "email": "staff16@example.com", "siteCode": "TOKYO", "isActive": true, "isManager": false, "escalationOrder": 0},
   {"employeeId": "emp17", "displayName": "スタッフ17", "email": "staff17@example.com", "siteCode": "TOKYO", "isActive": true, "isManager": false, "escalationOrder": 0},
   {"employeeId": "emp18", "displayName": "スタッフ18", "email": "staff18@example.com", "siteCode": "TOKYO", "isActive": true, "isManager": false, "escalationOrder": 0},
-  {"employeeId": "boss01", "displayName": "上司01", "email": "boss01@example.com", "siteCode": "TOKYO", "isActive": true, "isManager": true, "escalationOrder": 1},
-  {"employeeId": "boss02", "displayName": "上司02", "email": "boss02@example.com", "siteCode": "TOKYO", "isActive": true, "isManager": true, "escalationOrder": 2},
-  {"employeeId": "boss03", "displayName": "上司03", "email": "boss03@example.com", "siteCode": "TOKYO", "isActive": true, "isManager": true, "escalationOrder": 3}
+  {"employeeId": "mgr01", "displayName": "マネージャー01", "email": "mgr01@example.com", "siteCode": "TOKYO", "isActive": true, "isManager": true, "escalationOrder": 1},
+  {"employeeId": "mgr02", "displayName": "マネージャー02", "email": "mgr02@example.com", "siteCode": "TOKYO", "isActive": true, "isManager": true, "escalationOrder": 2},
+  {"employeeId": "admin01", "displayName": "管理者01", "email": "admin01@example.com", "siteCode": "TOKYO", "isActive": true, "isManager": true, "escalationOrder": 3}
 ]

@@ -2,6 +2,27 @@
 
 このフォルダ内の変更履歴。
 
+## [20260731_01] - 2026-07-31
+
+**追加ファイル:** `scripts/provision_sharepoint_20260730_03.ps1`(`_01`/`_02`は規約により残置)
+
+**変更ファイル:** `config/members.example.json`, `docs/FLOW_LOGIC_SPEC.md`,
+`docs/MANUAL_STEPS.md`, `README.md`
+
+- `EQ_Config_Sites`をSharePointリストから廃止。監視対象拠点(大分・大阪・東京)と
+  震度閾値は運用中も変わらない固定値であり、かつ`TeamId`/`ChannelId`をサイト
+  閲覧者全員に見えるリストへ置く必要もないという指摘を受け、
+  `EQ06_Manual_Drill_DEV`内のSwitchアクション(`CMP_Site_Config`)に
+  固定値として持たせる設計に変更した。`docs/FLOW_LOGIC_SPEC.md`のアクション
+  順序・式を全面的に更新。
+- `provision_sharepoint_*.ps1`から`EQ_Config_Sites`関連のリスト作成・データ投入
+  処理を削除(SharePointリストは4個に)。
+- `EQ_Config_Members`のマネージャー3件のIDを`boss01`/`boss02`/`boss03`から
+  `mgr01`/`mgr02`/`admin01`に変更。
+- 実機検証で、PnP.PowerShellによるSharePoint自動化にはEntra IDアプリ登録
+  (IT部門の承認)が必要と判明したため、`docs/MANUAL_STEPS.md`の推奨手順を
+  「Excelアップロードによる一度限りの手動作成」に変更(スクリプトは代替手段として残置)。
+
 ## [20260730_01] - 2026-07-30
 
 **追加ファイル:** `README.md`, `config/sites.json`, `config/members.example.json`,

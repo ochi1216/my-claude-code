@@ -2,8 +2,10 @@
 
 このPoCは「GUIでの手作業を極限まで削減する」ことを主眼にしている。
 以下は、Microsoft側の設計・セキュリティモデル上、**自動化できない**手作業である。
-これ以外の作業(SharePointの列作成、メンバー投入、式の入力、カードのJSON)は、
-`scripts/`のスクリプトまたはコピペで代替する。
+式の入力・カードのJSONはコピペで代替する。SharePointのリスト・列作成は、
+当初PowerShellでの完全自動化を目指したが、Entra IDアプリ登録がIT部門の
+承認を要することが判明したため、**Excelアップロードによる一度限りの手動作成**を
+基本とする(理由は下記「なぜ自動化できないのか」参照)。
 
 ## なぜ自動化できないのか
 
@@ -39,10 +41,29 @@
         `Install-Module -Name PowerShellGet -Force -AllowClobber -Scope CurrentUser`
         で更新し、**PowerShellウィンドウを閉じて開き直してから**再試行すること。
 
-### 2. SharePoint(スクリプトで自動化済み・手動確認のみ)
+### 2. SharePoint(4リスト。Excelアップロードによる手動作成を推奨)
 
-- [ ] `scripts/provision_sharepoint_*.ps1（最新版）`を実行(初回サインインのみ対話的、以降は自動)
-- [ ] 実行結果として表示される列内部名を`evidence/sharepoint_internal_names.json`へ保存(Gate D)
+実機検証の結果、`scripts/provision_sharepoint_*.ps1`によるPnP.PowerShell自動化には、
+Entra IDアプリ登録(委任アクセス)が必要で、これは通常のユーザー権限では
+自己登録できず、IT部門への依頼が必要になることが判明した。
+
+4リスト・列を作るだけの一度限りの作業であれば、**SharePointの「Excelから新しいリストを作る」
+機能を使った手動アップロードの方が、IT部門への依頼なしで完結し早い**。以下のいずれかで進める。
+
+- [ ] **(推奨)** SharePointサイトで「サイトコンテンツ」→「新規」→「リスト」→「Excelから」を選び、
+      4つのリスト用Excelファイル(`EQ_Config_Members`, `EQ_Received_Items`, `EQ_Events`, `EQ_Responses`)を
+      それぞれアップロードする(`EQ_Config_Sites`は作らない。下記「拠点情報について」参照)
+- [ ] (代替、IT部門の協力が得られる場合のみ) `scripts/provision_sharepoint_*.ps1（最新版）`を実行
+
+- [ ] 作成後、列の内部名を`evidence/sharepoint_internal_names.json`へ保存(Gate D)
+      (SharePointの「リストの設定」→各列をクリック→URLの`Field=`部分で確認できる)
+
+#### 拠点情報(大分・大阪・東京)について
+
+`EQ_Config_Sites`はSharePointリストとして作らない。監視対象拠点と震度閾値(5弱)は
+運用中も変わらない固定値であり、かつ`TeamId`/`ChannelId`をサイト閲覧者全員に
+見える形で置く必要もないため、`docs/FLOW_LOGIC_SPEC.md`の`CMP_Site_Config`
+(Power Automateのフロー内のSwitchアクション)に直接値を書き込む方式に変更した。
 
 ### 3. コネクタ接続の初回承認(各コネクタにつき1回のみ)
 
@@ -54,7 +75,7 @@ Power Automate画面で、新規フロー作成時に以下のコネクタへの
 
 ### 4. フロー本体の初回構築(DEV環境で1回のみ)
 
-`docs/FLOW_LOGIC_SPEC.md`の通りに、以下5フローを構築する。
+`docs/FLOW_LOGIC_SPEC.md`の通りに、以下3フローを構築する。
 記載の式・カードJSONはすべてコピペで完結する(考える作業は発生しない)。
 
 - [ ] `EQ06_Manual_Drill_DEV`
@@ -85,8 +106,8 @@ Power Automate画面で、新規フロー作成時に以下のコネクタへの
 | 作業 | 回数 | 所要時間の目安 |
 | --- | --- | --- |
 | pac CLI / PnP.PowerShellインストール | 1回 | 10分 |
-| SharePoint 5リスト・全列作成 | 0回(スクリプト) | — |
-| メンバー18名+上司3名投入 | 0回(スクリプト) | — |
+| SharePoint 4リスト・全列作成 | 1回(Excelアップロード) | 15〜20分 |
+| メンバー18名+マネージャー2名+管理者1名投入 | 0回(Excelに含めてアップロード) | — |
 | フロー3本の初回構築(コピペ) | 1回(DEV環境のみ) | 60〜90分 |
 | コネクタ接続承認 | 2回(SharePoint/Teams、DEV) | 5分 |
 | Gate B証拠取得 | 1回 | 15分 |

@@ -42,13 +42,14 @@ Power AutomateのGUI操作は煩雑になりがちなため、以下を徹底し
 ```
 power_automate_safety_checkin/
 ├── config/
-│   ├── sites.json              # 監視対象拠点(大分・大阪・東京)の定義
-│   └── members.example.json    # スタッフ18名+上司3名のプレースホルダ
+│   ├── sites.json              # 拠点(大分・大阪・東京)の定義。SharePointには置かず、
+│   │                            # Power AutomateのCMP_Site_Configアクションを作る際の値の元ネタとして使う
+│   └── members.example.json    # スタッフ18名+マネージャー2名+管理者1名のプレースホルダ
 ├── cards/
 │   ├── channel_alert_card.json # チャネルへの開始通知カード(非対話)
 │   └── checkin_card.json       # 個人への安否確認カード(回答用)
 ├── scripts/
-│   ├── provision_sharepoint_yyyymmdd_NN.ps1 # SharePoint 5リスト自動作成+データ投入(最新版のみ残す)
+│   ├── provision_sharepoint_yyyymmdd_NN.ps1 # SharePoint 4リスト自動作成+メンバー投入(最新版のみ残す)
 │   └── deploy_solution_yyyymmdd_NN.ps1      # pac CLIによるSolution展開(最新版のみ残す)
 ├── solution/                    # pac CLIでunpackしたフロー定義(初回構築後に生成)
 └── docs/
