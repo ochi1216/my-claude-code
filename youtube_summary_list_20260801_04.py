@@ -2935,25 +2935,21 @@ class GlaspEngine:
 
     def _batch_send_ctrl_x(self, video_tabs: List[Dict], config: ProcessConfig = None) -> List[Dict]:
         """
-        [ADR-0001、S03再修正] Glasp起動処理を「トリガーラウンド→検出＆リトライラウンド」の
-        2フェーズで実行する。
+        [ADR-0001、S03再々修正] Glasp起動処理を、越智さんの「先週うまく動いていた頃」の
+        構成に倣った3ラウンド構成で実行する。1周（ラップ）につき以下の3ラウンドを順に行い、
+        いずれかのラウンドで失敗した動画は、次のラップで1巡目(クリック)からやり直す。
+        これを最大MAX_RETRIES_PER_VIDEO回、まだ確定していない動画がなくなるまで繰り返す。
 
-        トリガーラウンド: 全動画に対して「きらきらボタンを1回クリック→その場で3秒だけ、
-                          新しいGeminiタブが出たか確認」を順番に行う。3秒以内に出ればその
-                          動画のタブとして確定させ、次の動画のクリックに進む前にタブの
-                          所属を確定させる（他動画のクリックによってタブの所属があいまいに
-                          ならないようにするため。越智さんのローカル実行結果で判明した、
-                          複数の動画が同じGeminiタブを誤って自分のものと認識する不具合への対策）。
-                          送信成功判定（数秒〜数十秒かかる）はこのラウンドでは行わない。
+        1巡目(トリガー): まだ確定していない全動画に対して、Glasp起動ボタンを1回クリック
+                        するだけを順番に行う。検出は待たない（即座に次の動画へ）。
+        2巡目(タブ起動確認): 1巡目でクリックした動画を順番に、1本ずつ「新しいGeminiタブが
+                            出現したか」をきちんと待って確認してから次へ進む。
+        3巡目(要約完了確認): 2巡目でタブが確定した動画を順番に、1本ずつ「送信成功（＝要約
+                            生成が進んでいる状態）になったか」を確認する。
 
-        検出＆リトライラウンド: トリガーラウンドで確定していない動画は、まだ検出できていない
-                              動画から順に「新しいタブが出たか(20秒)」を確認し、確定済みの
-                              動画は送信成功判定を行う。失敗した場合はきらきらボタンを
-                              再クリックするのみで、動画タブのrefreshは行わない
-                              （refreshは文字起こし生成を最初からやり直させてしまうため、
-                              越智さんのご指摘により廃止）。これを最大MAX_RETRIES_PER_VIDEO回
-                              繰り返す。同一動画への即時リトライを避け、バッチ内の他動画を
-                              処理している間の実時間経過を活用する狙い（ADR 0001）。
+        失敗時にdriver.refresh()（動画タブの再読み込み）は行わない（文字起こし生成を
+        最初からやり直させてしまうため、越智さんのご指摘により廃止）。次のラップで
+        きらきらボタンを再クリックするのみで促す。
 
         戻り値の各dictのキー構成・video_tabsと同じ順序は現行(20260801_03)と完全互換（呼び出し側は無改修）。
         """
@@ -2967,16 +2963,13 @@ class GlaspEngine:
         slow_tab_threshold = config.tab_wait_timeout if config else 10.0
         input_mode = config.glasp_input_mode if config else 'js_click'
 
-        # トリガーラウンド内・クリック直後のその場確認は3秒（越智さん指示・S03）。
-        # 検出＆リトライラウンドでの(まだハンドル未確定の動画への)確認は既存どおりの待機時間。
-        trigger_round_claim_timeout = 3.0
-        retry_round_detect_timeout = (
+        detect_timeout = (
             config_manager.get("glasp.tab_generation_timeout_first", 20)
             if self.is_first_run_in_session
             else config_manager.get("glasp.tab_generation_timeout", 20)
         )
         if self.is_first_run_in_session:
-            log_message(f"📢 初回/復帰直後のため、動画読み込み待機時間を {retry_round_detect_timeout}秒 に延長します", "INFO")
+            log_message(f"📢 初回/復帰直後のため、動画読み込み待機時間を {detect_timeout}秒 に延長します", "INFO")
 
         original_socket_timeout = 60.0
         temp_socket_timeout = 15.0
@@ -3024,11 +3017,13 @@ class GlaspEngine:
             }
             skipped_count += 1
 
-        def _safe_handle_alive(handle: str) -> bool:
-            try:
-                return handle in self.driver.window_handles
-            except Exception:
+        def _needs_retry_next_lap(item: Dict, error_msg_if_exhausted: str) -> bool:
+            """このラップでの失敗をattempt_usedに反映し、まだリトライ予算があればTrueを返す。"""
+            item['attempt_used'] += 1
+            if item['attempt_used'] > MAX_RETRIES_PER_VIDEO:
+                _finalize_failure(item, error_msg_if_exhausted)
                 return False
+            return True
 
         try:
             if hasattr(self.driver.command_executor, '_client_config'):
@@ -3038,127 +3033,117 @@ class GlaspEngine:
         except:
             pass
 
-        pending: List[Dict] = []
         cancelled = False
         # バッチ全体で共有する「既に他の動画に割り当て済みのGeminiタブ」の集合。
         # 生成が遅い動画のタブが後から出現した際、別の動画がそれを誤って
-        # 自分のものと拾ってしまわないようにするための対策（S03再修正・第2版）。
+        # 自分のものと拾ってしまわないようにするための保険（本来は2巡目を1本ずつ
+        # きちんと待つ構成にしたことで発生しにくくなっているはずだが、念のため維持）。
         claimed_handles: set = set()
 
+        # 初期リスト構築（動画情報欠損・タブ生成失敗は現行同様その場で確定させる）
+        pending: List[Dict] = []
+        for i, tab_info in enumerate(video_tabs):
+            video_info_obj = tab_info.get('video_info')
+            if not video_info_obj:
+                results_by_index[i] = {
+                    'video_info': None,
+                    'success': False,
+                    'error': '動画情報欠損',
+                    'skipped': True,
+                    'processing_time': 0,
+                    'retry_count': 0
+                }
+                skipped_count += 1
+                continue
+
+            if not tab_info.get('tab_handle') and not self.is_first_run_in_session:
+                results_by_index[i] = {
+                    'video_info': video_info_obj,
+                    'success': False,
+                    'error': 'タブ生成失敗（ハンドルなし）',
+                    'skipped': True,
+                    'processing_time': 0,
+                    'retry_count': 0
+                }
+                skipped_count += 1
+                continue
+
+            pending.append({
+                'index': i,
+                'tab_info': tab_info,
+                'video_info': video_info_obj,
+                'video_id_for_log': getattr(video_info_obj, 'video_id', ''),
+                'playlist_position': getattr(video_info_obj, 'playlist_order', 0) + 1,
+                'video_total_start': time.time(),
+                'attempt_used': 0,
+            })
+
         try:
-            # === トリガーラウンド ===
-            for i in range(len(video_tabs)):
-                tab_info = video_tabs[i]
-                if check_user_input() == 'cancel':
-                    cancelled = True
-                    break
+            lap = 0
+            while pending and not cancelled and lap <= MAX_RETRIES_PER_VIDEO:
+                # === 1巡目: トリガー（クリックのみ、待たない） ===
+                clicked_items: List[Dict] = []
+                still_pending: List[Dict] = []
 
-                if tab_info.get('video_info'):
-                    state.set_current_video(tab_info['video_info'].title)
-                    state.update_status(f"Glaspトリガー中... ({i+1}/{len(video_tabs)})")
-
-                video_info_obj = tab_info.get('video_info')
-                if not video_info_obj:
-                    results_by_index[i] = {
-                        'video_info': None,
-                        'success': False,
-                        'error': '動画情報欠損',
-                        'skipped': True,
-                        'processing_time': 0,
-                        'retry_count': 0
-                    }
-                    skipped_count += 1
-                    continue
-
-                if not tab_info.get('tab_handle') and not self.is_first_run_in_session:
-                    results_by_index[i] = {
-                        'video_info': video_info_obj,
-                        'success': False,
-                        'error': 'タブ生成失敗（ハンドルなし）',
-                        'skipped': True,
-                        'processing_time': 0,
-                        'retry_count': 0
-                    }
-                    skipped_count += 1
-                    continue
-
-                playlist_position = getattr(video_info_obj, 'playlist_order', 0) + 1
-                video_id_for_log = getattr(video_info_obj, 'video_id', '')
-                video_total_start = time.time()
-
-                if not smart_sleep(0.5):
-                    if state.cancel_flag:
+                for i, item in enumerate(pending):
+                    if check_user_input() == 'cancel':
                         cancelled = True
                         break
-                    if state.skip_flag:
-                        state.skip_flag = False
-                        perf_log(
-                            "glasp_video_total",
-                            video_total_start,
-                            video_idx=playlist_position,
-                            video_id=video_id_for_log[:12],
-                            success=False,
-                            reason="user_skip"
+
+                    if item.get('video_info'):
+                        state.set_current_video(item['video_info'].title)
+                        state.update_status(f"Glaspトリガー中(周回{lap+1})... ({i+1}/{len(pending)})")
+
+                    if item['attempt_used'] == 0:
+                        # 初回のみ、ユーザーのスキップ操作をこの時点で反映する（現行同様の挙動）
+                        if not smart_sleep(0.5):
+                            if state.cancel_flag:
+                                cancelled = True
+                                break
+                            if state.skip_flag:
+                                state.skip_flag = False
+                                perf_log(
+                                    "glasp_video_total",
+                                    item['video_total_start'],
+                                    video_idx=item['playlist_position'],
+                                    video_id=item['video_id_for_log'][:12],
+                                    success=False,
+                                    reason="user_skip"
+                                )
+                                results_by_index[item['index']] = {'video_info': item['video_info'], 'success': False, 'skipped': True, 'error': 'ユーザーによるスキップ', 'processing_time': 0, 'retry_count': 0}
+                                continue
+
+                    try:
+                        trig = self._trigger_glasp_click(
+                            item['tab_info'], item['playlist_position'], attempt_index=item['attempt_used'],
+                            timeout_threshold=slow_tab_threshold, input_mode=input_mode
                         )
-                        results_by_index[i] = {'video_info': video_info_obj, 'success': False, 'skipped': True, 'error': 'ユーザーによるスキップ', 'processing_time': 0, 'retry_count': 0}
+                    except Exception as e:
+                        error_msg = str(e)
+                        if "FATAL" in error_msg:
+                            raise Exception(error_msg)
+                        if _needs_retry_next_lap(item, error_msg):
+                            still_pending.append(item)
                         continue
 
-                item = {
-                    'index': i,
-                    'tab_info': tab_info,
-                    'video_info': video_info_obj,
-                    'video_id_for_log': video_id_for_log,
-                    'playlist_position': playlist_position,
-                    'video_total_start': video_total_start,
-                    'attempt_used': 0,
-                    'glasp_handle': None,
-                    'before_handles': None,
-                    'trigger_method': None,
-                }
-
-                try:
-                    trig = self._trigger_glasp_click(
-                        tab_info, playlist_position, attempt_index=0,
-                        timeout_threshold=slow_tab_threshold, input_mode=input_mode
-                    )
-                except Exception as e:
-                    error_msg = str(e)
-                    if "FATAL" in error_msg:
-                        raise Exception(error_msg)
-                    pending.append(item)
-                    continue
-
-                if not trig['ok']:
-                    if trig.get('permanent'):
-                        _finalize_failure(item, GENERIC_FAIL_MSG)
+                    if not trig['ok']:
+                        if trig.get('permanent'):
+                            _finalize_failure(item, GENERIC_FAIL_MSG)
+                            continue
+                        if _needs_retry_next_lap(item, trig.get('error') or GENERIC_FAIL_MSG):
+                            still_pending.append(item)
                         continue
-                    pending.append(item)
-                    continue
 
-                item['before_handles'] = trig['before_handles']
-                item['trigger_method'] = trig['trigger_method']
+                    item['before_handles'] = trig['before_handles']
+                    item['trigger_method'] = trig['trigger_method']
+                    clicked_items.append(item)
 
-                # クリック直後、次の動画に進む前にその場で(3秒だけ)新しいタブの出現を確認し、
-                # このタイミングでタブの所属を確定させる（他動画のクリックで手遅れになる前に）
-                wait_result = self._wait_for_new_glasp_handle(
-                    tab_info, trig['before_handles'], claimed_handles, playlist_position,
-                    attempt_index=0, glasp_trigger_method=trig['trigger_method'],
-                    tab_gen_timeout=trigger_round_claim_timeout
-                )
-                item['glasp_handle'] = wait_result['handle']
-                pending.append(item)
+                if cancelled:
+                    break
 
-            # === 検出＆リトライラウンド ===
-            # ハンドル未確定の動画は「タブ出現待ち(20秒)→ダメなら再クリック(リフレッシュなし)」、
-            # ハンドル確定済みの動画は「送信成功判定→ダメなら再クリック(リフレッシュなし)」を、
-            # 最大MAX_RETRIES_PER_VIDEO回の再クリックが尽きるまで繰り返す。
-            # 実際の終了判定は各動画のattempt_used(finalize済みならpendingから除外)に委ねるため、
-            # 周回上限は安全側の余裕を持たせるだけに留める。
-            pass_num = 0
-            max_passes = MAX_RETRIES_PER_VIDEO * 4 + 4
-            while pending and not cancelled and pass_num <= max_passes:
-                next_pending: List[Dict] = []
-                for idx_in_pass, item in enumerate(pending):
+                # === 2巡目: タブ起動確認（1本ずつ、きちんと待つ） ===
+                opened_items: List[Dict] = []
+                for i, item in enumerate(clicked_items):
                     if check_user_input() == 'cancel':
                         _finalize_failure(item, GENERIC_FAIL_MSG)
                         cancelled = True
@@ -3166,57 +3151,34 @@ class GlaspEngine:
 
                     if item.get('video_info'):
                         state.set_current_video(item['video_info'].title)
-                        state.update_status(f"Glasp検出/リトライ中... (周回{pass_num+1}, {idx_in_pass+1}/{len(pending)})")
+                        state.update_status(f"Geminiタブ起動確認中(周回{lap+1})... ({i+1}/{len(clicked_items)})")
 
-                    if item['glasp_handle'] is None:
-                        # まだGeminiタブが確定していない動画 → 出現を確認
-                        wait_result = self._wait_for_new_glasp_handle(
-                            item['tab_info'], item['before_handles'], claimed_handles, item['playlist_position'],
-                            item['attempt_used'], item['trigger_method'],
-                            tab_gen_timeout=retry_round_detect_timeout
-                        )
-                        if wait_result['handle']:
-                            item['glasp_handle'] = wait_result['handle']
-                            next_pending.append(item)
-                            continue
-
-                        if item['attempt_used'] >= MAX_RETRIES_PER_VIDEO:
-                            _finalize_failure(item, GENERIC_FAIL_MSG)
-                            continue
-
-                        try:
-                            trig = self._trigger_glasp_click(
-                                item['tab_info'], item['playlist_position'],
-                                attempt_index=item['attempt_used'] + 1,
-                                timeout_threshold=slow_tab_threshold, input_mode=input_mode
-                            )
-                        except Exception as e:
-                            error_msg = str(e)
-                            if "FATAL" in error_msg:
-                                raise Exception(error_msg)
-                            item['attempt_used'] += 1
-                            if item['attempt_used'] >= MAX_RETRIES_PER_VIDEO:
-                                _finalize_failure(item, error_msg)
-                            else:
-                                next_pending.append(item)
-                            continue
-
-                        item['attempt_used'] += 1
-                        if not trig['ok']:
-                            if trig.get('permanent'):
-                                _finalize_failure(item, GENERIC_FAIL_MSG)
-                            elif item['attempt_used'] >= MAX_RETRIES_PER_VIDEO:
-                                _finalize_failure(item, trig.get('error') or GENERIC_FAIL_MSG)
-                            else:
-                                next_pending.append(item)
-                            continue
-
-                        item['before_handles'] = trig['before_handles']
-                        item['trigger_method'] = trig['trigger_method']
-                        next_pending.append(item)
+                    wait_result = self._wait_for_new_glasp_handle(
+                        item['tab_info'], item['before_handles'], claimed_handles, item['playlist_position'],
+                        item['attempt_used'], item['trigger_method'], tab_gen_timeout=detect_timeout
+                    )
+                    if wait_result['handle']:
+                        item['glasp_handle'] = wait_result['handle']
+                        opened_items.append(item)
                         continue
 
-                    # Geminiタブ確定済み → 送信成功判定
+                    if _needs_retry_next_lap(item, GENERIC_FAIL_MSG):
+                        still_pending.append(item)
+
+                if cancelled:
+                    break
+
+                # === 3巡目: 要約完了（送信成功）確認（1本ずつ） ===
+                for i, item in enumerate(opened_items):
+                    if check_user_input() == 'cancel':
+                        _finalize_failure(item, GENERIC_FAIL_MSG)
+                        cancelled = True
+                        break
+
+                    if item.get('video_info'):
+                        state.set_current_video(item['video_info'].title)
+                        state.update_status(f"Glasp要約完了確認中(周回{lap+1})... ({i+1}/{len(opened_items)})")
+
                     try:
                         conf = self._confirm_glasp_success(
                             item['tab_info'], item['glasp_handle'], item['playlist_position'], item['attempt_used']
@@ -3231,64 +3193,13 @@ class GlaspEngine:
                         _finalize_success(item, item['glasp_handle'])
                         continue
 
-                    if item['attempt_used'] >= MAX_RETRIES_PER_VIDEO:
-                        _finalize_failure(item, GENERIC_FAIL_MSG)
-                        continue
+                    if _needs_retry_next_lap(item, GENERIC_FAIL_MSG):
+                        still_pending.append(item)
 
-                    # 送信成功判定に失敗 → refreshはせず、きらきらボタンだけ再クリックして促す
-                    old_handle = item['glasp_handle']
-                    old_handle_alive = _safe_handle_alive(old_handle)
+                pending = still_pending
+                lap += 1
 
-                    try:
-                        trig = self._trigger_glasp_click(
-                            item['tab_info'], item['playlist_position'],
-                            attempt_index=item['attempt_used'] + 1,
-                            timeout_threshold=slow_tab_threshold, input_mode=input_mode
-                        )
-                    except Exception as e:
-                        error_msg = str(e)
-                        if "FATAL" in error_msg:
-                            raise Exception(error_msg)
-                        item['attempt_used'] += 1
-                        if item['attempt_used'] >= MAX_RETRIES_PER_VIDEO:
-                            _finalize_failure(item, error_msg)
-                        else:
-                            if not old_handle_alive:
-                                item['glasp_handle'] = None
-                            next_pending.append(item)
-                        continue
-
-                    item['attempt_used'] += 1
-                    if not trig['ok']:
-                        if trig.get('permanent'):
-                            _finalize_failure(item, GENERIC_FAIL_MSG)
-                        elif item['attempt_used'] >= MAX_RETRIES_PER_VIDEO:
-                            _finalize_failure(item, trig.get('error') or GENERIC_FAIL_MSG)
-                        else:
-                            if not old_handle_alive:
-                                item['glasp_handle'] = None
-                            next_pending.append(item)
-                        continue
-
-                    # 再クリック成功 → 別の新しいタブが出ていないかその場で短時間だけ確認。
-                    # 出ていなければ元のタブが生きている限りそのまま使い続け、次の周回で再度成功判定する
-                    item['before_handles'] = trig['before_handles']
-                    item['trigger_method'] = trig['trigger_method']
-                    wait_result = self._wait_for_new_glasp_handle(
-                        item['tab_info'], trig['before_handles'], claimed_handles, item['playlist_position'],
-                        item['attempt_used'], trig['trigger_method'],
-                        tab_gen_timeout=trigger_round_claim_timeout
-                    )
-                    if wait_result['handle']:
-                        item['glasp_handle'] = wait_result['handle']
-                    elif not old_handle_alive:
-                        item['glasp_handle'] = None
-                    next_pending.append(item)
-
-                pending = next_pending
-                pass_num += 1
-
-            # キャンセル、または周回上限到達で残った動画は打ち切り（現行の「未処理動画には結果を残さない」挙動を踏襲）
+            # キャンセル、またはリトライ上限到達で残った動画は打ち切り（現行の「未処理動画には結果を残さない」挙動を踏襲）
         finally:
             try:
                 if hasattr(self.driver.command_executor, '_client_config'):
