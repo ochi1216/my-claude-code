@@ -3,47 +3,52 @@
 ## Project Name
 RSS オーガナイザー開発
 
-## Previous Session
-S01 - 読み込みフィードのシンプル化（完了）
+## Current Session
+S01（継続中）
 
-## Next Session
-S02（候補）
+## Current Session Title
+RSS オーガナイザー開発 S01 - 読み込みフィードのシンプル化
 
-## Next Session Title（候補）
-RSS オーガナイザー開発 S02 - AI最先端フィードのソース選定調整
+## Current Objective
+Tab3「AI最先端フィード」の読み込み過多に対応する。ユーザー指示により英語メディア(5)・AI企業ブログ(6)・日本語メディア(4)は件数維持で確定。残る論文・研究フィード構成と`AI_FEED_ARXIV_MAX`は、過去の実際の投稿数実績データを見た上で判断する方針。
 
 ## Background
-S01でTab3「AI最先端フィード」の固定フィードリスト（`AI_FEED_URLS`）を20件→14件に削減した（`rss_organizer_20260801_01.py`）。除外するフィードの選定基準（AI専門度・他フィードとの内容重複度）はユーザーの明示的な合意を得られないままClaude Codeの判断で実施しており、実際に使ってみて狙いと異なる可能性がある。
+`rss_organizer_20260801_01.py` は現状、ベースライン(`20260708_02.py`)とコメントを除き同じ設定（`AI_FEED_URLS`全20件、`AI_FEED_ARXIV_MAX`=15）に戻っている。論文・研究カテゴリ（arXiv cs.AI/cs.LG/cs.CL/cs.CV, Papers with Code）だけが唯一の未確定事項。
 
-除外した6フィード:
-- 英語メディア: The Verge AI, Wired AI
-- 論文・研究: arXiv cs.CL, arXiv cs.CV
-- 日本語メディア: Publickey, テクノエッジ
+過去実績データの取得を試みたが以下の理由で本セッションでは取得不可だった:
+- リポジトリ内に`ai_feed_history.json`等の実行履歴ファイルなし（Windows実機側でGit管理対象外として生成される仕様）
+- 本セッション環境のネットワークポリシーでarXiv/Papers with Codeへの直接アクセスがブロックされている（`rss.arxiv.org`宛CONNECTが403）
 
-## Candidate Scope（次セッション開始時にユーザーへ確認）
-- 削減後の14フィード構成で実際に運用してみて、まだ多い/少ない、ジャンルが偏っている等の調整依頼があれば対応
-- Tab1「キーワード探索」（`SITE_CONFIG`: note/Qiita/Zenn）の絞り込みが必要か確認
-- その他、ユーザーからの新規依頼
+一般的傾向（未検証・参考値）として提示済み: arXiv cs.AI/cs.LG/cs.CVは1日あたり新着100件超、cs.CLは50〜100件程度、Papers with Codeはトレンド抽出のため相対的に少数。
+
+## Scope
+- 論文・研究フィードの構成（現状5件を維持するか、一部除外するか）
+- `AI_FEED_ARXIV_MAX`（現状15）を実績に応じてどう設定するか
 
 ## Files That May Be Changed
-- `rss_organizer/rss_organizer_20260801_01.py` の後続バージョン（例: `rss_organizer_YYYYMMDD_01.py`、新規作成・旧版は残置）
+- `rss_organizer/rss_organizer_20260801_01.py`（`AI_FEED_URLS`の「論文・研究」および`AI_FEED_ARXIV_MAX`のみ）
 - `rss_organizer/README.md`
 - `rss_organizer/CHANGELOG.md`
+- `docs/PROJECT_STATUS.md` / `docs/SESSION_HISTORY.md`（決定後、最終状態を反映）
 
 ## Files That Must Not Be Changed
-- `rss_organizer/rss_organizer_20260708_02.py`, `rss_organizer_20260801_01.py`（旧バージョンとして保持、削除・上書き禁止）
+- `rss_organizer/rss_organizer_20260708_02.py`（旧バージョンとして保持、削除・上書き禁止）
+- `AI_FEED_URLS`の英語メディア・AI企業ブログ・日本語メディア（件数維持で確定済み）
 - 他プロジェクト（`rtocs_organizer/`, `youtube_summary_list_*.py`, `po_database_organizer/`, `shareflex_dashboard/`）は無関係のため変更しない
 
 ## Task
-セッション開始時にユーザーへ「S01の削減結果で問題ないか、追加調整が必要か」を確認し、対応する。
+ユーザーから過去の実際の投稿数実績（`ai_feed_history.json`の中身、または直近のHTMLレポート等）の提供を受けたら、それを基に論文・研究フィード構成と`AI_FEED_ARXIV_MAX`を確定し、`rss_organizer_20260801_01.py`に反映する。
 
 ## Completion Criteria
-- 未確認（ユーザー確認後に確定）
+- 論文・研究フィード構成が確定していること（ユーザー合意済み）
+- `AI_FEED_ARXIV_MAX`の値が確定していること（ユーザー合意済み）
+- 既存機能に意図しない影響がないこと
+- 必要なテストを実施すること
 
 ## Required Tests
 - Python構文チェック（`python -m py_compile`）
 - 変更箇所の静的ロジック確認（GUI実機テストは本セッション環境では不可のため対象外）
 
 ## Known Risks
+- 実績データが得られない場合、一般的傾向のみに基づく判断となり精度が落ちる
 - 本ツールはWindows+Playwright+Tkinter前提のため、クラウドセッションでは実機動作確認ができない
-- フィード選定はユーザーの実際の情報ニーズに依存するため、S01の判断が最適とは限らない

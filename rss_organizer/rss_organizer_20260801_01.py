@@ -164,17 +164,18 @@ def cosine_similarity(v1, v2):
 
 # ============================================================
 # [v20260508.02追加] AI最先端フィード 固定URLリスト
-# [v20260801_01修正] 毎回の読み込み量が多すぎるとの指摘を受け、
-# カテゴリごとに重複性・網羅性の低いソースを間引いて20件→14件に削減。
-# 除外したソース: The Verge AI, Wired AI（AI以外の一般テック記事の比率が高い）、
-#                 arXiv cs.CL, arXiv cs.CV（arXiv cs.AI/cs.LGと内容が重複しやすい）、
-#                 Publickey, テクノエッジ（AI専門ではない一般テックメディア）
+# [v20260801_01修正] 毎回の読み込み量が多すぎるとの指摘を受け対応検討。
+# ユーザー確認の結果、英語メディア・AI企業ブログ・日本語メディアは件数維持と決定。
+# 論文・研究 と AI_FEED_ARXIV_MAX は過去実績データ確認中のため、
+# 判断が出るまで元の構成（5フィード・上限15）のまま据え置く。
 # ============================================================
 AI_FEED_URLS = {
     "英語メディア": [
         {"title": "TechCrunch AI",        "url": "https://techcrunch.com/category/artificial-intelligence/feed/"},
         {"title": "VentureBeat AI",        "url": "https://venturebeat.com/category/ai/feed/"},
         {"title": "MIT Technology Review", "url": "https://www.technologyreview.com/feed/"},
+        {"title": "The Verge AI",          "url": "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml"},
+        {"title": "Wired AI",              "url": "https://www.wired.com/feed/tag/ai/latest/rss"},
     ],
     "AI企業・研究機関ブログ": [
         {"title": "OpenAI Blog",           "url": "https://openai.com/blog/rss.xml"},
@@ -187,17 +188,21 @@ AI_FEED_URLS = {
     "論文・研究": [
         {"title": "arXiv cs.AI",           "url": "https://rss.arxiv.org/rss/cs.AI"},
         {"title": "arXiv cs.LG",           "url": "https://rss.arxiv.org/rss/cs.LG"},
+        {"title": "arXiv cs.CL",           "url": "https://rss.arxiv.org/rss/cs.CL"},
+        {"title": "arXiv cs.CV",           "url": "https://rss.arxiv.org/rss/cs.CV"},
         {"title": "Papers with Code",      "url": "https://paperswithcode.com/latest.rss"},
     ],
     "日本語メディア": [
         {"title": "ITmedia AI+",           "url": "https://rss.itmedia.co.jp/rss/2.0/aiplus.xml"},
         {"title": "Ledge.ai",              "url": "https://ledge.ai/feed"},
+        {"title": "Publickey",             "url": "https://www.publickey1.jp/atom.xml"},
+        {"title": "テクノエッジ",           "url": "https://www.techno-edge.net/rss20/index.rdf"},
     ],
 }
 
 # arXiv は記事数が多いため1フィードあたりの取得上限を設ける
-# [v20260801_01修正] 毎回の流入量を抑えるため15→8に削減
-AI_FEED_ARXIV_MAX = 8  # arXiv フィードの最大取得件数
+# [v20260801_01修正] 過去実績データ確認中のため元の値(15)に据え置き
+AI_FEED_ARXIV_MAX = 15  # arXiv フィードの最大取得件数
 
 # ============================================================
 # サイト別プロファイル設定
