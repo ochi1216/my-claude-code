@@ -3040,6 +3040,10 @@ class GlaspEngine:
 
         pending: List[Dict] = []
         cancelled = False
+        # バッチ全体で共有する「既に他の動画に割り当て済みのGeminiタブ」の集合。
+        # 生成が遅い動画のタブが後から出現した際、別の動画がそれを誤って
+        # 自分のものと拾ってしまわないようにするための対策（S03再修正・第2版）。
+        claimed_handles: set = set()
 
         try:
             # === トリガーラウンド ===
@@ -3137,7 +3141,7 @@ class GlaspEngine:
                 # クリック直後、次の動画に進む前にその場で(3秒だけ)新しいタブの出現を確認し、
                 # このタイミングでタブの所属を確定させる（他動画のクリックで手遅れになる前に）
                 wait_result = self._wait_for_new_glasp_handle(
-                    tab_info, trig['before_handles'], playlist_position,
+                    tab_info, trig['before_handles'], claimed_handles, playlist_position,
                     attempt_index=0, glasp_trigger_method=trig['trigger_method'],
                     tab_gen_timeout=trigger_round_claim_timeout
                 )
@@ -3167,7 +3171,7 @@ class GlaspEngine:
                     if item['glasp_handle'] is None:
                         # まだGeminiタブが確定していない動画 → 出現を確認
                         wait_result = self._wait_for_new_glasp_handle(
-                            item['tab_info'], item['before_handles'], item['playlist_position'],
+                            item['tab_info'], item['before_handles'], claimed_handles, item['playlist_position'],
                             item['attempt_used'], item['trigger_method'],
                             tab_gen_timeout=retry_round_detect_timeout
                         )
@@ -3271,7 +3275,7 @@ class GlaspEngine:
                     item['before_handles'] = trig['before_handles']
                     item['trigger_method'] = trig['trigger_method']
                     wait_result = self._wait_for_new_glasp_handle(
-                        item['tab_info'], trig['before_handles'], item['playlist_position'],
+                        item['tab_info'], trig['before_handles'], claimed_handles, item['playlist_position'],
                         item['attempt_used'], trig['trigger_method'],
                         tab_gen_timeout=trigger_round_claim_timeout
                     )
@@ -4177,8 +4181,9 @@ class GlaspEngine:
             _perf_step("trigger_total", click_phase_start, success=False, reason=error_msg[:80])
             return {'ok': False, 'permanent': False, 'error': error_msg, 'needs_refresh': needs_refresh}
 
-    def _wait_for_new_glasp_handle(self, tab_info: Dict, before_handles: set, playlist_position: int,
-                                    attempt_index: int, glasp_trigger_method: str, tab_gen_timeout: float) -> Dict:
+    def _wait_for_new_glasp_handle(self, tab_info: Dict, before_handles: set, claimed_handles: set,
+                                    playlist_position: int, attempt_index: int, glasp_trigger_method: str,
+                                    tab_gen_timeout: float) -> Dict:
         """
         [ADR-0001, S03再修正] 「新しいGeminiタブが出てきたか」だけを判定する軽量チェック。
         送信成功判定（_confirm_glasp_success、数秒〜数十秒かかる）は含まない。
@@ -4187,9 +4192,13 @@ class GlaspEngine:
         差分だけで行っていたため、トリガーラウンドで全動画を待たずにクリックした結果、
         まだ実際には存在しないタブが後から出現した際、複数の動画が同じタブを
         自分のものと誤認する不具合が確認された。
-        対策として、この判定はトリガーラウンド内・各動画のクリック直後にその場で
-        (短いタイムアウトで)呼び出し、次の動画のクリックに進む前にタブの所属を
-        確定させることで、before_handlesが他動画のクリックによって古くなる前に判定を終える。
+        「クリック直後にその場で短時間確認する」対策(S03再修正・第1版)だけでは、
+        生成が遅い動画のタブが後から出現した際に、たまたま同時に検出処理をしていた
+        別の動画がそのタブを拾ってしまう抜け道が残っていた（実機ログで、10本中
+        複数本が同一のGeminiタブを共有してしまう事例を確認）。
+        対策として、claimed_handles(バッチ全体で共有する「既に他の動画に割り当て
+        済みのハンドル」の集合)を導入し、たとえ自分のbefore_handlesに含まれない
+        新規タブであっても、既に他の動画が使用中であれば候補から除外する。
 
         戻り値:
           {'handle': str}  … 新しいGemini/GoogleタブのSelenium window handle
@@ -4233,7 +4242,7 @@ class GlaspEngine:
         while time.time() - start_wait < tab_gen_timeout:
             elapsed = time.time() - start_wait
             current_handles = _safe_window_handles()
-            new_handles = [h for h in current_handles if h not in before_handles]
+            new_handles = [h for h in current_handles if h not in before_handles and h not in claimed_handles]
 
             if candidate_handle and candidate_handle not in current_handles:
                 log_message(
@@ -4294,6 +4303,7 @@ class GlaspEngine:
         )
 
         if glasp_handle:
+            claimed_handles.add(glasp_handle)
             self.tab_tracker.record_glasp_tab(glasp_handle, tab_info["video_info"].video_id, attempt_index + 1, "pending")
         return {'handle': glasp_handle}
 
