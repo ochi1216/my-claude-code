@@ -2933,6 +2933,52 @@ class GlaspEngine:
             return all_results
 
 
+    def _cleanup_stray_glasp_tabs(self, protected_handles: set) -> int:
+        """
+        [S03再々修正・第2版] 1巡目(トリガー)完了直後に呼び出し、予期しないGeminiタブ
+        （直前のクリックで偶然開いてしまった、文字起こしが入っていないプレーンな
+        タブ等）を閉じてクリーンな状態に戻す。
+        越智さんの実機観察により、こうしたタブは待っても文字起こしが入ることは
+        なく、2巡目で別の動画のタブと誤認され、実体のないタブを掴んだまま何も
+        進まなくなることが確認されたため、Geminiタブであること自体を条件に
+        無条件でクローズする（文字起こしの有無による判定は行わない）。
+        protected_handlesに含まれるタブ（動画タブ本体・既に確定済みのGeminiタブ・
+        メインタブ）は対象外。
+        """
+        closed_count = 0
+        try:
+            current_handles = list(self.driver.window_handles)
+        except Exception:
+            return 0
+
+        for handle in current_handles:
+            if handle in protected_handles:
+                continue
+            try:
+                self.driver.switch_to.window(handle)
+                current_url = (self.driver.current_url or "").lower()
+            except Exception:
+                continue
+            if "gemini" in current_url or "google" in current_url:
+                try:
+                    self.driver.close()
+                    closed_count += 1
+                    log_message(
+                        f"GLASP_STRAY_TAB_CLEANUP|handle={str(handle)[:8]}|url={current_url[:120]}",
+                        "INFO"
+                    )
+                except Exception as e:
+                    log_message(f"GLASP_STRAY_TAB_CLEANUP_ERROR|handle={str(handle)[:8]}|error={e}", "WARNING")
+
+        try:
+            main_handle = getattr(self, 'main_window_handle', None)
+            if main_handle and main_handle in self.driver.window_handles:
+                self.driver.switch_to.window(main_handle)
+        except Exception:
+            pass
+
+        return closed_count
+
     def _batch_send_ctrl_x(self, video_tabs: List[Dict], config: ProcessConfig = None) -> List[Dict]:
         """
         [ADR-0001、S03再々修正] Glasp起動処理を、越智さんの「先週うまく動いていた頃」の
@@ -3039,6 +3085,8 @@ class GlaspEngine:
         # 自分のものと拾ってしまわないようにするための保険（本来は2巡目を1本ずつ
         # きちんと待つ構成にしたことで発生しにくくなっているはずだが、念のため維持）。
         claimed_handles: set = set()
+        # 動画タブ自体は「予期しないGeminiタブ」クリーンアップの対象外として保護する
+        video_tab_handles: set = {t.get('tab_handle') for t in video_tabs if t.get('tab_handle')}
 
         # 初期リスト構築（動画情報欠損・タブ生成失敗は現行同様その場で確定させる）
         pending: List[Dict] = []
@@ -3140,6 +3188,19 @@ class GlaspEngine:
 
                 if cancelled:
                     break
+
+                # 1巡目のクリックで偶然開いてしまった「予期しないGeminiタブ」
+                # （文字起こしが入っていないプレーンなタブ等）を、2巡目に入る前に
+                # クリーンアップする。越智さんの実機観察により、こうしたタブは
+                # 待っても文字起こしが入ることはなく、2巡目で別の動画のタブと
+                # 誤認され「起動成功はしたが実体のないタブを掴んだまま何も進まない」
+                # 状態を引き起こすことが確認されたため（S03再々修正・第2版）。
+                protected_handles = video_tab_handles | claimed_handles
+                if getattr(self, 'main_window_handle', None):
+                    protected_handles.add(self.main_window_handle)
+                stray_closed = self._cleanup_stray_glasp_tabs(protected_handles)
+                if stray_closed:
+                    log_message(f"周回{lap+1}: 予期しないGeminiタブを{stray_closed}個クリーンアップしました", "INFO")
 
                 # === 2巡目: タブ起動確認（1本ずつ、きちんと待つ） ===
                 opened_items: List[Dict] = []
