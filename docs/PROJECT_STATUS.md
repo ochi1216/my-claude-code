@@ -19,21 +19,33 @@
 
 ```
 my-claude-code/
-├── CLAUDE.md                                          セッション管理ルール（本セットアップで新設）
+├── CLAUDE.md                                          セッション管理ルール
 ├── README.md                                           未整備（タイトルのみ）
 ├── HANDOVER_youtube_summary_list.md                    youtube_summary_list系の引継ぎ資料
-├── youtube_summary_list_20260703_01.py                 ベースライン（YouTube要約本体）
-├── youtube_summary_list_20260711_01.py                 お気に入りチャンネル動画をHTML先頭に配置
-├── consolidated_html_summary_manager_20260708_01.py    ベースライン（統合マネージャー本体）
-├── consolidated_html_summary_manager_20260711_02.py    スキップモード手動固定の保持機能
-├── consolidated_html_summary_manager_20260716_01.py    mode4追加・mode2/自動判定変更
-├── consolidated_html_summary_manager_20260722_01.py    mode1のワンショット化
-├── consolidated_html_summary_manager_20260722_02.py    Track 0のGeminiモデル修正（最新版）
+├── youtube_summary_list_20260703_01.py                 旧版
+├── youtube_summary_list_20260711_01.py                 旧版
+├── youtube_summary_list_20260725_01.py                 旧版
+├── youtube_summary_list_20260725_02.py                 旧版
+├── youtube_summary_list_20260801_01.py                 旧版（Glaspボタン検出をアイコンクラス名ベースに変更）
+├── youtube_summary_list_20260801_02.py                 旧版（Glaspリトライ回数2→5）
+├── youtube_summary_list_20260801_03.py                 最新版（未使用UI設定整理・Glasp起動方式に本物クリック(CDPマウス)追加）
+├── consolidated_html_summary_manager_20260708_01.py    旧版
+├── consolidated_html_summary_manager_20260711_02.py    旧版
+├── consolidated_html_summary_manager_20260716_01.py    旧版
+├── consolidated_html_summary_manager_20260722_01.py    旧版
+├── consolidated_html_summary_manager_20260722_02.py    最新版（Track 0のGeminiモデル修正）
+├── run_youtube_summary_auto.bat                        youtube_summary_list起動用（Chromeデバッグプロファイル起動込み）
+├── run_youtube_List_auto_setup.bat                     Youtube_List_Setup起動用
+├── run_youtube_channel_remove_auto.bat                 チャンネル解除ツール起動用
+├── run_youtube_all_tasks.bat                           旧・一括起動用（要用途確認）
 └── docs/
     ├── PROJECT_STATUS.md                               本ファイル
     ├── SESSION_HISTORY.md                               セッション履歴
-    └── NEXT_TASK.md                                     次セッション用引継ぎ
+    ├── NEXT_TASK.md                                     次セッション用引継ぎ
+    └── decisions/                                       重要設計判断のADR
 ```
+
+※越智さんのローカル作業フォルダには本リポジトリ対象外の関連ツール（`Youtube_List_Setup_*.py`・`Youtube_Playlist_management_*.py`等）や大量の旧版・ログ・バックアップファイルが存在する。S02にて整理対象の棚卸しを実施済み（詳細は本ファイル未記載・チャット上のみ、越智さんのローカル作業）。
 
 ### 各ファイルの役割
 
@@ -50,6 +62,9 @@ my-claude-code/
 - プレイリスト種別 `ALL V S A B N M P+` への対応（VERSION 20260703_01）
 - お気に入りチャンネル動画をHTML内で先頭グループに集約（VERSION 20260711_01。プレイリスト内相対順序は維持したまま安定ソート）
 - Automode（`--auto` / `--playlists`引数によるバッチ処理起動）
+- Glaspボタン（きらきらマーク）検出はアイコンのCSSクラス名（`svg.lucide-sparkles`）ベースで行う（VERSION 20260801_01。旧実装のSVGパス座標ハードコードはGlasp側UI更新で破綻したため廃止）
+- GUI「Glasp起動方式」ラジオボタンで、クリック方式を「疑似クリック（JS `.click()`、既定）」と「本物クリック（CDPの`Input.dispatchMouseEvent`、検証用）」から選択可能（VERSION 20260801_03）
+- GUIの「ブラウザ挙動設定」「出力形式」ラジオボタンは実運用で変更されないため非表示化し、内部固定値（browser_mode=3/タブ連続運転、output_format=html）で動作（VERSION 20260801_03）
 
 ### consolidated_html_summary_manager
 
@@ -145,23 +160,40 @@ handlePartEnd() → 読了後、skipModeに応じて次のcurrentPartを決定 o
 ### 完了済み
 
 - youtube_summary_list: ベースライン取り込み、お気に入りチャンネル動画のHTML先頭配置（VERSION 20260711_01）
-- consolidated_html_summary_manager: ベースライン取り込み、スキップモード手動固定のファイル切替/停止までの保持（VERSION 20260711_02）、mode4（title+summary+conclusion）追加、mode2の見出しのみ読み上げ化、自動判定優先順位の変更（VERSION 20260716_01）、mode1のワンショット化（1カード読了後に直前のモードへ自動復帰。VERSION 20260722_01。別スレッドで開発され、本セッションに取り込み・統合）
+- consolidated_html_summary_manager: ベースライン取り込み、スキップモード手動固定のファイル切替/停止までの保持（VERSION 20260711_02）、mode4（title+summary+conclusion）追加、mode2の見出しのみ読み上げ化、自動判定優先順位の変更（VERSION 20260716_01）、mode1のワンショット化（1カード読了後に直前のモードへ自動復帰。VERSION 20260722_01）、Track 0全体概況生成のGeminiモデル不整合修正（VERSION 20260722_02）
 - 本ドキュメント一式（`CLAUDE.md`・`docs/`）の初期セットアップ
-- youtube_summary_listのChromeログインエラー（「Couldn't sign you in」）の原因調査・対処方法の案内（自動操作検知が原因。手動プロファイルログイン＋デスクトップショートカットで解消確認済み）
-- Track 0全体概況生成のGeminiモデル不整合を修正（`gemini-2.0-flash`→`gemini-2.5-flash`、VERSION 20260722_02）
+- youtube_summary_listのChromeログインエラー（「Couldn't sign you in」）の原因調査・対処（自動操作検知が原因。手動プロファイルログイン＋デスクトップショートカットで解消確認済み）
+- **S02: Glasp自動起動の信頼性改善（進行中の課題、詳細は下記Known Issues参照）**
+  - Chrome「session not created」クラッシュ修正（Seleniumのchromedriverキャッシュ削除）
+  - Glaspボタン検出をアイコンCSSクラス名ベースに変更（VERSION 20260801_01。Glasp UI更新でボタンが検出できなくなっていた問題を解消）
+  - Glaspリトライ回数を2→5に増加（VERSION 20260801_02）
+  - GUIの未使用設定（ブラウザ挙動設定・出力形式）を非表示化し、「Glasp起動方式」に実際に機能する疑似クリック/本物クリック(CDPマウス)の切替を実装（VERSION 20260801_03）
+  - 越智さんのローカルChromeプロファイル（`ChromeDebugProfile_20260725`）の拡張機能同期問題への対処案内（同期オフ＋手動整理、コード変更なし）
+  - 越智さんのローカル作業フォルダの棚卸し（現役3ツール以外の旧版・重複ファイルの洗い出し、コード変更なし）
 
 ### 作業中
 
-- なし（本セットアップ完了時点）
+- Glasp自動起動の信頼性改善（S02から継続）。次の一手として「バッチ処理の2フェーズ化」（トリガーラウンド→検出/リトライラウンド）の設計に合意済みだが未実装。詳細は`docs/decisions/0001-glasp-batch-trigger-detect-redesign.md`と`NEXT_TASK.md`を参照
 
 ### 未着手
 
 - youtube_summary_list側の`config/playlists.json`未参照問題の整理（HANDOVER記載、スコープ外合意済み）
 - `datetime.min`安全ガード（`upload_time`のNone処理、HANDOVER記載、別パッチ扱いで未着手）
 - 兄弟ツール（`Youtube_List_Setup`等）は本リポジトリの管理対象外（未確認）
+- youtube_summary_list_20260801_03.pyの「本物クリック（CDPマウス）」オプションの実地検証（越智さんのローカル環境での実行結果待ち）
 
 ## 6. Known Issues
 
+- **【未解決・優先度高】youtube_summary_listのGlasp自動起動が低成功率（S02時点）**:
+  - 症状: きらきらボタンのクリック自体は成功する（`cdp_button=True`）が、Geminiタブが検出されない（`glasp_tab_detect=False`）失敗が多数発生。リトライ回数を2→5に増やしても改善せず（直近の実行結果は3/26本成功）
+  - 判明した事実:
+    - Glasp拡張機能は最新版（v2.3.0）に更新済み。更新前後で完全ノーヒットからは改善したが、依然として過半数が失敗
+    - 失敗した動画タブでも、後で手動できらきらボタンを1クリックすれば高い確率でGemini/ChatGPTが起動する
+    - Glaspのボタンをクリックすると、YouTube側に「文字起こし」パネル（AIによる文字起こし・チャプター生成、完了までスピナー表示）が開く。これはクリックの**結果**であり、クリック前に存在を確認できる条件ではない
+    - このパネルの完了を待たずに現在のコードは動いており、かつ検出失敗時は`driver.refresh()`でページを再読み込みするため、生成途中の状態がリセットされている可能性がある
+    - パネルの挙動には複数パターンがある（パネルが出ずに成功するケース、UIパターンが複数存在するケース、待っても永久にスピナーが終わらないケース）
+  - 現在の仮説: バックエンド側の文字起こし生成に相応の実時間がかかることがあり、同一動画に対して数秒間隔で即座に再クリックしても状況は変わらない。放置して他の処理をしている間に自然と完了することが多い
+  - 次の対策案（設計合意済み・未実装）: `docs/decisions/0001-glasp-batch-trigger-detect-redesign.md`参照。バッチ内の全動画に対して「まず1回ずつクリックする」トリガーラウンドを先に済ませ、その後まとめて検出・必要なら再クリックする2フェーズ方式に変更する
 - **RSS記事のconclusion/points未生成状態**: consolidated_html_summary_managerのRSSカードは、オンデマンド生成（「主なポイントを生成」ボタン）前は`conclusion`/`points`が空。mode2・mode4選択時、空の場合は読み上げをスキップして次のカードへ進む仕様（意図的な設計）
 - **クラウド環境での動作確認不可**: 本ツールはSelenium+Chrome debugポート+ローカルファイル前提のブラウザGUIのため、クラウド開発環境では実ブラウザでの動作確認ができない。構文チェック（`ast.parse`）とdiffレビューのみ実施し、実動作確認は越智さんのローカル環境に依存する
 - **youtube_summary_list側の既知の罠（HANDOVER記載、要再確認）**:

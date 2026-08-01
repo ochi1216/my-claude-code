@@ -5,6 +5,13 @@
 | Session | Title | Date | Status | Main Files |
 | ------- | ----- | ---- | ------ | ---------- |
 | S01 | 引継ぎ管理の初期設定 | 2026-07-16 | 完了 | youtube_summary_list_*.py, consolidated_html_summary_manager_*.py, CLAUDE.md, docs/* |
+| S02 | youtube_summary_list Glasp自動起動の信頼性改善 | 2026-08-01 | 一部完了・継続中 | youtube_summary_list_20260801_01/02/03.py, docs/* |
+
+---
+
+## S02 - youtube_summary_list Glasp自動起動の信頼性改善
+
+[2026-08-01] S02: Glaspボタン検出方式の修正・リトライ回数増加・GUI起動方式の追加を実施（VERSION 20260801_01/02/03）。成功率は改善したが根本解決には至らず、次の一手（バッチ処理2フェーズ化）はADR 0001に設計のみ記録し未実装。 / 重大判断: 「文字起こしパネルはクリック前に検知できない（クリックの結果として現れる）」ことが判明し、事前ポーリング案を棄却してバッチ再構成の方向へ転換した。
 
 ---
 
