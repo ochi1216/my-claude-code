@@ -41,7 +41,7 @@ python rss_organizer_20260801_01.py
 | --- | --- | --- |
 | 🔎 キーワード探索 (Tab1) | `my_keywords.txt`/`keywords.txt` のキーワードで note/Qiita/Zenn のハッシュタグRSSを横断取得 | `SITE_CONFIG` |
 | 👤 フォローnote (Tab2) | `followed_note_authors.txt` に登録した作者のnote RSSのみ取得 | 作者ごとのRSS |
-| 🤖 AI最先端フィード (Tab3) | 固定登録されたAI関連フィードを並列取得 | `AI_FEED_URLS`（英語メディア5/AI企業・研究機関ブログ6/論文・研究5/日本語メディア4、計20フィード。arXivの取得上限は `AI_FEED_ARXIV_MAX`=15。英語メディア・AI企業ブログ・日本語メディアは件数維持で確定。論文・研究と`AI_FEED_ARXIV_MAX`は実績データ確認のうえ削減方針を検討中） |
+| 🤖 AI最先端フィード (Tab3) | 固定登録されたAI関連フィードを並列取得 | `AI_FEED_URLS`（英語メディア5/AI企業・研究機関ブログ6/論文・研究0/日本語メディア4、計15フィード）。論文・研究はarXiv 4フィード・Papers with Codeとも取得停止（実績データでarXivが全体の57%を占め主要因と判明、Papers with Codeはフィード自体が機能停止していたためユーザー判断で0件に） |
 
 ## 既知の制限（今回のスコープ外）
 

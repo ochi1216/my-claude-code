@@ -164,10 +164,14 @@ def cosine_similarity(v1, v2):
 
 # ============================================================
 # [v20260508.02追加] AI最先端フィード 固定URLリスト
-# [v20260801_01修正] 毎回の読み込み量が多すぎるとの指摘を受け対応検討。
-# ユーザー確認の結果、英語メディア・AI企業ブログ・日本語メディアは件数維持と決定。
-# 論文・研究 と AI_FEED_ARXIV_MAX は過去実績データ確認中のため、
-# 判断が出るまで元の構成（5フィード・上限15）のまま据え置く。
+# [v20260801_01修正] 毎回の読み込み量が多すぎるとの指摘を受け対応。
+# 実際の ai_feed_history.json（直近1週間・606件）を分析した結果、
+# arXiv 4フィード（cs.AI/cs.LG/cs.CL/cs.CV）が全体の57%(345件)を占め、
+# 主要因と判明。一方 Papers with Code は同期間0件で、Windows実機での
+# feedparser動作確認でも SSLV3_ALERT_HANDSHAKE_FAILURE により
+# フィード自体が機能停止していることを確認した。
+# ユーザー判断: 英語メディア・AI企業ブログ・日本語メディアは件数維持。
+# 論文・研究は arXiv 4フィード・Papers with Code とも取得を停止し、0件とする。
 # ============================================================
 AI_FEED_URLS = {
     "英語メディア": [
@@ -185,13 +189,9 @@ AI_FEED_URLS = {
         {"title": "Hugging Face Blog",     "url": "https://huggingface.co/blog/feed.xml"},
         {"title": "DeepLearning.AI Batch", "url": "https://www.deeplearning.ai/the-batch/feed/"},
     ],
-    "論文・研究": [
-        {"title": "arXiv cs.AI",           "url": "https://rss.arxiv.org/rss/cs.AI"},
-        {"title": "arXiv cs.LG",           "url": "https://rss.arxiv.org/rss/cs.LG"},
-        {"title": "arXiv cs.CL",           "url": "https://rss.arxiv.org/rss/cs.CL"},
-        {"title": "arXiv cs.CV",           "url": "https://rss.arxiv.org/rss/cs.CV"},
-        {"title": "Papers with Code",      "url": "https://paperswithcode.com/latest.rss"},
-    ],
+    # [v20260801_01修正] arXiv 4フィード・Papers with Codeとも取得停止（ユーザー判断）。
+    # 再開する場合は旧版 rss_organizer_20260708_02.py の同カテゴリを参照。
+    "論文・研究": [],
     "日本語メディア": [
         {"title": "ITmedia AI+",           "url": "https://rss.itmedia.co.jp/rss/2.0/aiplus.xml"},
         {"title": "Ledge.ai",              "url": "https://ledge.ai/feed"},
@@ -201,7 +201,8 @@ AI_FEED_URLS = {
 }
 
 # arXiv は記事数が多いため1フィードあたりの取得上限を設ける
-# [v20260801_01修正] 過去実績データ確認中のため元の値(15)に据え置き
+# [v20260801_01修正] 論文・研究フィード停止に伴い現在は使用されないが、
+# 再開時のために定数自体は残す
 AI_FEED_ARXIV_MAX = 15  # arXiv フィードの最大取得件数
 
 # ============================================================
@@ -1967,11 +1968,15 @@ class RSSManagerGUI:
         ).pack(side=tk.LEFT, padx=10)
 
         # フィード構成説明ラベル
-        categories = ", ".join(AI_FEED_URLS.keys())
+        # [v20260801_01修正] 空カテゴリ(論文・研究)を表示から除外し、
+        # arXiv未登録時は上限件数の注記を出さないようにする
+        categories = ", ".join(k for k, v in AI_FEED_URLS.items() if v)
         total_feeds = sum(len(v) for v in AI_FEED_URLS.values())
+        has_arxiv = any("arxiv.org" in f["url"] for feeds in AI_FEED_URLS.values() for f in feeds)
+        arxiv_note = f" arXivは最新{AI_FEED_ARXIV_MAX}件に制限。" if has_arxiv else ""
         ttk.Label(
             frame,
-            text=f"計{total_feeds}フィード（{categories}）を並列取得します。arXivは最新{AI_FEED_ARXIV_MAX}件に制限。"
+            text=f"計{total_feeds}フィード（{categories}）を並列取得します。{arxiv_note}"
         ).pack(side=tk.LEFT, padx=5)
 
     def _show_ai_feed_list(self):

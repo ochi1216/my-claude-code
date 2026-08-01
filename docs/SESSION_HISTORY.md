@@ -4,7 +4,7 @@
 
 | Session | Title | Date | Status | Main Files |
 | ------- | ----- | ---- | ------ | ---------- |
-| S01 | 読み込みフィードのシンプル化 | 2026-08-01 | 一部完了（論文・研究とAI_FEED_ARXIV_MAXは確認中） | rss_organizer/ |
+| S01 | 読み込みフィードのシンプル化 | 2026-08-01 | 完了 | rss_organizer/ |
 
 セッションの詳細な記録は、セッション終了処理（ユーザーが明示的に指示した場合）の際にこのファイルへ1件としてまとめて追記する。同一セッション中の途中更新は行わない。
 
@@ -48,3 +48,27 @@
   - 一般的な傾向（未検証）として、arXiv cs.AI/cs.LG/cs.CVは1日あたり新着100件超、cs.CLは50〜100件程度、Papers with Codeはトレンド抽出のため相対的に少数、という参考情報をユーザーに提示済み。
   - この確認が完了するまで、`論文・研究`（5フィード: arXiv cs.AI/cs.LG/cs.CL/cs.CV, Papers with Code）と `AI_FEED_ARXIV_MAX`（15）は元の値のまま据え置いている。
 - 結果として `rss_organizer_20260801_01.py` は現時点でコメント（変更履歴の記述）を除き、実質的にベースライン(`20260708_02.py`)と同じ設定値になっている。次セッション（または本セッション継続）で論文・研究の実績データが得られ次第、最終的な構成を決定する。
+
+### 最終決定（同一セッション内、2026-08-01）
+
+ユーザーより実際の `ai_feed_history.json`（直近1週間分・606件）の提供を受け、Pythonで集計・分析:
+
+- **arXiv 4フィード（cs.AI/cs.LG/cs.CL/cs.CV）が全期間606件中345件（57%）を占めていた。** arXivがヒットした日は1日あたり最大60件（＝`AI_FEED_ARXIV_MAX`15件×4フィードの上限に張り付き）取得されており、「毎回大量」の主因と判明。
+- **Papers with Codeは同期間0件。** ユーザーにWindows実機で `feedparser.parse('https://paperswithcode.com/latest.rss')` を実行してもらったところ `bozo=True`、例外は `SSLV3_ALERT_HANDSHAKE_FAILURE` — フィード自体が現在機能停止していることを確認（本セッション環境からのネットワークアクセスも同様にブロックされていたため、事前にコードを読んで仕組みを説明したうえでユーザーに実機確認を依頼した）。
+- 副次的な発見: AI企業・研究機関ブログもOpenAI(11件)以外（Anthropic/DeepMind/Meta/Hugging Face/DeepLearning.AI Batch）は同期間0件だった。今回のスコープ外のため変更していないが、次回確認候補として`docs/NEXT_TASK.md`に記録。
+- **ユーザー最終判断: 論文・研究カテゴリはarXiv4フィード・Papers with Codeとも取得を停止し、`AI_FEED_URLS["論文・研究"] = []`（0件）に確定。** `AI_FEED_ARXIV_MAX`定数は将来の再開に備えて残置（現状未使用）。
+- 実装に伴い、GUIのフィード構成説明ラベル（`_build_ai_feed_tab`内、空カテゴリの表示・arXiv上限の注記）が新構成のままだと不正確な表示になるバグを発見し、あわせて修正（空カテゴリを表示から除外し、arXiv未登録時は上限件数の注記を出さないよう変更）。
+- 最終構成: 英語メディア5 / AI企業・研究機関ブログ6 / 論文・研究0 / 日本語メディア4 = **計15フィード**（旧: 20フィード）。`README.md`/`CHANGELOG.md`も最終状態に更新済み。
+
+### テスト結果（最終版）
+
+- `python3 -m py_compile rss_organizer_20260801_01.py` → 構文エラーなし
+- 新旧ファイルの `diff` → 変更箇所は意図した範囲（`VERSION`定数、`AI_FEED_URLS`の論文・研究、`AI_FEED_ARXIV_MAX`コメント、GUIラベルのロジック）のみ
+- `AI_FEED_URLS` の件数を実測 → 15件（想定通り。英語5/企業ブログ6/論文0/日本語4）
+- GUI起動・実ネットワーク経由のフィード取得テスト（Windows実機）は本セッション環境では実施不可のため未実施。Papers with Codeの生死確認のみユーザーにWindows実機で実施いただいた。
+
+### 引継ぎ事項（最終）
+
+- 論文・研究カテゴリは意図的に0件（arXiv・Papers with Codeとも停止）。将来再開する場合は旧版 `rss_organizer_20260708_02.py` の`AI_FEED_URLS["論文・研究"]`を参照。
+- AI企業・研究機関ブログのうちOpenAI以外（Anthropic/DeepMind/Meta/Hugging Face/DeepLearning.AI Batch）が過去1週間0件だった件は未調査。フィード切れの可能性があるため、次回セッションで確認候補とする。
+- GUI起動・実ネットワーク経由の動作確認はWindows実機で改めて行うことを推奨。

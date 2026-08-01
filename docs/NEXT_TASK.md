@@ -3,52 +3,48 @@
 ## Project Name
 RSS オーガナイザー開発
 
-## Current Session
-S01（継続中）
+## Previous Session
+S01 - 読み込みフィードのシンプル化（完了）
 
-## Current Session Title
-RSS オーガナイザー開発 S01 - 読み込みフィードのシンプル化
+## Next Session
+S02（候補）
 
-## Current Objective
-Tab3「AI最先端フィード」の読み込み過多に対応する。ユーザー指示により英語メディア(5)・AI企業ブログ(6)・日本語メディア(4)は件数維持で確定。残る論文・研究フィード構成と`AI_FEED_ARXIV_MAX`は、過去の実際の投稿数実績データを見た上で判断する方針。
+## Next Session Title（候補）
+RSS オーガナイザー開発 S02 - AI企業・研究機関ブログのフィード疎通確認
 
 ## Background
-`rss_organizer_20260801_01.py` は現状、ベースライン(`20260708_02.py`)とコメントを除き同じ設定（`AI_FEED_URLS`全20件、`AI_FEED_ARXIV_MAX`=15）に戻っている。論文・研究カテゴリ（arXiv cs.AI/cs.LG/cs.CL/cs.CV, Papers with Code）だけが唯一の未確定事項。
+S01でTab3「AI最先端フィード」の読み込み過多に対応し、`ai_feed_history.json`（直近1週間・606件）の分析を通じて以下が確定した。
 
-過去実績データの取得を試みたが以下の理由で本セッションでは取得不可だった:
-- リポジトリ内に`ai_feed_history.json`等の実行履歴ファイルなし（Windows実機側でGit管理対象外として生成される仕様）
-- 本セッション環境のネットワークポリシーでarXiv/Papers with Codeへの直接アクセスがブロックされている（`rss.arxiv.org`宛CONNECTが403）
+- 論文・研究カテゴリ: arXiv4フィード（全体の57%を占めていた）・Papers with Code（フィード自体がSSLハンドシェイク失敗で機能停止）とも取得停止、0件に確定
+- 英語メディア(5)・AI企業ブログ(6)・日本語メディア(4)は件数維持
+- 最終構成: 計15フィード（`rss_organizer_20260801_01.py`）
 
-一般的傾向（未検証・参考値）として提示済み: arXiv cs.AI/cs.LG/cs.CVは1日あたり新着100件超、cs.CLは50〜100件程度、Papers with Codeはトレンド抽出のため相対的に少数。
+分析の過程で副次的に判明した点として、AI企業・研究機関ブログ6フィードのうちOpenAI(11件)以外（Anthropic, Google DeepMind, Meta AI, Hugging Face, DeepLearning.AI Batch）が過去1週間で1件も取得されていなかった。S01のスコープ外のため未調査のまま。
 
-## Scope
-- 論文・研究フィードの構成（現状5件を維持するか、一部除外するか）
-- `AI_FEED_ARXIV_MAX`（現状15）を実績に応じてどう設定するか
+## Candidate Scope（次セッション開始時にユーザーへ確認）
+- Anthropic/DeepMind/Meta/Hugging Face/DeepLearning.AI Batchの各フィードURLが生きているか確認（Papers with Codeと同様に`feedparser.parse()`で`bozo`/例外を確認する方法が使える）
+- 生きていないフィードがあれば、正しいURLへの差し替え or 取得停止を検討
+- その他、ユーザーからの新規依頼（実際に運用してみての追加調整など）
 
 ## Files That May Be Changed
-- `rss_organizer/rss_organizer_20260801_01.py`（`AI_FEED_URLS`の「論文・研究」および`AI_FEED_ARXIV_MAX`のみ）
+- `rss_organizer/rss_organizer_20260801_01.py` の後続バージョン（例: `rss_organizer_YYYYMMDD_01.py`、新規作成・旧版は残置）
 - `rss_organizer/README.md`
 - `rss_organizer/CHANGELOG.md`
-- `docs/PROJECT_STATUS.md` / `docs/SESSION_HISTORY.md`（決定後、最終状態を反映）
 
 ## Files That Must Not Be Changed
-- `rss_organizer/rss_organizer_20260708_02.py`（旧バージョンとして保持、削除・上書き禁止）
-- `AI_FEED_URLS`の英語メディア・AI企業ブログ・日本語メディア（件数維持で確定済み）
+- `rss_organizer/rss_organizer_20260708_02.py`, `rss_organizer_20260801_01.py`（旧バージョンとして保持、削除・上書き禁止）
 - 他プロジェクト（`rtocs_organizer/`, `youtube_summary_list_*.py`, `po_database_organizer/`, `shareflex_dashboard/`）は無関係のため変更しない
 
 ## Task
-ユーザーから過去の実際の投稿数実績（`ai_feed_history.json`の中身、または直近のHTMLレポート等）の提供を受けたら、それを基に論文・研究フィード構成と`AI_FEED_ARXIV_MAX`を確定し、`rss_organizer_20260801_01.py`に反映する。
+セッション開始時にユーザーへ「AI企業ブログの疎通確認を行うか」「他に調整したい点はあるか」を確認し、対応する。
 
 ## Completion Criteria
-- 論文・研究フィード構成が確定していること（ユーザー合意済み）
-- `AI_FEED_ARXIV_MAX`の値が確定していること（ユーザー合意済み）
-- 既存機能に意図しない影響がないこと
-- 必要なテストを実施すること
+- 未確認（ユーザー確認後に確定）
 
 ## Required Tests
 - Python構文チェック（`python -m py_compile`）
-- 変更箇所の静的ロジック確認（GUI実機テストは本セッション環境では不可のため対象外）
+- 変更箇所の静的ロジック確認（GUI実機テストは本セッション環境では不可のため対象外。フィード疎通確認はユーザーにWindows実機での`feedparser.parse()`実行を依頼する方式が有効）
 
 ## Known Risks
-- 実績データが得られない場合、一般的傾向のみに基づく判断となり精度が落ちる
 - 本ツールはWindows+Playwright+Tkinter前提のため、クラウドセッションでは実機動作確認ができない
+- 本セッション環境からは arxiv.org・paperswithcode.com 等の外部RSS URLへ直接アクセスできない（ネットワークポリシーでブロック）。同様のブロックが他ドメインでも起こりうるため、疎通確認はユーザーのWindows実機に依頼する前提で計画する

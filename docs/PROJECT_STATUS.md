@@ -1,6 +1,6 @@
 # PROJECT_STATUS — RSS オーガナイザー開発
 
-最終更新: S01一部完了（2026-08-01、論文・研究とAI_FEED_ARXIV_MAXは確認中）
+最終更新: S01完了（2026-08-01）
 
 ## Project Overview
 
@@ -32,7 +32,7 @@ CLAUDE.md
 - `RSSManagerGUI` — Tkinter GUI本体。3タブ構成:
   - Tab1「🔎 キーワード探索」— `SITE_CONFIG`（note/Qiita/Zenn）× `my_keywords.txt`/`keywords.txt` のキーワードでハッシュタグRSSを横断取得
   - Tab2「👤 フォローnote」— `followed_note_authors.txt` に登録された作者のnote RSSのみ取得
-  - Tab3「🤖 AI最先端フィード」— `AI_FEED_URLS` に固定登録された20フィード（英語メディア5／AI企業・研究機関ブログ6／論文・研究5／日本語メディア4）を並列取得。英語メディア・AI企業ブログ・日本語メディアは件数維持が確定。論文・研究（`AI_FEED_ARXIV_MAX`含む）は削減方針を検討中で現状は元の値のまま据え置き
+  - Tab3「🤖 AI最先端フィード」— `AI_FEED_URLS` に固定登録された15フィード（英語メディア5／AI企業・研究機関ブログ6／論文・研究0／日本語メディア4）を並列取得。論文・研究はarXiv4フィード・Papers with Codeとも取得停止（実績データでarXivが57%を占め主要因と判明、Papers with Codeはフィード自体がSSLハンドシェイク失敗で機能停止していたためユーザー判断で0件に確定）
 - `-auto` 起動引数でGUIを隠し、Tab2→Tab1→Tab3の順で全タブを自動実行→統合→要約→レポート生成→ブラウザ表示→既読化まで一括実行するステルスモードあり
 
 ## Confirmed Specifications
@@ -46,14 +46,15 @@ CLAUDE.md
 ## Current Status
 
 - ユーザーから提供されたベースライン（`rss_organizer_20260708_02.py`、v20260708_02_01）をリポジトリに初回登録済み。
-- ユーザー依頼「AI最先端フィード（Tab3）が毎回大量に読み込まれるのでソースを限定したい」に対応中。`rss_organizer_20260801_01.py`（v20260801_01_01）を作成し、最初はClaude Code独断で20フィード→14フィードに削減したが、ユーザーから「勝手に進めないでください」と指摘を受け訂正。
+- ユーザー依頼「AI最先端フィード（Tab3）が毎回大量に読み込まれるのでソースを限定したい」に対応完了。`rss_organizer_20260801_01.py`（v20260801_01_01）を最終版として確定。
   - 確定: 英語メディア（5件）・AI企業・研究機関ブログ（6件）・日本語メディア（4件）は元の件数を維持
-  - 未確定（要検討）: 論文・研究フィード構成（現状arXiv cs.AI/cs.LG/cs.CL/cs.CV + Papers with Code の5件）と `AI_FEED_ARXIV_MAX`（現状15）。ユーザーは過去の実際の投稿数実績を見て判断したい意向だが、リポジトリ内に実行履歴なし・本セッション環境からarXiv等へ直接アクセス不可のため、実測データを提示できていない。一般的傾向（未検証）の参考値のみ提示済み。判断が出るまで論文・研究とAI_FEED_ARXIV_MAXは元の値のまま。
+  - 確定: 論文・研究は0件（arXiv4フィード・Papers with Codeとも取得停止）。ユーザー提供の実際の`ai_feed_history.json`（606件）を分析し、arXivが全体の57%(345件)を占め主因と判明。Papers with Codeはユーザーのwindows実機での`feedparser`実行結果からSSLハンドシェイク失敗により機能停止と確認済み。
+  - 最終構成: 計15フィード（旧20フィードから5削減）
 
 ## Known Issues
 
-- 論文・研究フィードの構成と `AI_FEED_ARXIV_MAX` の最終決定が未了。ユーザーから実際の`ai_feed_history.json`等の実績データ提供を待っている状態。
-- 本ツールはWindows+Playwright+Tkinter前提のため、本セッション（クラウド実行環境）ではGUI起動・実ネットワーク経由のフィード取得テストが未実施（構文チェックと静的diff確認のみ実施済み）。本セッション環境のネットワークポリシー上、arXiv/Papers with Code等外部RSSへの直接アクセスも不可（`rss.arxiv.org`宛CONNECTが403で拒否される）。
+- AI企業・研究機関ブログのうちOpenAI以外（Anthropic/DeepMind/Meta/Hugging Face/DeepLearning.AI Batch）が過去1週間の実績で0件だった（`ai_feed_history.json`分析より）。フィード切れの可能性があるが、今回のスコープ外のため未調査。次回セッションでの確認候補。
+- 本ツールはWindows+Playwright+Tkinter前提のため、本セッション（クラウド実行環境）ではGUI起動・実ネットワーク経由のフィード取得テストが未実施（構文チェックと静的diff確認のみ実施済み）。本セッション環境のネットワークポリシー上、arXiv/Papers with Code等外部RSSへの直接アクセスも不可（`rss.arxiv.org`・`paperswithcode.com`宛CONNECTが403で拒否される）。
 - `HTMLReportGenerator.folder` および `note` ログイン情報の一部（`nx023836` ユーザー名）がハードコードされている（既存仕様、今回のスコープ外）
 
 ## Test and Execution
