@@ -42,7 +42,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, WebDriverException
 from webdriver_manager.chrome import ChromeDriverManager
-import pyautogui
 
 import socket
 # デフォルトのソケットタイムアウトを30秒に設定
@@ -362,8 +361,7 @@ DEFAULT_CONFIG = {
         
         # === フォーカス制御設定（新規）===
         'use_selenium_actions': True,  # Selenium Actions優先使用
-        'fallback_to_pyautogui': True,  # 失敗時のフォールバック許可
-        
+
         # === バッチ処理設定（新規）===
         'batch_delay': 2,  # バッチ間の待機時間
         
@@ -3832,9 +3830,6 @@ class GlaspEngine:
             if "Gemini Prompt Split Error" in str(e):
                 raise e
             return False
-
-    def _save_debug_evidence(self, prefix: str = "error"):
-        log_message(f"📸 デバッグ証拠保存をスキップしました: {prefix}", "WARNING")
 
     def _emergency_cleanup(self):
         log_message("🚨 緊急クリーンアップ発動: プロセス強制終了", "WARNING")
