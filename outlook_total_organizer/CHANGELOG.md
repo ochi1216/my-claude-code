@@ -1,5 +1,53 @@
 # CHANGELOG — outlook_total_organizer
 
+## VERSION 20260730_11
+
+### 追加・修正
+	**振り返りタブ: スタッフ(部下)への対象拡張、およびOchiさんのG1/G2/G3ゴール定義の見直し**。
+
+	(1) スタッフ拡張: これまで振り返りタブはOchiさん本人の実績のみが対象だったが、対象者チェックボックス(Ochi + project_knowledge["staffs"]登録のスタッフ)で選んだスタッフの実績も同じ枠組みで生成できるようにした。本ツールはOchiさんがログインしているOutlookプロファイルのメールボックスしか参照できない(委任アクセス・共有メールボックスを開くCOM実装は無い)ため、スタッフの活動は「Ochiさんのメールボックス内で観測できる範囲」(本人が送信者のスレッド、またはOchiさんが本人へ送信したスレッド)に限られる。この制約はUI説明文・レポートのフッターに明記した。スタッフのランクは、Ochiさん用の決定木(Tier1/Tier2関与・スタッフ牽引ブースト等を含む)とは別の、KPIゴールへの紐づきを軸にしたシンプルな決定木(`rank_review_staff_achievement`: 未確定→P、ゴール外→B、ゴール紐づき+定量効果/Japan Site全体→S、ゴール紐づきのみ→A)で判定する。Ochiさん用の決定木(`rank_review_achievement`)自体は一切変更していない(回帰テストで確認済み)。
+
+	(2) ゴール定義の外出し: 各対象者のゴール(KPI)定義を`json/review_person_goals.json`へ外出しした。ご提供いただいた各スタッフのNexperia 2026年ゴールシート(全ページ"confidential")のKPIタイトルを雛形の初期値として入れてある。このファイルは氏名・KPI・数値目標を含む機密情報のため`.gitignore`へ追加し、リポジトリには含めない。
+
+	(3) OchiさんのG1/G2/G3ゴール定義の見直し: ご提供いただいたOchiさんのゴールシート(2026/07/31改訂版)を確認したところ、`G3_r04`(旧ラベル「R04フロー適合」)の説明文に「R19等の既存プロジェクトの進め方をR04式に合わせる」とあったが、実際のゴールシートではR19の後始末(IO Close・impaired 12NCリスト確定・残存資産の廃棄)はGoal1(CN Crisis対応)のMilestoneであり、Goal2(R04 Governance)のMilestoneはIATF監査・外部監査準備・FMEA導入・Enovia文書管理移行が中心でR19は含まれていなかった。従来のプロンプトのままだと、R19関連の実績がG1ではなくG3に誤分類される恐れがあった。G1/G2/G3のキー名(`G1_project`/`G2_site`/`G3_r04`)は既存キャッシュ・`review_manual_items.json`との互換のため変更していないが、ラベル・分類キーワードの定義文を実際のKPIに合わせて修正した(G1にR19後始末を明記、G3からR19の記述を削除)。ユーザー承認済み。既存の月次キャッシュは、実機で対象月のチェックボックスを入れて再生成することで新しい定義が反映される(過去のキャッシュファイル自体は自動では再計算されない)。
+
+	(4) Japan Site Weekly議事録(`ICS R04 Japan R&D meeting - week`)からのスタッフ実績抽出: Ochiさんが今年4月以降、毎週「Japan Staff All」等の配布リストへ送信している議事録には、全プロジェクトの進捗(PM=プロジェクト全体はNakai-san、PEはOi-san、TEはSaji-sanのパート)が1通に混在している。このメールは配布リスト宛のため、個人名にも個人アドレスにも一致せず、既存の`review_person_activity_qualifies`(送信者名一致 or Ochiさんが個人宛に送信)では捕捉できないことが調査で判明した(ユーザーからの調査依頼を受けて確認)。件名一致による専用検知(`review_thread_is_minutes`)を追加し、該当スレッドは登録スタッフ全員の対象スレッドへ無条件で含めるようにした。あわせて、AIプロンプトに「この議事録から{対象者}の{ファンクション}パートのみを抽出し、他の人物のパートは無視せよ」という抽出指示を対象者ごとに動的に追加した(Nakai=PM観点はプロジェクト全体、Oi/Saji等は本人のファンクションパート)。本文は、通常のスレッド(1通あたり800文字→スレッド全体8000文字に切り詰め)とは別に、議事録スレッドに限り`_clean_body_for_ai`のlimitを緩和して全文を渡すようにした(ユーザー承認: 「全文を渡す」)。全体60000文字上限による切り詰めで議事録が後回しに削られないよう、議事録スレッドをプロンプト内で先頭に並べる措置も入れた。Ochiさん自身の実績分析では、この抽出指示は付与しない(Ochiさんの実績は従来通り議事録全体を1つの活動として扱う)。
+
+### 変更関数
+	`summarize_review_month`（`person`引数を追加。ゴール分類のプロンプトを`json/review_person_goals.json`の対象者別定義から動的に生成するよう変更(以前はG1/G2/G3をプロンプトへ直接ハードコード)。personがOchi以外の場合はTier1/Tier2判定・G2小分類・会議紐付けを行わず、ランクは`rank_review_staff_achievement`で判定。キャッシュファイル名は対象者ごとに分離するが、Ochiさんは既存の`{yyyymm}.json`のまま完全互換）
+	`load_review_month_cache`（`person`引数を追加。キャッシュパスを対象者ごとに分離）
+	`generate_review_data`（`monthly_threads`の形式を`{yyyymm: {conv_id: thread}}`から`{yyyymm: {person: {conv_id: thread}}}`に変更。`persons`引数を追加し、月×対象者の全組み合わせを処理）
+	`apply_review_manual_overrides`（achievement_idを`{person}::{従来の算出結果}`へ人物スコープ化。既存(接頭辞なし)の`hidden`/`rank_overrides`/`text_overrides`は、Ochiさんの実績に限りフォールバック照合する後方互換を実装。手動追加項目は`person`フィールドを保持(無ければOchi扱い)）
+	`HTTPHandler.do_POST`の`/update_review_manual`の`add`アクション（`person`フィールドを追加）
+	`HTTPHandler.do_GET`の`/review_hidden_list`（`apply_review_manual_overrides`と同じachievement_id算出式(人物接頭辞+後方互換)に合わせて更新。更新漏れがあると非表示復元パネルが壊れるため同時に修正）
+	`HTMLReportGenerator.generate_review_report`（実績カードに人物チップ(`👤 {person}`)を追加。ゴール別ビューは、Ochiさんの既存G1/G2/G3の3グループ(構造・見た目は完全に不変)に続けて、スタッフの実績を対象者ごとのKPIキー順でサブセクションとして追記(KPIキー体系が対象者ごとに異なるため、Ochiさんの3グループへは混ぜていない)。手動追加フォームに「対象者」プルダウンを追加し、選択に応じてゴールチェックボックスをJSで動的に再構築(`reviewRenderAddGoals`)。コピー用テキスト(`reviewCopyText`)はOchiさん以外の行に`[人物名]`を前置)
+	`MailManagerGUI._ui_review_tab`（対象者チェックボックス行(Ochi + project_knowledge["staffs"]登録スタッフ)を追加。既定はOchiさんのみチェック。スタッフ俯瞰タブと同じALL/全解除の操作感を再入防止フラグ別に実装）
+	`MailManagerGUI._run_review`（対象者チェックボックスで選ばれた各人物についてスレッドを再フィルタしAI分析する。メール取得・スレッド化はOutlook COM呼び出しを増やさないよう月ごとに1回のみ。スタッフの対象スレッド判定に`review_thread_is_minutes`によるJapan Site Weekly議事録の無条件追加を組み込んだ）
+	`summarize_review_month`（議事録スレッドの検知・並べ替え・本文の全文渡し・対象者別の抽出指示注入を追加。Ochiさん自身の分析ではこの抽出指示を付与しない）
+
+### 新規追加：
+	定数 `REVIEW_PERSON_GOALS_FILE` / `REVIEW_MINUTES_SUBJECT_KEYWORD`
+	関数 `load_review_person_goals` / `save_review_person_goals` / `_default_review_person_goals` / `get_review_person_goal_defs` / `build_review_goal_prompt_block`
+	関数 `review_person_activity_qualifies` / `harvest_person_email_aliases` / `rank_review_staff_achievement` / `_review_person_cache_suffix` / `review_thread_is_minutes`
+	メソッド `MailManagerGUI._get_review_selected_persons`
+	JS関数 `reviewRenderAddGoals`
+	`.gitignore`に`outlook_total_organizer/json/review_person_goals.json`を追加
+
+### 削除：
+	なし
+
+変更ファイル：
+	`outlook_total_organizer_20260730_11.py`（`_20260730_10`からのコピー＋今回の変更。`_20260730_10`はそのまま残置）
+	`.gitignore`
+
+動作確認時の注意：
+	本ツールはWindows専用（win32com依存）のため、本セッションの実行環境（Linuxコンテナ）ではOutlook実機・実際のローカルサーバーでの動作検証ができていない。以下を実施済み: `ast.parse`構文チェック、`_20260730_10`との`diff`で変更範囲が振り返りタブ関連のコードのみであることを確認。win32com/tkinter/google.genai/bs4をスタブ化したOutlook非依存のスタンドアロン`python3`ハーネスで、(a)`review_person_activity_qualifies`のスタッフ送信者一致・Ochi送信+宛先一致・無関係スレッド・person_emails空の各パターン、(b)`harvest_person_email_aliases`の別名収集・大小文字表記ゆれ、(c)スタッフ用ランク決定木(P/B/S/A)の全分岐、(d)Ochi用ランク決定木(`rank_review_achievement`)が従来と完全に同一の結果を返す回帰テスト、(e)`_aid`の人物接頭辞付与と、接頭辞なし既存ID(hidden/rank_overrides/手動追加のperson欠落)のOchi限定フォールバック、(f)キャッシュファイル名の対象者別分離とOchiの完全後方互換、(g)`load_review_person_goals`の雛形自動生成とスキーマ、の計42項目を検証し全て合格した。あわせて`generate_review_report`をOchi+Saji混在のダミーデータで実行し、生成されたHTMLに対しNode版Playwright(`/opt/pw-browsers/chromium`)で、(1)Ochiさんの既存G1/G2/G3見出しが完全に不変であること(デグレ確認)、(2)Sajiのスタッフサブセクション見出しがゴール定義のラベルで正しく追記されること、(3)非Ochi行に人物チップが表示されること、(4)対象者プルダウンでSaji/Ochiを切り替えるとゴールチェックボックスが動的に再構築されること、(5)コピー用テキストでSaji行のみ`[Saji]`が前置されOchi行には付かないこと、を確認した。
+	Japan Site Weekly議事録対応については別途、`review_thread_is_minutes`の件名一致判定(送信者チェック有無の両パターン)、および`summarize_review_month`が実際に構築するプロンプト文字列を`_run_genai_call_with_schema`をモック化して検証し、(a)Sajiとして分析するとプロンプトに議事録マーカーとTEパートの抽出指示が入ること、(b)Nakaiとして分析するとPM観点(プロジェクト全体)の抽出指示になること、(c)Ochiさん自身の分析では議事録マーカー・抽出指示が一切付与されないこと、(d)`_clean_body_for_ai`の既定`limit=800`により長文本文が途中で切れていた不具合を発見し、議事録スレッドに限り`limit`を緩和して実際に全文(3セクション目のSaji部分のテキストまで)が渡ることを確認した(修正前は当初の想定通り動かず、テストで検出→修正済み)。あわせて`review_person_activity_qualifies`単体では配布リスト宛のこの議事録を捕捉できないこと(＝`review_thread_is_minutes`による専用対応が必須であること)も回帰的に確認した。
+	実機（Windows＋Outlook）でのご確認が必須: (1)対象者チェックボックスでスタッフを選び「📈 振り返りを生成」を実行し、実際に妥当な実績が拾えるか(拾えなさすぎる/拾いすぎる場合は`json/review_person_goals.json`のkeywords調整が必要)。(2)`json/review_person_goals.json`の雛形にゴール本文・キーワードを記入し、ゴール紐づけの精度を確認。(3)Ochiさん単独での生成結果が`_10.py`までと変わらないこと(デグレ確認。G1/G2/G3のラベル・分類基準は変わるため実績の並び自体は変わりうるが、コード構造・キー名は不変)。(4)既存の月次キャッシュ(analysis_cache/review_monthly/配下)を新しいG1/G2/G3定義で再計算するため、対象月のチェックボックスを入れて再生成すること。(5)実際の議事録メールで、Nakai/Oi/Saji各人のパートが正しく抽出されているか(表記ゆれ・見出しの付け方次第でAIの抽出精度が変わりうるため)。(6)件名`"ICS R04 Japan R&D meeting - week"`が実際の送信メールの件名と完全に一致しているか(表記ゆれがあれば`REVIEW_MINUTES_SUBJECT_KEYWORD`の調整が必要)。
+
+変更しないこと（宣誓）：
+	Ochiさん用のランク決定木`rank_review_achievement`本体のロジック・Tier1/Tier2/G2小分類/会議紐付けの仕組み・G1_project/G2_site/G3_r04というキー名・既存のOchi用月次キャッシュファイル名(`{yyyymm}.json`)・既存の`hide`/`unhide`/`set_rank`/`edit_text`アクションの本体動作・ランクフィルタ(`reviewToggleRank`)・「🙈非表示にした実績を確認・復元」パネル(`_20260730_10`)・実績カードのタイトルリンク(`_20260730_09`)・`max_output_tokens`関連(`_20260730_07`)・その他の既存タブ
+
 ## VERSION 20260730_10
 
 ### 追加・修正

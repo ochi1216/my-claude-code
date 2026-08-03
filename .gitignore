@@ -7,3 +7,7 @@ venv/
 po_database_organizer/config.json
 po_database_organizer/token_cache.json
 po_database_organizer/cache/
+
+# Outlookオーガナイザー(振り返りタブ): 対象者ごとのゴール(KPI)定義。
+# Nexperiaのゴールシート由来の機密情報(氏名・KPI・数値目標)を含むため、リポジトリには含めない。
+outlook_total_organizer/json/review_person_goals.json
