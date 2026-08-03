@@ -10027,44 +10027,60 @@ class MailManagerGUI:
         threading.Thread(target=task, daemon=True).start()
 
     def _reformat_review(self):
-        """フォーマットのみ再生成: 保存済みraw_achievementsに、review_manual_items.jsonの
-        最新値(非表示・ランク上書き・手動追加・文言修正)を適用し直してHTMLだけ再生成する
-        （メール再取得・AI再解析なし）。"""
+        """フォーマットのみ再生成: 現在チェックボックスで選ばれている対象者について、
+        月別キャッシュ(analysis_cache/review_monthly/配下、メール再取得・AI再解析なし)
+        から実績を読み込み直し、review_manual_items.jsonの最新値(非表示・ランク上書き・
+        手動追加・文言修正)を適用してHTMLだけ再生成する。
+        対象者は「前回『📈 振り返りを生成』を実行した時点で選ばれていた対象者」ではなく、
+        今チェックボックスで選ばれている対象者を使う(例: 前回はOchi・Saji・Yutoで生成した後、
+        チェックをKajikawaだけに変えてこのボタンを押せば、Kajikawaの月別キャッシュから
+        Kajikawaだけのレポートを作り直せる)。以前は直近の生成結果(review_last_result.json)
+        の対象者リストをそのまま使っていたため、チェックを変えても前回の対象者のHTMLが
+        出てきてしまう不具合があった。
+        ただし、その対象者がある月について一度も「📈 振り返りを生成」で分析されたことが
+        無ければ、その月のキャッシュ自体が存在しないため実績0件になる(AI再解析はしないため、
+        過去に一度も分析していない対象者・月の実績はこのボタンでは作れない。その場合は
+        対象月のチェックを入れて「📈 振り返りを生成」を実行する必要がある)。"""
         import tkinter.messagebox as messagebox
 
-        if not os.path.exists(REVIEW_LAST_RESULT_FILE):
+        if not os.path.exists(REVIEW_CACHE_DIR):
             messagebox.showerror("エラー", "保存済みデータがありません。\n先に「📈 振り返りを生成」を実行してください。")
             return
+
+        all_months = self._get_review_all_months()
+        selected_persons = self._get_review_selected_persons()
 
         self.btn_reformat_review.config(state=tk.DISABLED, text="⏳ フォーマット再生成中...")
         self._set_status("🎨 フォーマットのみ再生成中...", start_timer=True)
 
         def task():
             try:
-                with open(REVIEW_LAST_RESULT_FILE, 'r', encoding='utf-8') as jf:
-                    saved = json.load(jf)
-                raw_achievements = saved.get("raw_achievements", [])
-                period_label = saved.get("period_label", "")
-                total_input = saved.get("total_input", 0)
-                total_output = saved.get("total_output", 0)
-                # 保存時点(_save_review_result)の対象者リスト。旧バージョンで保存された
-                # ファイルには"persons"キーが無いため、その場合はOchiのみとして扱う
-                # (後方互換)。実績が0件の対象者がいても、その人のHTML(実績0件)を
-                # 生成できるよう、raw_achievementsから逆算するのではなくこちらを使う。
-                persons = saved.get("persons") or ["Ochi"]
+                all_achievements = []
+                for yyyymm in all_months:
+                    for person in selected_persons:
+                        all_achievements.extend(self.summarizer.load_review_month_cache(yyyymm, person=person))
 
-                merged = self.summarizer.apply_review_manual_overrides(raw_achievements)
+                raw_achievements = [dict(a) for a in all_achievements]
+                merged = self.summarizer.apply_review_manual_overrides(all_achievements)
+                period_label = f"{all_months[0][:4]}年 1月〜{int(all_months[-1][4:])}月（保存済みキャッシュから再構成）"
                 review_data = {
                     "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                    "months": saved.get("months", []),
+                    "months": all_months,
+                    "persons": selected_persons,
                     "achievements": merged,
+                    "raw_achievements": raw_achievements,
                 }
+                # /review_hidden_list(非表示にした実績の確認・復元パネル)は
+                # review_last_result.jsonのraw_achievementsからタイトルを引くため、
+                # 今回チェックされていた対象者の分で上書き保存し直す。
+                self._save_review_result(review_data, period_label, 0, 0)
+
                 # 複数人まとめたHTMLは生成せず、対象者ごとに別々のHTMLファイルを生成する
                 # (_run_reviewの初回生成と同じ方針)。
                 import webbrowser
-                for person in persons:
+                for person in selected_persons:
                     person_path = self.reporter.generate_review_report(
-                        review_data, period_label, total_input, total_output,
+                        review_data, period_label, 0, 0,
                         reformat_mode=True, filter_person=person
                     )
                     if person_path:
