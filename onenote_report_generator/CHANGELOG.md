@@ -1,3 +1,138 @@
+## VERSION 20260729_02_01
+
+### 追加・修正
+- **要約の出力言語モード追加**：UIに「要約の言語」選択（`<select>`）を追加。
+  - 「日本語に翻訳して要約」（既定・`translate_ja`）：従来通り、原文が英語・
+    中国語等でも日本語に翻訳して要約する（現行動作を完全維持）。
+  - 「原文の言語のまま要約」（新規・`keep_original`）：翻訳せず、原文と同じ
+    言語（カテゴリ名・項目名・タスク名を含む全項目）でJSONを出力する。
+- **プロンプトの言語依存文字列を`_LANG_VARIANTS`辞書に集約**：`critical_rules`の
+  ルール2だけでなく、`system_directive`の末尾文・`_thinking`ヒント・`summary`
+  ヒント・`updates`/`details`のカテゴリ名/項目名プレースホルダ・
+  `pending_actions.task_name`ヒント・`<execution>`確認文の計7箇所が言語に
+  依存していたため、モード切替時に全箇所を一括で差し替える設計とした
+  （1箇所だけの条件分岐だと、スキーマ内に残った日本語強制の指示文とルール2が
+  競合し、「原文の言語のまま」モードでも日本語化されてしまうリスクがあったため）。
+  `translate_ja`側の文言は変更前バージョンの文言と完全一致させており、
+  テストでプロンプト文字列がバイト単位で一致することを確認済み（既定動作は無変更）。
+- 本バージョンは、VERSION 20260729_01_01のCHANGELOGで宣誓した
+  「GeminiProcessorの全メソッド（プロンプト含む）を変更しない」を初めて破る
+  変更である（今回の依頼範囲として明示的に許可されたもの）。
+
+### 既知の制約
+- 複数ページのレポートで、ページごとに原文の言語が異なる場合（例：先週は英語、
+  今週は日本語）、「原文の言語のまま要約」モードでは前回データとの差分比較用
+  JSON（`prev_context`）に渡す内容の言語が混在する可能性がある。対応はしていない。
+- `extract_with_color()`が青文字（更新ポイント）行に付与する固定マーカー
+  「【更新ポイント】」は、原文が完全に英語のページであっても日本語のまま
+  埋め込まれる。ルーティング用マーカーとして扱われるため実害は小さいが、
+  言語混在の別要因として記載しておく。
+- 原文の言語判定はGemini自身のベストエフォートであり、完全な保証はない。
+
+### 変更関数
+- `GeminiProcessor.analyze_html` (`language_mode`引数追加、プロンプトの言語依存
+  箇所を`_LANG_VARIANTS`経由で切り替え)
+- `generate` Flaskエンドポイント (`language_mode`パラメータ受け取り追加、既定値`translate_ja`)
+- `_generate_worker` (`language_mode`引数追加、`analyze_html`呼び出しに伝播)
+- `index.html: startGenerate()` (`language_mode`をPOSTボディに追加)
+
+### 新規追加
+- `_LANG_VARIANTS` (モジュールレベル辞書、言語モードごとのプロンプト文字列)
+- `index.html`：「要約の言語」`<select>`（`languageMode`、既定`translate_ja`）
+
+### 変更ファイル
+- onenote_report_generator_20260729_02.py
+- templates/index.html
+
+### 変更しないこと（宣誓）
+- `ReportGenerator.generate_html` およびレポート自体の固定見出し・表項目名
+  （「エグゼクティブ・サマリー」「詳細情報」「残アクション」等は常に日本語のまま）
+- ブックマーク機能全体（`language_mode`はbookmarks.jsonに保存しない。
+  `reverse_order`と同様の理由で明示的に依頼された範囲のみ変更する方針）
+- `extract_with_color` / テーブル抽出ロジック
+- トークン期限切れ対応・詳細情報の階層レンダリング・逆順オプション
+  （VERSION 20260727_01_01・20260729_01_01の内容）
+
+## VERSION 20260729_01_01
+
+### 追加・修正
+- **HTML出力順の逆順オプション追加**：OneNoteのページが「古い→新しい」順（約9割）
+  と「新しい→古い」順（約1割）の両方があり、レポートで常に新しい方を先頭に
+  表示したいという要望に対応。UIに「サマリーを逆順（新→古）に並べる」
+  チェックボックス（既定ON）を追加。ONの場合はHTMLレポート上の表示順を
+  新→古に反転する。OFFの場合は受け取ったページ順のまま出力する。
+- **Gemini解析の処理順・差分抽出ロジックには影響しない設計**：
+  「前回ページとの差分」を抽出する`prev_context`の受け渡しは、従来通り
+  `page_ids`の受け取り順のまま処理する。並び替えは`ReportGenerator.generate_html()`
+  に渡す直前の`results`リストにのみ適用し、解析結果の中身・差分抽出の基準には
+  一切手を加えていない。
+
+### 変更関数
+- `generate` Flaskエンドポイント (`reverse_order`パラメータ受け取り追加、既定値`True`)
+- `_generate_worker` (`reverse_order`引数追加。`results`をHTML生成直前にのみ反転)
+- `index.html: startGenerate()` (`reverse_order`をPOSTボディに追加)
+
+### 新規追加
+- `index.html`：「サマリーを逆順（新→古）に並べる」チェックボックス（`reverseOrderCheckbox`、既定チェック済み）
+
+### 変更ファイル
+- onenote_report_generator_20260729_01.py
+- templates/index.html
+
+### 変更しないこと（宣誓）
+- `GeminiProcessor` の全メソッド（プロンプト含む）
+- `_generate_worker`内のGemini解析ループ・`prev_context`の受け渡し順序
+- ブックマーク機能全体
+- `extract_with_color` / テーブル抽出ロジック
+- トークン期限切れ対応・詳細情報の階層レンダリング（VERSION 20260727_01_01の内容）
+
+## VERSION 20260727_01_01
+
+### 追加・修正
+- **トークン期限切れ時の無言フリーズを修正**：Flaskプロセスを長時間（アクセストークンの
+  有効期限程度）起動し続けたまま①サイトを選択すると、認証状態は「認証済み」と表示され
+  続けるにもかかわらず、②ノートブック取得が裏でエラーになり、`data.forEach`が
+  配列でないオブジェクト（`{"error": "..."}"}`）に対して呼ばれて`TypeError`が発生、
+  画面が無言で固まる不具合を修正。`restoreBookmark()`で既に導入済みだった
+  `Array.isArray()`ガードを、通常選択フローの`loadNotebooks`・`loadSections`・
+  `loadPages`にも追加。
+- **トークン期限切れの自動検知・再認証**：Graph APIがHTTP 401を返した場合、
+  バックエンドで`TokenExpiredError`として区別し、グローバル変数`_token`を
+  `None`にリセットした上で`auth_expired: true`をレスポンスに含めるように変更。
+  フロント側は`auth_expired`を検知すると自動的に`checkAuth()`を再実行し、
+  `token_cache.bin`のリフレッシュトークンによるサイレント再認証を試みる。
+- **詳細情報（details）の3階層以上ネスト対応**：`ReportGenerator.generate_html()`の
+  「詳細情報」描画が2階層（カテゴリ→項目名:文字列）までしか想定しておらず、
+  OneNoteページの内容によって3階層（カテゴリ→プロジェクト名→担当者名→項目:文字列）
+  になった場合、Pythonの辞書がそのまま文字列化されて`{'宮崎': {...}}`のような
+  生の辞書表記が出力される不具合を修正。`ReportGenerator._render_detail_value()`を
+  新設し、階層の深さによらず再帰的に見出し化（h5・h6）するように変更。
+  VERSION 20260416.36で一度対策された「AI出力揺れによる辞書ベタ書き」問題の、
+  未対応だった深い階層での再発。
+
+### 変更関数
+- `OneNoteGraphExtractor._get` (HTTP 401を`TokenExpiredError`として送出するよう変更)
+- `api_notebooks` / `api_sections` / `api_pages` Flaskエンドポイント
+  (`TokenExpiredError`捕捉時に`_token`をリセットし`auth_expired`フラグを返却)
+- `ReportGenerator.generate_html` (詳細情報描画部分を`_render_detail_value`呼び出しに変更)
+- `index.html: loadNotebooks` / `loadSections` / `loadPages`
+  (`Array.isArray`ガード追加、`auth_expired`時の自動再認証呼び出し追加)
+
+### 新規追加
+- `TokenExpiredError` (例外クラス)
+- `ReportGenerator._render_detail_value` (再帰的詳細情報レンダリング関数)
+
+### 変更ファイル
+- onenote_report_generator_20260727_01.py
+- templates/index.html
+
+### 変更しないこと（宣誓）
+- `GeminiProcessor` の全メソッド（プロンプト含む）
+- ブックマーク機能全体（`_load_bookmarks` / `_save_bookmarks` / bookmark系エンドポイント / `saveBookmark` / `restoreBookmark` / `deleteBookmark`）
+- `extract_with_color` / テーブル抽出ロジック
+- `/api/sites` エンドポイント・複数サイト選択の仕組み
+- レポート一覧・クリーンアップ機能
+
 ## VERSION 20260706_01_01
 
 ### 追加・修正

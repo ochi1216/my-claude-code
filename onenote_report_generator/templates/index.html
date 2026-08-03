@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>OneNote Report Generator 20260706_01_01</title>
+    <title>OneNote Report Generator 20260729_02_01</title>
     <style>
         body { font-family: 'Segoe UI', Meiryo, sans-serif; margin: 0; background: #f0f2f5; }
         .container { max-width: 800px; margin: 40px auto; background: white; border-radius: 8px; padding: 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
@@ -49,7 +49,7 @@
 <body>
 <div class="container">
     <h1>📓 OneNote Report Generator</h1>
-    <small>VERSION 20260706_01_01</small>
+    <small>VERSION 20260729_02_01</small>
 
     <div class="auth-box" id="authBox">
         <strong>🔐 認証状態：</strong><span id="authStatus">確認中...</span>
@@ -97,6 +97,25 @@
             <option>-- セクションを選択してください --</option>
         </select>
         <small>※ページ範囲を変更すると自動選択されます。個別選択も可能です（Ctrl+クリック）</small>
+
+        <!-- 逆順オプション（VERSION 20260729_01追加） -->
+        <div style="margin-top:14px;">
+            <label style="display:flex; align-items:center; gap:6px; font-weight:normal;">
+                <input type="checkbox" id="reverseOrderCheckbox" checked>
+                サマリーを逆順（新→古）に並べる
+            </label>
+            <small>※OneNoteのページが古い→新しい順の場合はON（既定）。既に新しい→古い順の場合はOFFにしてください。</small>
+        </div>
+
+        <!-- 要約言語オプション（VERSION 20260729_02追加） -->
+        <div style="margin-top:14px;">
+            <label>要約の言語</label>
+            <select id="languageMode">
+                <option value="translate_ja" selected>日本語に翻訳して要約（既定）</option>
+                <option value="keep_original">原文の言語のまま要約</option>
+            </select>
+            <small>※原文の言語判定はAIによるベストエフォートです（完全な保証はありません）。</small>
+        </div>
 
         <!-- ブックマーク保存UI（VERSION 20260529_01_01追加） -->
         <div style="margin-top:18px;">
@@ -188,6 +207,16 @@ async function loadNotebooks() {
     if (!currentSiteId) return;
     const res  = await fetch('/api/notebooks?site_id=' + encodeURIComponent(currentSiteId));
     const data = await res.json();
+    // VERSION 20260727_01_01: 配列でない場合（認証切れ・Graph APIエラー等）のガード追加
+    if (!Array.isArray(data)) {
+        showToast('❌ ' + (data.error || 'ノートブック取得失敗（認証切れの可能性があります）'), true);
+        if (data.auth_expired) {
+            document.getElementById('authBox').classList.remove('ok');
+            document.getElementById('authStatus').textContent = '再認証中...';
+            await checkAuth();
+        }
+        return;
+    }
     const nbSel = document.getElementById('notebookSelect');
     nbSel.innerHTML = '<option value="">-- 選択してください --</option>';
     data.forEach(nb => nbSel.innerHTML += '<option value="' + nb.id + '">' + nb.displayName + '</option>');
@@ -204,6 +233,16 @@ async function loadSections() {
     if (!nbId) return;
     const res  = await fetch('/api/sections/' + nbId + '?site_id=' + encodeURIComponent(currentSiteId));
     const data = await res.json();
+    // VERSION 20260727_01_01: 配列でない場合（認証切れ・Graph APIエラー等）のガード追加
+    if (!Array.isArray(data)) {
+        showToast('❌ ' + (data.error || 'セクション取得失敗（認証切れの可能性があります）'), true);
+        if (data.auth_expired) {
+            document.getElementById('authBox').classList.remove('ok');
+            document.getElementById('authStatus').textContent = '再認証中...';
+            await checkAuth();
+        }
+        return;
+    }
     const sel  = document.getElementById('sectionSelect');
     sel.innerHTML = '<option value="">-- 選択してください --</option>';
     data.forEach(s => sel.innerHTML += '<option value="' + s.id + '" data-name="' + s.displayName + '">' + s.displayName + '</option>');
@@ -217,7 +256,18 @@ async function loadPages() {
     const secSel = document.getElementById('sectionSelect');
     if (!secSel.value) return;
     const res    = await fetch('/api/pages/' + secSel.value + '?site_id=' + encodeURIComponent(currentSiteId));
-    allPages     = await res.json();
+    const data   = await res.json();
+    // VERSION 20260727_01_01: 配列でない場合（認証切れ・Graph APIエラー等）のガード追加
+    if (!Array.isArray(data)) {
+        showToast('❌ ' + (data.error || 'ページ取得失敗（認証切れの可能性があります）'), true);
+        if (data.auth_expired) {
+            document.getElementById('authBox').classList.remove('ok');
+            document.getElementById('authStatus').textContent = '再認証中...';
+            await checkAuth();
+        }
+        return;
+    }
+    allPages     = data;
     const list   = document.getElementById('pageList');
     list.innerHTML = '';
     allPages.forEach((p, i) => {
@@ -268,7 +318,9 @@ async function startGenerate() {
             page_ids:      selected,
             section_name:  secName,
             notebook_name: nbName,
-            site_id:       currentSiteId
+            site_id:       currentSiteId,
+            reverse_order: document.getElementById('reverseOrderCheckbox').checked,
+            language_mode: document.getElementById('languageMode').value
         })
     });
     statusPollTimer = setInterval(pollStatus, 1500);
