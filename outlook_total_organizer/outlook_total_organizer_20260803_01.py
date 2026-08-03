@@ -7019,7 +7019,7 @@ function cockpitSetView(mode) {{
             print(f"Cockpit v2 Report Error: {e}")
             return ""
 
-    def generate_review_report(self, review_data, period_label, total_input, total_output, reformat_mode=False) -> str:
+    def generate_review_report(self, review_data, period_label, total_input, total_output, reformat_mode=False, filter_person: str = None) -> str:
         """振り返りタブ(四半期パフォーマンスレビュー)用HTML。
         review_data は MailSummarizer.generate_review_data() の戻り値。
         3つの表示軸(ゴール別=既定・プロジェクト別・月別タイムライン)を切り替えられる。
@@ -7028,15 +7028,25 @@ function cockpitSetView(mode) {{
         ランクフィルタ(既定でB=実績リストは畳む)・非表示・ランク上書き・文言修正・手動追加は
         いずれも review_manual_items.json 経由(統括コックピットv2の確認済み/再分類UIと
         同じfetchパターン)。「📋 コピー用テキストを生成」で、現在表示中の実績をMarkdown化して
-        コピーできる(レビューフォーム等への貼り付け用)。"""
+        コピーできる(レビューフォーム等への貼り付け用)。
+        filter_person: 指定した場合、その対象者の実績だけに絞り込んだ「その人専用」の
+        HTMLを生成する(ファイル名にも対象者名を含める)。四半期パフォーマンスレビューという
+        用途上、複数人の実績を1つのHTMLに混在させると本人以外の評価内容が見えてしまうため、
+        呼び出し元(_run_review/_reformat_review)は必ずこれを指定し、対象者ごとに
+        本メソッドを繰り返し呼び出して別々のファイルを生成する。"""
         import html as html_mod
+        import re as re_mod
         from urllib.parse import quote
 
         try:
             ts = datetime.now().strftime('%Y%m%d_%H%M%S')
             if not self.folder.exists():
                 self.folder.mkdir(parents=True)
-            path = self.folder / f"Review_{ts}.html"
+            if filter_person:
+                safe_person = re_mod.sub(r'[^0-9A-Za-z_\-]+', '_', filter_person).strip('_') or "person"
+                path = self.folder / f"Review_{safe_person}_{ts}.html"
+            else:
+                path = self.folder / f"Review_{ts}.html"
 
             in_cost = (total_input / 1000000) * 0.075 * 160
             out_cost = (total_output / 1000000) * 0.3 * 160
@@ -7048,8 +7058,11 @@ function cockpitSetView(mode) {{
             )
 
             achievements = review_data.get("achievements", [])
+            if filter_person:
+                achievements = [a for a in achievements if (a.get("person") or "Ochi") == filter_person]
             generated_at = html_mod.escape(review_data.get("generated_at", ""))
-            period_label_safe = html_mod.escape(period_label)
+            period_label_display = f"{period_label}　｜　対象者: {filter_person}" if filter_person else period_label
+            period_label_safe = html_mod.escape(period_label_display)
 
             rank_counts = {"S": 0, "A": 0, "B": 0, "P": 0}
             for a in achievements:
@@ -7268,16 +7281,21 @@ function cockpitSetView(mode) {{
             # 対象者ごとにゴール(KPI)キー体系が異なる(Ochi=G1/G2/G3固定、スタッフ=K1..等)
             # ため、json/review_person_goals.jsonの定義をJSへ埋め込み、対象者選択時に
             # チェックボックスをJS側で動的に再構築する(reviewRenderAddGoals)。
-            report_persons = []
-            _seen_rp = set()
-            for a in achievements:
-                p = a.get("person", "Ochi")
-                if p not in _seen_rp:
-                    _seen_rp.add(p)
-                    report_persons.append(p)
-            if "Ochi" in report_persons:
-                report_persons.remove("Ochi")
-            report_persons.insert(0, "Ochi")
+            if filter_person:
+                # 1ファイル=1対象者のレポートなので、手動追加フォームの対象者プルダウンも
+                # その対象者のみに固定する(他人の実績を混在させないため)。
+                report_persons = [filter_person]
+            else:
+                report_persons = []
+                _seen_rp = set()
+                for a in achievements:
+                    p = a.get("person", "Ochi")
+                    if p not in _seen_rp:
+                        _seen_rp.add(p)
+                        report_persons.append(p)
+                if "Ochi" in report_persons:
+                    report_persons.remove("Ochi")
+                report_persons.insert(0, "Ochi")
 
             goals_data_all = load_review_person_goals()
             person_goals_js = {}
@@ -7290,11 +7308,12 @@ function cockpitSetView(mode) {{
                 for p in report_persons
             )
 
+            page_title = html_mod.escape(f"四半期振り返り - {filter_person}" if filter_person else "四半期振り返り")
             html_content = f"""<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>四半期振り返り</title>
+<title>{page_title}</title>
 <style>
 :root{{ color-scheme: light;
   --page:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
@@ -9884,12 +9903,16 @@ class MailManagerGUI:
         """振り返りタブの生成結果(手動編集反映"前"のraw_achievements)を保存し、
         次回以降「フォーマットのみ再生成」でメール再取得・AI再解析なしにHTMLだけを
         作り直せるようにする。手動編集後の状態を保存しないのは、reformat実行のたびに
-        review_manual_items.jsonの手動追加分が二重に足されるのを防ぐため。"""
+        review_manual_items.jsonの手動追加分が二重に足されるのを防ぐため。
+        personsも保存する: 1ファイル=1対象者のHTMLに分割生成するため、reformat実行時に
+        「今回の生成に含まれていた対象者は誰か」をこのファイルから復元する必要がある
+        (raw_achievementsが0件の対象者がいても、その人のHTML(実績0件)を生成できるように)。"""
         try:
             with open(REVIEW_LAST_RESULT_FILE, 'w', encoding='utf-8') as jf:
                 json.dump({
                     "raw_achievements": review_data.get("raw_achievements", []),
                     "months": review_data.get("months", []),
+                    "persons": review_data.get("persons", []),
                     "period_label": period_label,
                     "total_input": total_input,
                     "total_output": total_output
@@ -9973,23 +9996,27 @@ class MailManagerGUI:
                     progress_callback=lambda c, t, msg: self.root.after(0, lambda: self._set_status(msg, current=c, total=t))
                 )
 
-                persons_label = "・".join(selected_persons)
                 if len(selected_months) == len(all_months):
-                    period_label = f"{all_months[0][:4]}年 1月〜{int(all_months[-1][4:])}月（全月更新・{persons_label}）"
+                    period_label = f"{all_months[0][:4]}年 1月〜{int(all_months[-1][4:])}月（全月更新）"
                 elif selected_months:
                     updated_label = "、".join(f"{m}月" for (_, m) in selected_months)
-                    period_label = f"{all_months[0][:4]}年 1月〜{int(all_months[-1][4:])}月（{updated_label}を更新・{persons_label}）"
+                    period_label = f"{all_months[0][:4]}年 1月〜{int(all_months[-1][4:])}月（{updated_label}を更新）"
                 else:
-                    period_label = f"{all_months[0][:4]}年 1月〜{int(all_months[-1][4:])}月（キャッシュのみ、更新なし・{persons_label}）"
+                    period_label = f"{all_months[0][:4]}年 1月〜{int(all_months[-1][4:])}月（キャッシュのみ、更新なし）"
 
-                path = self.reporter.generate_review_report(
-                    review_data, period_label,
-                    self.summarizer.total_input_tokens, self.summarizer.total_output_tokens
-                )
+                # 四半期パフォーマンスレビューという用途上、複数人の実績を1つのHTMLに
+                # 混在させると本人以外の評価内容が見えてしまうため、対象者ごとに別々の
+                # HTMLファイルを生成する(複数人まとめたHTMLは生成しない)。
                 self._save_review_result(review_data, period_label, self.summarizer.total_input_tokens, self.summarizer.total_output_tokens)
-                if path:
-                    import webbrowser
-                    webbrowser.open(path)
+                import webbrowser
+                for person in selected_persons:
+                    person_path = self.reporter.generate_review_report(
+                        review_data, period_label,
+                        self.summarizer.total_input_tokens, self.summarizer.total_output_tokens,
+                        filter_person=person
+                    )
+                    if person_path:
+                        webbrowser.open(person_path)
             except Exception as e:
                 import tkinter.messagebox as messagebox
                 self.root.after(0, lambda: messagebox.showerror("エラー", str(e)))
@@ -10020,6 +10047,11 @@ class MailManagerGUI:
                 period_label = saved.get("period_label", "")
                 total_input = saved.get("total_input", 0)
                 total_output = saved.get("total_output", 0)
+                # 保存時点(_save_review_result)の対象者リスト。旧バージョンで保存された
+                # ファイルには"persons"キーが無いため、その場合はOchiのみとして扱う
+                # (後方互換)。実績が0件の対象者がいても、その人のHTML(実績0件)を
+                # 生成できるよう、raw_achievementsから逆算するのではなくこちらを使う。
+                persons = saved.get("persons") or ["Ochi"]
 
                 merged = self.summarizer.apply_review_manual_overrides(raw_achievements)
                 review_data = {
@@ -10027,12 +10059,16 @@ class MailManagerGUI:
                     "months": saved.get("months", []),
                     "achievements": merged,
                 }
-                path = self.reporter.generate_review_report(
-                    review_data, period_label, total_input, total_output, reformat_mode=True
-                )
-                if path:
-                    import webbrowser
-                    webbrowser.open(path)
+                # 複数人まとめたHTMLは生成せず、対象者ごとに別々のHTMLファイルを生成する
+                # (_run_reviewの初回生成と同じ方針)。
+                import webbrowser
+                for person in persons:
+                    person_path = self.reporter.generate_review_report(
+                        review_data, period_label, total_input, total_output,
+                        reformat_mode=True, filter_person=person
+                    )
+                    if person_path:
+                        webbrowser.open(person_path)
             except Exception as e:
                 _err = str(e)
                 self.root.after(0, lambda: messagebox.showerror("エラー", f"フォーマット再生成に失敗しました:\n{_err}"))
