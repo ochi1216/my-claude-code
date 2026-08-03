@@ -1,5 +1,31 @@
 # CHANGELOG — outlook_total_organizer
 
+## VERSION 20260803_01
+
+### 追加・修正
+	**振り返りタブ: 議事録の人物別抽出における「Yuto」「Oi」の名前表記不一致バグを修正**。ユーザーから、対象者チェックボックスに「Yuto」と「Oi」という2つの別々のチェックボックスが表示されており、これらは同一人物(Yuto Oi-san)であるとの指摘を受けて調査・修正した。project_knowledge["staffs"]への実際の登録名は"Yuto"であり、これは「苗字"Oi"だけをメール送信者・宛先のキーワードにすると無関係なメールを大量に誤検出してしまうため、名前"Yuto"を優先している」という既存の運用方針によるもの。一方、`_20260730_11.py`で追加したJapan Site Weekly議事録からの人物別抽出処理は、`REVIEW_STAFF_FUNCTIONS`辞書のキーを`"oi yuto"`という登録名と一致しない表記のままにしていたため、対象者="Yuto"のファンクション(PE/VE)取得が失敗し、抽出指示が「Yutoさんの担当領域に関する進捗パート」という汎用的な文言になってしまっていた。さらに、議事録の本文中ではこの人物は"Oi"/"Oi-san"としてしか登場しないため、AIへの指示文が"Yuto"のままだと、AIが本文中の該当パートを正しく見つけられない(表記が一致しない)という問題があった。すなわち「メール送信者・宛先のマッチングには"Yuto"を使う」「議事録本文からの抽出指示には実際の本文表記"Oi"/"Oi-san"を使う」という2つの異なる用途で、意図的に別の名前を使い分ける必要があることが分かった。
+
+### 変更関数
+	`REVIEW_STAFF_FUNCTIONS`（キー`"oi yuto"`を、実際の登録名に合わせて`"yuto"`へ変更）
+	`review_staff_function_labels`（`REVIEW_STAFF_FUNCTIONS.get(name.lower(), [])`の直接参照を、新設の`get_review_staff_functions`(完全一致→部分一致フォールバック)へ置き換え）
+	`summarize_review_month`（議事録抽出指示(`minutes_instruction`)の構築で、ファンクション取得を`get_review_staff_functions`に、抽出指示の宛先表記を`get_review_minutes_doc_name`で議事録本文の実際の表記へ変換するよう変更。登録名と本文表記が異なる場合、両方を併記する注記を追加）
+	`_default_review_person_goals`（`json/review_person_goals.json`の雛形キーを`"Oi Yuto"`から実際の登録名`"Yuto"`へ変更。既に生成済みのファイルには影響しない(部分一致フォールバックで従来どおり動作するため)）
+
+### 新規追加：
+	定数 `REVIEW_MINUTES_DOC_ALIASES`（登録名→議事録本文内の実際の表記、の対応表。現状"yuto"→["Oi","Oi-san"]のみ登録）
+	関数 `get_review_staff_functions`（`REVIEW_STAFF_FUNCTIONS`の完全一致→大文字小文字無視の部分一致フォールバック取得）
+	関数 `get_review_minutes_doc_name`（登録名を議事録本文内の実際の表記へ変換。未登録なら登録名をそのまま返す）
+
+### 削除：
+	なし
+
+変更ファイル：
+	`outlook_total_organizer_20260803_01.py`（`_20260730_11`からのコピー＋今回の変更。`_20260730_11`はそのまま残置。本日付(2026/8/3)から日付+連番でのバージョン管理に変更）
+
+動作確認時の注意：
+	本ツールはWindows専用（win32com依存）のため、本セッションの実行環境（Linuxコンテナ）ではOutlook実機・実際のローカルサーバーでの動作検証ができていない。以下を実施済み: `ast.parse`構文チェック、`_20260730_11`との`diff`で変更範囲が今回の修正箇所のみであることを確認。Outlook非依存のスタンドアロン`python3`ハーネスで、(a)`get_review_staff_functions`が"Yuto"(大文字小文字問わず)でPE/VEを正しく取得できること、(b)`get_review_minutes_doc_name`が"Yuto"を"Oi/Oi-san"へ変換すること(未登録の対象者はそのまま返すこと)、(c)対象者="Yuto"として`summarize_review_month`を実行した際、実際に構築されるプロンプト文字列に「PE」「VE」というファンクションと、登録名"Yuto"・本文表記"Oi/Oi-san"の両方が含まれること、(d)"oi"単体では(意図的に)ゴール定義・ファンクションのどちらにもフォールバックしないこと(苗字だけでの誤爆防止方針を維持していることの確認)、を検証し全て合格した。既存の回帰テスト(スタッフ拡張・Ochi決定木・achievement_id等の計42+12項目)も合わせて再実行し、全て合格を維持していることを確認した。
+	実機（Windows＋Outlook）でのご確認が必須: (1)対象者チェックボックスで「Yuto」を選んで議事録月を含む期間で生成し、議事録からOi-sanのPE/VEパートが正しく抽出されること。(2)`REVIEW_MINUTES_DOC_ALIASES`の"Oi"/"Oi-san"という表記が、実際の議事録本文の表記(全角/半角、"様"付き等)と一致しているか(表記ゆれがあれば追加登録が必要)。(3)project_knowledge["staffs"]に残っている重複エントリ("Yuto"と"Oi"の両方)自体は、スタッフ俯瞰タブ側のデータであり本修正では変更していない。重複を整理したい場合は別途スタッフ俯瞰タブ側でご対応いただきたい。
+
 ## VERSION 20260730_11
 
 ### 追加・修正
