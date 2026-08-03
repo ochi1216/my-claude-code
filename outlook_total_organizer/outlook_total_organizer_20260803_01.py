@@ -730,6 +730,126 @@ def review_thread_is_minutes(t: dict, user_smtp_address: str = None) -> bool:
             return True
     return False
 
+# 振り返りタブ・議事録の進捗表(OneNote由来、Outlookの.HTMLBodyに<table>として残る)の
+# ヘッダーセル文字列(小文字・空白除去後)を、内部の正規化した列名へ変換するための対応表。
+# "Function"列は見出しの意味と異なり、実際には担当者の姓が入っている(REVIEW_MINUTES_DOC_ALIASES
+# 参照)。表記ゆれ(週によって微妙に文言が変わる可能性)に備え、部分一致で判定する。
+_REVIEW_MINUTES_TABLE_HEADER_ALIASES = [
+    ("project", ["project"]),
+    ("person", ["function"]),
+    ("last_week", ["last week", "lastweek"]),
+    ("this_week", ["this week", "thisweek"]),
+    ("key_tasks", ["key tasks", "keytasks"]),
+    ("baseline", ["baseline"]),
+    ("lv", ["lv"]),
+    ("risk_item", ["risk"]),
+    ("countermeasures", ["countermeasure"]),
+    ("comment", ["comment"]),
+]
+
+def parse_review_minutes_table(html_body: str) -> list:
+    """Japan Site Weekly議事録のHTML本文(MailItem.HTMLBody)から、OneNote由来の進捗表を
+    構造化して抽出する。表はProject/Function(実際は担当者名)/Last Week/This Week/
+    Key Tasks in next 4w/Baseline/LV/Risk Item/Countermeasures Action/Commentの列を持ち、
+    同一人物・同一プロジェクトの複数タスクにまたがってProject・Function列がrowspanで
+    結合されている(例: "Caracal"がrowspan=10、その中の"Saji"がrowspan=6)。
+    rowspan/colspanを考慮した一般的なグリッド展開で列を正しく復元する(特定の週の
+    セル結合パターンに依存する実装にはしていない)。
+    印刷用に表中に繰り返される見出し行(Project/Functionという値がそのまま入っている行)は
+    データ行として扱わず除外する。
+    戻り値は [{"project":str, "person":str, "last_week":str, "this_week":str,
+    "key_tasks":str, "baseline":str, "lv":str, "risk_item":str,
+    "countermeasures":str, "comment":str}, ...]。
+    対象の表が見つからない・HTML本文が空の場合は空リストを返す(呼び出し元は
+    既存の自由文からの人物別抽出にフォールバックする)。"""
+    if not html_body:
+        return []
+    try:
+        soup = BeautifulSoup(html_body, "html.parser")
+    except Exception:
+        return []
+
+    all_rows = []
+    for table in soup.find_all("table"):
+        trs = table.find_all("tr")
+        if len(trs) < 2:
+            continue
+        header_cells = trs[0].find_all(["td", "th"])
+        header_texts = [c.get_text(" ", strip=True).lower() for c in header_cells]
+        if not (any("project" in h for h in header_texts) and any("function" in h for h in header_texts)):
+            continue  # Weekly議事録の進捗表ではない別種の表
+
+        col_names = []
+        for h in header_texts:
+            canonical = None
+            for name, aliases in _REVIEW_MINUTES_TABLE_HEADER_ALIASES:
+                if any(a in h for a in aliases):
+                    canonical = name
+                    break
+            col_names.append(canonical or f"col_{len(col_names)}")
+        n_cols = len(col_names)
+
+        pending = {}  # col_index -> [text, remaining_rowspan]
+        for tr in trs[1:]:
+            cells = tr.find_all(["td", "th"])
+            row_values = [None] * n_cols
+            col = 0
+            cell_iter = iter(cells)
+            cell = next(cell_iter, None)
+            while col < n_cols:
+                if col in pending and pending[col][1] > 0:
+                    row_values[col] = pending[col][0]
+                    pending[col][1] -= 1
+                    if pending[col][1] == 0:
+                        del pending[col]
+                    col += 1
+                    continue
+                if cell is None:
+                    col += 1
+                    continue
+                text = cell.get_text(" ", strip=True)
+                try:
+                    rowspan = int(cell.get("rowspan", 1) or 1)
+                except ValueError:
+                    rowspan = 1
+                try:
+                    colspan = int(cell.get("colspan", 1) or 1)
+                except ValueError:
+                    colspan = 1
+                for c_off in range(colspan):
+                    if col + c_off < n_cols:
+                        row_values[col + c_off] = text
+                        if rowspan > 1:
+                            pending[col + c_off] = [text, rowspan - 1]
+                col += colspan
+                cell = next(cell_iter, None)
+            row_dict = {name: (row_values[i] or "").strip() for i, name in enumerate(col_names)}
+            if row_dict.get("project", "").strip().lower() == "project":
+                continue  # 印刷用に繰り返された見出し行
+            if any(row_dict.values()):
+                all_rows.append(row_dict)
+    return all_rows
+
+def format_review_minutes_rows_for_person(rows: list) -> str:
+    """parse_review_minutes_tableの結果のうち、特定の対象者に絞り込んだ行のリストを、
+    AIへ渡すための整形済みテキストに変換する(1行1タスク)。"""
+    lines = []
+    for r in rows:
+        parts = []
+        head = f"[{r.get('project', '')}] {r.get('key_tasks', '')}".strip()
+        if head.strip("[] "):
+            parts.append(head)
+        if r.get("last_week"): parts.append(f"開始/前回期限: {r['last_week']}")
+        if r.get("this_week"): parts.append(f"今回期限: {r['this_week']}")
+        if r.get("baseline"): parts.append(f"ベースライン: {r['baseline']}")
+        if r.get("lv"): parts.append(f"LV: {r['lv']}")
+        if r.get("risk_item"): parts.append(f"リスク: {r['risk_item']}")
+        if r.get("countermeasures"): parts.append(f"対策: {r['countermeasures']}")
+        if r.get("comment"): parts.append(f"コメント: {r['comment']}")
+        if parts:
+            lines.append(" / ".join(parts))
+    return "\n".join(lines)
+
 def review_activity_qualifies(mails: list, user_smtp_address: str, staff_names: list = None) -> bool:
     """振り返りタブの機械フィルタ(L2): AIに渡す前にスレッドを8〜9割落とすための必須条件。
     「自分の送信メールが1通も無い」スレッドは無条件で対象外(振り返りは受動的な受信ではなく
@@ -3867,24 +3987,50 @@ class MailSummarizer:
         has_minutes_for_person = False
         for cid, t in thread_items:
             is_minutes = review_thread_is_minutes(t)
-            # _clean_body_for_ai既定のlimit=800では、議事録のような長文本文は先頭800文字で
-            # 切られてしまい対象者のパートに到達できない。議事録スレッドに限り、
-            # 本文そのものを大きく緩めたlimitで渡す(全文を渡す、が既存の署名・引用カットの
-            # 仕組み自体は活かす)。
-            body_limit = 50000 if is_minutes else 800
-            mail_texts = []
-            for m in t['mails']:
-                body = self._clean(self._clean_body_for_ai(m['body'], limit=body_limit))
-                mail_texts.append(f"【送信者:{m['sender_name']}】\n本文:{body}\n")
-            raw_content = "".join(mail_texts)
-            if is_minutes:
-                content = raw_content
-                marker = "【議事録: 複数人の進捗が混在。下記の抽出指示を参照】" if person != "Ochi" else ""
-                if person != "Ochi":
-                    has_minutes_for_person = True
+
+            # 議事録は実は自由文ではなく、OneNote由来の進捗表(HTMLBodyに<table>として
+            # 残っている)を含んでいることが多い。表からこの対象者の担当行を直接抽出
+            # できれば、AIに渡すテキストは最初からこの対象者だけに絞られた状態になり、
+            # 自由文からの人物別抽出(他人のパートを誤って拾う・見失うリスク)を避けられる。
+            # ただし表の"Function"列は役割名ではなく担当者の姓が入っており(例:"Saji"は
+            # そのまま、"Yuto"の場合は本文中で"Oi"表記のためREVIEW_MINUTES_DOC_ALIASESで
+            # 変換する必要がある)、PM(Nakai)のように表に行を持たない対象者は
+            # 従来通り「Executive Summary」等の自由文からの抽出に頼るしかない。
+            structured_text = None
+            if is_minutes and person != "Ochi":
+                person_aliases = {person.strip().lower()} | {
+                    a.strip().lower() for a in REVIEW_MINUTES_DOC_ALIASES.get(person.lower(), [])
+                }
+                matched_rows = []
+                for m in t['mails']:
+                    for row in parse_review_minutes_table(m.get('html_body', '')):
+                        if (row.get('person') or '').strip().lower() in person_aliases:
+                            matched_rows.append(row)
+                if matched_rows:
+                    structured_text = format_review_minutes_rows_for_person(matched_rows)
+
+            if structured_text:
+                content = structured_text
+                marker = "【議事録: 進捗表からこの対象者の担当行のみ自動抽出済み】"
             else:
-                content = raw_content[:8000]
-                marker = ""
+                # _clean_body_for_ai既定のlimit=800では、議事録のような長文本文は先頭800文字で
+                # 切られてしまい対象者のパートに到達できない。議事録スレッドに限り、
+                # 本文そのものを大きく緩めたlimitで渡す(全文を渡す、が既存の署名・引用カットの
+                # 仕組み自体は活かす)。
+                body_limit = 50000 if is_minutes else 800
+                mail_texts = []
+                for m in t['mails']:
+                    body = self._clean(self._clean_body_for_ai(m['body'], limit=body_limit))
+                    mail_texts.append(f"【送信者:{m['sender_name']}】\n本文:{body}\n")
+                raw_content = "".join(mail_texts)
+                if is_minutes:
+                    content = raw_content
+                    marker = "【議事録: 複数人の進捗が混在。下記の抽出指示を参照】" if person != "Ochi" else ""
+                    if person != "Ochi":
+                        has_minutes_for_person = True
+                else:
+                    content = raw_content[:8000]
+                    marker = ""
             thread_blocks.append(f"=== スレッドID: {cid} / 件名: {t.get('topic','')} {marker} ===\n{content}\n")
         full_content = "\n".join(thread_blocks)[:60000]
 

@@ -9,6 +9,8 @@
 
 	**振り返りタブ: 「🎨 フォーマットのみ再生成」が、対象者チェックボックスを変更しても前回生成時の対象者のHTMLを出してしまう不具合を修正**。上記の対象者別分割生成を実装した直後、ユーザーから「Kajikawaを選択してフォーマットのみ再生成したが、過去のSaji・Yutoのフォーマットしか出てこない」との報告を受けて調査・修正した。原因は、`_reformat_review`が直近の`review_last_result.json`に保存された対象者リスト(前回「📈 振り返りを生成」を実行した時点でチェックされていた対象者)をそのまま使っていたためで、チェックボックスを変えても反映されていなかった。修正として、`_reformat_review`は今チェックボックスで選ばれている対象者(`_get_review_selected_persons()`)を使い、`review_last_result.json`の単一スナップショットではなく、月別・対象者別キャッシュ(`analysis_cache/review_monthly/{yyyymm}__{対象者}.json`、`load_review_month_cache`)から対象者ごとに直接読み込み直す方式に変更した。これにより、直近の生成に含まれていなかった対象者(例: Kajikawa)を新たに選んでも、その対象者が過去に一度でも分析されたことのある月のキャッシュがあれば、そこから正しく再構成できるようになった(一度も分析されたことが無い対象者・月はキャッシュが無いため実績0件になる。これはAI再解析を行わないフォーマットのみ再生成の性質上、正しい挙動)。あわせて、非表示実績の確認・復元パネル(`/review_hidden_list`)が参照する`review_last_result.json`のタイトル情報も、今回選ばれていた対象者の分で上書き保存し直すようにした。
 
+	**振り返りタブ: Japan Site Weekly議事録から、OneNote由来の進捗表を直接構造化抽出する機能を追加**。ユーザーから実際の議事録(.msgファイル、week29)をご提供いただき調査した結果、この議事録は自由文ではなく、OneNoteから貼り付けられた本物のHTML表(Project/Function/Last Week/This Week/Key Tasks in next 4w/Baseline/LV/Risk Item/Countermeasures Action/Commentの列を持つ)を含んでいることが判明した。「Function」列は名称に反し役割(PM/PE/TE)ではなく担当者の姓(Miyazaki, Oi, Saji, Hirooka等)そのものであり、同一人物・同一プロジェクトの複数タスクにまたがってProject・Function列がセル結合(rowspan)されている。従来はこの表をプレーンテキストとして読んでいたため表構造が失われ、AIに「自由文から対象者のパートを推測させる」という本質的に不安定な処理を強いていた。今回、`MailItem.HTMLBody`(既存の`_item_to_dict`で取得済み)からこの表を`rowspan`/`colspan`を考慮したグリッド展開で正しく解析し、対象者の担当行だけを直接抽出できるようにした。抽出できた場合は、AIに渡すテキストが最初からその対象者の担当タスクだけに絞られた状態になるため、以前追加した「自由文から対象者のパートだけを抽出させる指示」(`minutes_instruction`)は不要になり、他人のタスクが混入するリスクが無くなる。表に行を持たない対象者(Nakai等、PMの「Executive Summary」部分はプロジェクト全体の自由文でありNakaiさんの担当領域という位置づけ)は、従来通り自由文からの抽出にフォールバックする(この点はユーザーへ確認済み)。Kajikawa・Najib・Nakaiの活動は、この議事録とは別のOneNoteで管理されているとのことで、今回の対応範囲外(別途の統合が必要)。
+
 ### 変更関数
 	`REVIEW_STAFF_FUNCTIONS`（キー`"oi yuto"`を、実際の登録名に合わせて`"yuto"`へ変更）
 	`review_staff_function_labels`（`REVIEW_STAFF_FUNCTIONS.get(name.lower(), [])`の直接参照を、新設の`get_review_staff_functions`(完全一致→部分一致フォールバック)へ置き換え）
@@ -18,11 +20,15 @@
 	`MailManagerGUI._save_review_result`（保存する内容に`persons`(生成時に選ばれていた対象者リスト)を追加）
 	`MailManagerGUI._run_review`（`period_label`から対象者名の埋め込みを削除(対象者名は`generate_review_report`側で表示するため)。選択された対象者ごとに`generate_review_report`をループ呼び出しし、複数人まとめたHTMLの生成をやめ、対象者ごとに別ファイルを生成・オープンするよう変更）
 	`MailManagerGUI._reformat_review`（保存済み`review_last_result.json`の`persons`に依存する実装から、今チェックボックスで選ばれている対象者(`_get_review_selected_persons()`)×月別キャッシュ(`load_review_month_cache`)から都度読み直す実装へ変更。対象者ごとに`generate_review_report`をループ呼び出しし、複数人まとめたHTMLは生成しない。再生成の都度`review_last_result.json`も選ばれていた対象者分で上書き保存し直す）
+	`summarize_review_month`（スレッドが議事録の場合、まず`parse_review_minutes_table`+`REVIEW_MINUTES_DOC_ALIASES`でその対象者の担当行を表から直接抽出できるか試み、抽出できればそれをAIへの入力として使う(自由文からの抽出指示は付与しない)。抽出できない場合のみ、従来通り自由文全文+`minutes_instruction`のフォールバックに進む）
 
 ### 新規追加：
 	定数 `REVIEW_MINUTES_DOC_ALIASES`（登録名→議事録本文内の実際の表記、の対応表。現状"yuto"→["Oi","Oi-san"]のみ登録）
+	定数 `_REVIEW_MINUTES_TABLE_HEADER_ALIASES`（議事録の進捗表のヘッダーセル文字列→内部の正規化した列名、の対応表）
 	関数 `get_review_staff_functions`（`REVIEW_STAFF_FUNCTIONS`の完全一致→大文字小文字無視の部分一致フォールバック取得）
 	関数 `get_review_minutes_doc_name`（登録名を議事録本文内の実際の表記へ変換。未登録なら登録名をそのまま返す）
+	関数 `parse_review_minutes_table`（議事録のHTML本文から、OneNote由来の進捗表を`rowspan`/`colspan`考慮のグリッド展開で構造化抽出する。印刷用に表中で繰り返される見出し行は除外する）
+	関数 `format_review_minutes_rows_for_person`（`parse_review_minutes_table`の結果のうち特定の対象者の行を、AIへ渡す整形済みテキストに変換する）
 	`review_last_result.json`の`persons`フィールド
 
 ### 削除：
@@ -36,8 +42,9 @@
 	Yuto/Oi表記不一致の修正については、Outlook非依存のスタンドアロン`python3`ハーネスで、(a)`get_review_staff_functions`が"Yuto"(大文字小文字問わず)でPE/VEを正しく取得できること、(b)`get_review_minutes_doc_name`が"Yuto"を"Oi/Oi-san"へ変換すること(未登録の対象者はそのまま返すこと)、(c)対象者="Yuto"として`summarize_review_month`を実行した際、実際に構築されるプロンプト文字列に「PE」「VE」というファンクションと、登録名"Yuto"・本文表記"Oi/Oi-san"の両方が含まれること、(d)"oi"単体では(意図的に)ゴール定義・ファンクションのどちらにもフォールバックしないこと(苗字だけでの誤爆防止方針を維持していることの確認)、を検証し全て合格した。
 	HTMLサマリの対象者別分割については、同様のスタンドアロンハーネスで`HTMLReportGenerator.generate_review_report`を実際に呼び出し、(a)`filter_person`を指定すると、生成されるHTMLにその対象者の実績タイトルだけが含まれ、他の対象者の実績タイトルは一切含まれないこと(混在しないこと)、(b)ファイル名・ページタイトル・ヘッダーの期間表示に対象者名が反映されること、(c)対象者を変えると別のファイルパスが生成されること、(d)`filter_person`省略時は従来通り全員混在のHTMLが生成される後方互換動作を維持していること、(e)`review_last_result.json`に`persons`キーが無い旧形式データはOchiのみへフォールバックすること、を検証し全て合格した。
 	フォーマットのみ再生成の対象者取り違えバグの修正については、`analysis_cache/review_monthly/`配下にOchi・Saji・Yuto(前回生成時の対象者)とKajikawa(別の月で過去に一度だけ分析済み、という想定)のキャッシュファイルをダミーで用意し、`_reformat_review`が内部で使うのと同じ「今選ばれている対象者×全月」の`load_review_month_cache`呼び出しパターンを再現して、(a)Kajikawaだけを選ぶとKajikawaの実績だけが取得され、前回生成時のOchi・Saji・Yutoの実績は一切混ざらないこと(報告された不具合の再現否定)、(b)Ochi・Sajiを選び直すとその2人の分だけが取得されること、(c)過去に一度も分析されたことのない対象者を選んでもエラーにならず0件になること、(d)`generate_review_report`にKajikawaの`filter_person`を指定して最終的なHTMLまで生成し、Kajikawaの実績のみが含まれ前回生成時のSaji・Yutoの実績が含まれないこと、を検証し全て合格した。
-	既存の回帰テスト(スタッフ拡張・Ochi決定木・achievement_id・議事録抽出等の計42+15+8項目)も合わせて再実行し、全て合格を維持していることを確認した。
-	実機（Windows＋Outlook）でのご確認が必須: (1)対象者チェックボックスで「Yuto」を選んで議事録月を含む期間で生成し、議事録からOi-sanのPE/VEパートが正しく抽出されること。(2)`REVIEW_MINUTES_DOC_ALIASES`の"Oi"/"Oi-san"という表記が、実際の議事録本文の表記(全角/半角、"様"付き等)と一致しているか(表記ゆれがあれば追加登録が必要)。(3)project_knowledge["staffs"]に残っている重複エントリ("Yuto"と"Oi"の両方)自体は、スタッフ俯瞰タブ側のデータであり本修正では変更していない。重複を整理したい場合は別途スタッフ俯瞰タブ側でご対応いただきたい。(4)複数対象者を選んで「📈 振り返りを生成」を実行した際、対象者の人数分だけブラウザタブが開くこと(意図した挙動だが、人数が多いと開くタブ数も多くなる点はご留意いただきたい)。(5)「🎨 フォーマットのみ再生成」で、チェックボックスを変えてから実行すると、今チェックされている対象者だけのHTMLが生成されること(ご報告いただいた「Kajikawaを選んだのにSaji・Yutoが出る」不具合が解消されているかの確認)。(6)過去に一度も「📈 振り返りを生成」で分析したことが無い対象者を選んで「🎨 フォーマットのみ再生成」を行うと、実績0件のHTMLになること(AI再解析はしないため正しい挙動だが、意図と異なる場合は先に対象月のチェックを入れて「📈 振り返りを生成」を実行する必要がある)。
+	議事録の進捗表からの構造化抽出については、ユーザーご提供の実際の.msg(week29)を圧縮RTFから復元して構造を確認し(表・行・セル数、rowspan値を実測)、その実物の構造(Project/Function列がrowspan結合・印刷用見出し行が表中に繰り返される・Function列に役割名でなく担当者の姓が入る)を再現したクリーンな合成HTML(実際のHTMLBodyにはRTF復元特有の文字化けノイズは無いため、実装の正しさはノイズの無い合成HTMLで厳密に検証する方が適切と判断した)に対して、(a)`parse_review_minutes_table`がrowspanで結合されたProject列を正しく全ての該当行へ継承すること、(b)1人が複数タスクを持つ場合(Saji: 6タスク、Miyazaki: 3タスク)を全て個別の行として取得できること、(c)印刷用に表中で繰り返される見出し行が誤ってデータ行として混入しないこと、(d)`format_review_minutes_rows_for_person`が対象者の行だけを1行1タスクのテキストに整形すること、(e)`summarize_review_month`に統合した結果、表に行を持つSajiは表からの直接抽出(自由文の抽出指示は付かない)、表に行を持たないNakaiは従来通り自由文+抽出指示のフォールバックになること、(f)登録名"Yuto"・表記"Oi"のエイリアス変換が実際のプロンプト構築でも機能し、Oiさんのタスクだけが正しく抽出され他人のタスクは混入しないこと、を検証し全て合格した。
+	既存の回帰テスト(スタッフ拡張・Ochi決定木・achievement_id・議事録抽出・HTML分割・reformat対象者等の計42+15+8+8+18項目)も合わせて再実行し、全て合格を維持していることを確認した。
+	実機（Windows＋Outlook）でのご確認が必須: (1)対象者チェックボックスで「Yuto」を選んで議事録月を含む期間で生成し、議事録からOi-sanのPE/VEパートが正しく抽出されること。(2)`REVIEW_MINUTES_DOC_ALIASES`の"Oi"/"Oi-san"という表記が、実際の議事録本文の表記(全角/半角、"様"付き等)と一致しているか(表記ゆれがあれば追加登録が必要)。(3)project_knowledge["staffs"]に残っている重複エントリ("Yuto"と"Oi"の両方)自体は、スタッフ俯瞰タブ側のデータであり本修正では変更していない。重複を整理したい場合は別途スタッフ俯瞰タブ側でご対応いただきたい。(4)複数対象者を選んで「📈 振り返りを生成」を実行した際、対象者の人数分だけブラウザタブが開くこと(意図した挙動だが、人数が多いと開くタブ数も多くなる点はご留意いただきたい)。(5)「🎨 フォーマットのみ再生成」で、チェックボックスを変えてから実行すると、今チェックされている対象者だけのHTMLが生成されること(ご報告いただいた「Kajikawaを選んだのにSaji・Yutoが出る」不具合が解消されているかの確認)。(6)過去に一度も「📈 振り返りを生成」で分析したことが無い対象者を選んで「🎨 フォーマットのみ再生成」を行うと、実績0件のHTMLになること(AI再解析はしないため正しい挙動だが、意図と異なる場合は先に対象月のチェックを入れて「📈 振り返りを生成」を実行する必要がある)。(7)議事録の進捗表からの構造化抽出が実際に機能しているか(実機のOutlookから取得した本物の`HTMLBody`で表構造が正しく解析されるか)。本セッションでは実際の議事録の構造をRTF復元して確認したが、実機の`MailItem.HTMLBody`プロパティで同じ表を直接取得した場合の解析結果までは検証できていない(未確認)。特にOi-san・Saji-sanの実績が表からの自動抽出で正しく分割されているか(タイトル・件数など)を実際の生成結果でご確認いただきたい。(8)Kajikawa・Najib・Nakaiの活動は別のOneNoteで管理されているとのことで、今回の表解析の対象外(この3名は従来通り自由文からのAI抽出、またはNakaiはExecutive Summaryからの抽出に頼る)。
 
 ## VERSION 20260730_11
 
