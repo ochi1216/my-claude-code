@@ -646,6 +646,30 @@ URL: ${url}
             }
         }
 
+        // [20260804] Mode1（▶・主なポイント本文を一時的に読み上げ）専用。
+        // RSSカードでまだ主なポイントが無い場合、生成ボタン押下と同じ処理を自動で
+        // バックグラウンド起動し、その完了を待てるようPromiseをMapに記録する。
+        // 既に生成中/生成済み/APIキー未設定（モーダルで再生を止めないため）の場合はnullを返す。
+        const rssPointsGenerationPromises = new Map();
+        function triggerRssPointsGenerationIfNeeded(fIdx, iIdx) {
+            const key = `${fIdx}-${iIdx}`;
+            if (rssPointsGenerationPromises.has(key)) return rssPointsGenerationPromises.get(key);
+
+            const qData = flatQueue.find(q => q.fIdx === fIdx && q.iIdx === iIdx);
+            if (!qData || qData.item.type !== 'rss' || qData.item.points) return null;
+
+            const btn = document.getElementById(`detail-btn-${fIdx}-${iIdx}`);
+            if (!btn || btn.disabled || btn.classList.contains('loading')) return null;
+
+            const apiKey = getOrAskApiKey();
+            if (!apiKey) return null; // モーダル入力待ちは連続読み上げと相性が悪いため自動生成を諦める
+
+            const promise = fetchDetailConsolidatedWithKey(fIdx, iIdx, apiKey).catch(err => {
+                console.error('[Mode1 RSS auto-generate] failed:', err);
+            });
+            rssPointsGenerationPromises.set(key, promise);
+            return promise;
+        }
 """
 
         html_content = """<!DOCTYPE html>
@@ -1480,7 +1504,13 @@ URL: ${url}
 
             // [20260804] Mode1（主なポイント本文・一時）専用のクイックボタン。
             // ホバー一覧を開かずワンタップで切り替えられるようにした。
+            // RSSカードで主なポイント未生成の場合は、ここで生成をバックグラウンド起動しておく
+            // （handlePartEndで実際に読み上げる段になってから待つより早く揃う）。
             document.getElementById('btnSkipMode1Quick').addEventListener('click', () => {
+                if (currentFlatIndex !== -1) {
+                    const qData = flatQueue[currentFlatIndex];
+                    if (qData) triggerRssPointsGenerationIfNeeded(qData.fIdx, qData.iIdx);
+                }
                 changeSkipMode(1);
             });
 
@@ -2250,6 +2280,7 @@ URL: ${url}
                         txt = "主なポイント。 " + tempDiv.textContent;
                     }
                     else if (currentPart === 'conclusion') txt = item.conclusion ? ("結論。 " + item.conclusion) : "";
+                    else if (currentPart === 'points_unavailable') txt = "主なポイントは生成されませんでした。";
                     else if (currentPart === 'point_titles') {
                         const listHtml = buildPointTitlesList(item.points);
                         let tempDiv = document.createElement("div");
@@ -2301,7 +2332,7 @@ URL: ${url}
             window.speechSynthesis.speak(ut);
         }
 
-        function handlePartEnd() {
+        async function handlePartEnd() {
             if(playTimer) clearTimeout(playTimer);
             if (currentPart === 'file_intro') {
                 if (!isChimePlaying) {
@@ -2327,9 +2358,32 @@ URL: ${url}
                     } else {
                         advanceAuto();
                     }
-                } else {
+                } else if (skipMode === 1) {
                     // skipMode 1: 結論をスキップし主なポイント本文へ（存在する場合は自動展開）。
                     //             1カード読了後に元のモードへ自動復帰する一時モード。
+                    // RSSカードでまだ主なポイントが未生成の場合は、自動生成を起動して完了を待つ。
+                    // 待っても生成されなかった場合は専用の案内文を読み上げてから次のカードへ進む。
+                    const qData = flatQueue[currentFlatIndex];
+                    if (qData.item.points) {
+                        openPointsAccordion(qData.fIdx, qData.iIdx);
+                        currentPart = 'points'; playTimer = setTimeout(playCurrentPart, 10);
+                    } else {
+                        const pending = triggerRssPointsGenerationIfNeeded(qData.fIdx, qData.iIdx);
+                        if (pending) {
+                            await pending;
+                            // 待機中に停止/モード変更/カード移動があった場合は何もしない
+                            if (!isPlaying || skipMode !== 1 || flatQueue[currentFlatIndex] !== qData) return;
+                            if (qData.item.points) {
+                                openPointsAccordion(qData.fIdx, qData.iIdx);
+                                currentPart = 'points'; playTimer = setTimeout(playCurrentPart, 10);
+                            } else {
+                                currentPart = 'points_unavailable'; playTimer = setTimeout(playCurrentPart, 10);
+                            }
+                        } else {
+                            advanceAuto();
+                        }
+                    }
+                } else {
                     // skipMode 2: 同じく主なポイント本文へ。手動選択したまま維持される固定モード。
                     const qData = flatQueue[currentFlatIndex];
                     if (qData.item.points) {
@@ -2349,6 +2403,7 @@ URL: ${url}
                 advanceAuto();
             }
             else if (currentPart === 'points') { advanceAuto(); }
+            else if (currentPart === 'points_unavailable') { advanceAuto(); }
         }
 
         function updateHighlighting() {
