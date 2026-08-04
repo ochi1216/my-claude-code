@@ -7317,41 +7317,46 @@ function cockpitSetView(mode) {{
                         staff_by_person_goal[person].setdefault(g, []).append(a)
 
             goal_sections = []
-            for g in REVIEW_GOAL_ORDER:
-                items = by_goal.get(g, [])
-                label = html_mod.escape(REVIEW_GOAL_LABELS.get(g, g))
-                if g == "G2_site" and items:
-                    by_subcat = {}
-                    no_subcat = []
-                    for a in items:
-                        sc = a.get("g2_subcategory")
-                        if sc: by_subcat.setdefault(sc, []).append(a)
-                        else: no_subcat.append(a)
-                    sub_html = []
-                    for sc_key, sc_label in REVIEW_G2_SUBCAT_LABELS.items():
-                        sc_items = by_subcat.get(sc_key, [])
-                        if not sc_items: continue
-                        rows = "".join(_render_row(a) for a in sc_items)
-                        sub_html.append(f'''
-                        <div class="rv-subcat-group">
-                            <div class="rv-subcat-head">{html_mod.escape(sc_label)}<span class="rv-count">{len(sc_items)}件</span></div>
-                            <div class="rv-subcat-rows">{rows}</div>
-                        </div>''')
-                    if no_subcat:
-                        # 小分類が付かないG2実績は、.rv-subcat-groupで包まずに.rv-goal-rowsの直下に
-                        # 平置きする(包んでしまうと、コピー用テキスト生成・件数再計算のJSが
-                        # ".rv-goal-group > .rv-goal-rows > .rv-row" / ".rv-subcat-group > .rv-subcat-rows
-                        # > .rv-row" という直接の親子関係だけを見ているため、中途半端なラッパーに
-                        # 入れると行が拾われず取りこぼす)。
-                        sub_html.append("".join(_render_row(a) for a in no_subcat))
-                    body = "".join(sub_html)
-                else:
-                    body = "".join(_render_row(a) for a in items) if items else ''
-                goal_sections.append(f'''
-                <div class="rv-goal-group" data-goal="{html_mod.escape(g, quote=True)}">
-                    <div class="rv-goal-head">{label}<span class="rv-count">{len(items)}件</span></div>
-                    <div class="rv-goal-rows">{body}</div>
-                </div>''')
+            # Ochiさん専用のG1/G2/G3見出しは、Ochiさん以外の対象者専用レポート
+            # (filter_person指定時)には無関係(そのスタッフのKPIキー体系はK1..等で別物)
+            # なので出さない。filter_person未指定(全員混在。現在は呼び出し元が使わない
+            # 後方互換パスのみ)またはfilter_person=="Ochi"のときだけ表示する。
+            if filter_person is None or filter_person == "Ochi":
+                for g in REVIEW_GOAL_ORDER:
+                    items = by_goal.get(g, [])
+                    label = html_mod.escape(REVIEW_GOAL_LABELS.get(g, g))
+                    if g == "G2_site" and items:
+                        by_subcat = {}
+                        no_subcat = []
+                        for a in items:
+                            sc = a.get("g2_subcategory")
+                            if sc: by_subcat.setdefault(sc, []).append(a)
+                            else: no_subcat.append(a)
+                        sub_html = []
+                        for sc_key, sc_label in REVIEW_G2_SUBCAT_LABELS.items():
+                            sc_items = by_subcat.get(sc_key, [])
+                            if not sc_items: continue
+                            rows = "".join(_render_row(a) for a in sc_items)
+                            sub_html.append(f'''
+                            <div class="rv-subcat-group">
+                                <div class="rv-subcat-head">{html_mod.escape(sc_label)}<span class="rv-count">{len(sc_items)}件</span></div>
+                                <div class="rv-subcat-rows">{rows}</div>
+                            </div>''')
+                        if no_subcat:
+                            # 小分類が付かないG2実績は、.rv-subcat-groupで包まずに.rv-goal-rowsの直下に
+                            # 平置きする(包んでしまうと、コピー用テキスト生成・件数再計算のJSが
+                            # ".rv-goal-group > .rv-goal-rows > .rv-row" / ".rv-subcat-group > .rv-subcat-rows
+                            # > .rv-row" という直接の親子関係だけを見ているため、中途半端なラッパーに
+                            # 入れると行が拾われず取りこぼす)。
+                            sub_html.append("".join(_render_row(a) for a in no_subcat))
+                        body = "".join(sub_html)
+                    else:
+                        body = "".join(_render_row(a) for a in items) if items else ''
+                    goal_sections.append(f'''
+                    <div class="rv-goal-group" data-goal="{html_mod.escape(g, quote=True)}">
+                        <div class="rv-goal-head">{label}<span class="rv-count">{len(items)}件</span></div>
+                        <div class="rv-goal-rows">{body}</div>
+                    </div>''')
 
             # スタッフのゴール別サブセクション(対象者ごと、その人自身のKPI順に表示)。
             # json/review_person_goals.jsonのキー順(≒登録順)をそのまま見出し順に使う。
