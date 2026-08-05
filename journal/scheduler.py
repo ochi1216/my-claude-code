@@ -32,7 +32,9 @@ def check_reminders(trigger_callback) -> None:
 
     Args:
         trigger_callback: 発火時に呼び出す引数無しの関数
-            （popup_ui.pyの queue_popup_trigger を渡す想定）
+            （ポップアップUI側の queue_popup_trigger を渡す想定。本体のファイル名は
+            daily_journal_yyyymmdd_NN.py形式でバージョン管理されており、
+            scheduler.py自体はどのファイル名からも独立して動作する）
     """
     now = datetime.now()
     current_time_str = now.strftime("%H:%M")
@@ -87,7 +89,9 @@ def write_startup_batch_file(
 
     Args:
         python_exe: 使用するpython実行ファイルのパス（既定: pythonw.exeを自動探索）
-        script_path: 起動対象スクリプト（既定: popup_ui.py の絶対パス）
+        script_path: 起動対象スクリプト（既定: run_latest.py の絶対パス。
+            run_latest.pyは常に最新のdaily_journal_*.pyを自動選択して起動するため、
+            本体のファイル名が変わってもこの既定値を変更する必要はない）
         batch_name: 作成するバッチファイル名
 
     Returns:
@@ -102,7 +106,7 @@ def write_startup_batch_file(
 
     if script_path is None:
         script_path = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "popup_ui.py")
+            os.path.join(os.path.dirname(__file__), "run_latest.py")
         )
 
     startup_folder = get_startup_folder()
@@ -151,7 +155,9 @@ def register_startup_task(
 
     Args:
         python_exe: 使用するpython実行ファイルのパス（既定: pythonw.exeを自動探索）
-        script_path: 起動対象スクリプト（既定: popup_ui.py の絶対パス）
+        script_path: 起動対象スクリプト（既定: run_latest.py の絶対パス。
+            run_latest.pyは常に最新のdaily_journal_*.pyを自動選択して起動するため、
+            本体のファイル名が変わってもこの既定値を変更する必要はない）
         task_name: タスク名
 
     Returns:
@@ -169,7 +175,7 @@ def register_startup_task(
 
     if script_path is None:
         script_path = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "popup_ui.py")
+            os.path.join(os.path.dirname(__file__), "run_latest.py")
         )
 
     command = (
@@ -204,4 +210,5 @@ def unregister_startup_task(task_name: str = "LearningJournalAutoStart") -> bool
 if __name__ == "__main__":
     print("🔧 scheduler.py 単体動作確認を開始します。")
     print(f"⏰ 現在設定されているリマインド時刻: {REMINDER_TIMES}")
-    print("ℹ️ 実際の定時発火はpopup_ui.py経由での起動時（コールバック渡し）で有効になります。")
+    print("ℹ️ 実際の定時発火はrun_latest.py（daily_journal_*.py）経由での"
+          "起動時（コールバック渡し）で有効になります。")

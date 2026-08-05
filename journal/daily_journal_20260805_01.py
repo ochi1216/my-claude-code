@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-popup_ui.py
+daily_journal_20260805_01.py
 学びジャーナル - ホットキー起動の入力ポップアップUI
-Version: 0.9.1
+（旧popup_ui.py。今後はyyyymmdd_NN形式のファイル名でバージョン管理する）
+Version: 0.9.2
 """
 
 import ctypes
+import os
 import queue
 import threading
 import tkinter as tk
@@ -23,6 +25,7 @@ TEXT_COLOR = "#ffffff"
 ENTRY_BG = "#0f3460"
 BUTTON_TEXT_COLOR = "#2b2b40"
 CANCEL_BTN_BG = "#d8d8e6"
+DASHBOARD_BTN_BG = "#dfeaf5"  # dashboard.pyのPERIOD_BTN_BGと揃えた配色
 
 
 def _lighten_color(hex_color: str, factor: float = 0.78) -> str:
@@ -45,7 +48,7 @@ def _format_duration(minutes: int) -> str:
 
 
 HOTKEY = "ctrl+shift+j"
-VERSION = "0.9.1"
+VERSION = "0.9.2"
 
 _trigger_queue = queue.Queue()
 
@@ -134,6 +137,7 @@ class PopupWindow:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.window = None
+        self.dashboard_window = None
         self.selected_tag = None
         self.l_var = tk.StringVar()
         self.k_var = tk.StringVar()
@@ -287,8 +291,13 @@ class PopupWindow:
         first_entry.focus_set()
 
         btn_frame = tk.Frame(self.window, bg=BG_COLOR)
-        btn_frame.pack(pady=6)
+        btn_frame.pack(pady=6, padx=20, fill="x")
         self._register_themed(btn_frame)
+        for col in range(3):
+            # uniform="btn"を指定した3カラムに均等分割することで、
+            # ボタンのテキスト長に関わらず幅を完全に揃える
+            # （pack()のexpand=Trueだけでは自然サイズの差が残ってしまうため）
+            btn_frame.columnconfigure(col, weight=1, uniform="btn")
 
         register_btn = tk.Button(
             btn_frame,
@@ -297,10 +306,9 @@ class PopupWindow:
             fg=BUTTON_TEXT_COLOR,
             activebackground=ACCENT_COLOR,
             relief="flat",
-            width=12,
             command=self._submit,
         )
-        register_btn.pack(side="left", padx=4)
+        register_btn.grid(row=0, column=0, sticky="ew", padx=3)
 
         cancel_btn = tk.Button(
             btn_frame,
@@ -309,10 +317,20 @@ class PopupWindow:
             fg=BUTTON_TEXT_COLOR,
             activebackground=ACCENT_COLOR,
             relief="flat",
-            width=12,
             command=self._cancel,
         )
-        cancel_btn.pack(side="left", padx=4)
+        cancel_btn.grid(row=0, column=1, sticky="ew", padx=3)
+
+        dashboard_btn = tk.Button(
+            btn_frame,
+            text="📊 DB",
+            bg=DASHBOARD_BTN_BG,
+            fg=BUTTON_TEXT_COLOR,
+            activebackground=ACCENT_COLOR,
+            relief="flat",
+            command=self._open_dashboard,
+        )
+        dashboard_btn.grid(row=0, column=2, sticky="ew", padx=3)
 
         self.window.bind("<Escape>", lambda e: self._cancel())
         # Windowsが Alt キー解放をシステムメニュー呼び出しと誤認識し、
@@ -379,6 +397,21 @@ class PopupWindow:
         print("🚫 入力をキャンセルしました。")
         self.window.destroy()
 
+    def _open_dashboard(self) -> None:
+        """ダッシュボードウィンドウを開く。既に開いていれば前面化のみ行う。"""
+        if self.dashboard_window is not None and self.dashboard_window.winfo_exists():
+            self.dashboard_window.lift()
+            self.dashboard_window.focus_force()
+            return
+
+        # popup_ui側とdashboard側で同名の定数（BG_COLOR等）を持つため、
+        # モジュールレベルでの衝突を避けて遅延importする
+        import dashboard
+
+        self.dashboard_window = tk.Toplevel(self.root)
+        dashboard.DashboardWindow(self.dashboard_window)
+        print("📊 ダッシュボードを開きました。")
+
 
 def poll_trigger_queue(root: tk.Tk, popup: "PopupWindow") -> None:
     """
@@ -401,8 +434,8 @@ def poll_trigger_queue(root: tk.Tk, popup: "PopupWindow") -> None:
 
 
 def run() -> None:
-    """popup_ui.py 単体起動用のメインループ。"""
-    print(f"📦 popup_ui.py version: {VERSION}")
+    """このファイル単体起動用のメインループ。"""
+    print(f"📦 {os.path.basename(__file__)} version: {VERSION}")
     root = tk.Tk()
     root.withdraw()  # メインウィンドウ本体は非表示にする
 
