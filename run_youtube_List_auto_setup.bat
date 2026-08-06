@@ -60,7 +60,7 @@ rem nested. Use goto :chrome_ready instead to skip this section.
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "try { $c = New-Object System.Net.Sockets.TcpClient; $c.Connect('127.0.0.1', !DEBUG_PORT!); $c.Close(); exit 0 } catch { exit 1 }" >NUL 2>&1
 if !ERRORLEVEL! EQU 0 (
-    echo Existing debug Chrome detected on port !DEBUG_PORT! - reusing it (no kill, no relaunch). >> "%LOG_FILE%" 2>&1
+    echo Existing debug Chrome detected on port !DEBUG_PORT! - reusing it, no kill, no relaunch. >> "%LOG_FILE%" 2>&1
     goto :chrome_ready
 )
 echo No debug Chrome detected on port !DEBUG_PORT! - will start a fresh one. >> "%LOG_FILE%" 2>&1
