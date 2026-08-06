@@ -1916,6 +1916,10 @@ class BrowserManager:
                 # [20260806] Youtube_List_Setup系スクリプトのバッチファイルには入っているが
                 # こちらには無かったフラグ。navigator.webdriver等の検知を抑える。
                 options.add_argument('--disable-blink-features=AutomationControlled')
+                # [20260806] Chromeをkill -9相当で強制終了した直後の起動時に出る
+                # 「ページを復元しますか？」クラッシュ復元ダイアログを抑制する。
+                # このダイアログはSeleniumのDOM操作では閉じられず、後続の自動操作を阻害しうる。
+                options.add_argument('--disable-session-crashed-bubble')
 
                 options.add_argument('--no-sandbox')
                 options.add_argument('--disable-dev-shm-usage')
