@@ -188,6 +188,68 @@ def append_entry(date_str: str, tag: str, memo: str,
     return success
 
 
+def _compute_time_range(ws_timelog, now: datetime) -> tuple:
+    """
+    本日のTimeLogの直近チェックポイント（終了時刻が最も新しい行）から、
+    今回のチェックインで記録する作業時間の範囲を計算する
+    （record_check_in()の実書き込みと、peek_next_time_range()での
+    書き込みなしプレビューの両方から使う共通ロジック）。
+
+    Returns:
+        tuple[str, datetime, datetime]: (kind, start, end)
+            kind: "anchor"（本日最初のチェックイン。start==end==nowで
+                  作業時間としては記録されない）または"interval"
+    """
+    today = now.date()
+    last_checkpoint = None
+    for row in ws_timelog.iter_rows(min_row=2, values_only=True):
+        end_value = row[1]
+        if not end_value:
+            continue
+        end_dt = (
+            end_value if isinstance(end_value, datetime)
+            else datetime.strptime(str(end_value), "%Y-%m-%d %H:%M")
+        )
+        if end_dt.date() == today and (last_checkpoint is None or end_dt > last_checkpoint):
+            last_checkpoint = end_dt
+
+    if last_checkpoint is None:
+        return "anchor", now, now
+
+    start = last_checkpoint
+    max_gap = timedelta(hours=MAX_TIMELOG_GAP_HOURS)
+    if now - start > max_gap:
+        start = now - max_gap
+    return "interval", start, now
+
+
+def peek_next_time_range(path: str = EXCEL_PATH, now: datetime = None) -> tuple:
+    """
+    次にrecord_check_in()を呼んだ場合に記録される作業時間の範囲を、
+    実際には書き込まずに事前計算する。タグ選択時にポップアップUIへ
+    「何時から何時までの作業として記録されるか」をプレビュー表示するために使う。
+
+    Args:
+        path: Excelファイルパス
+        now: 基準時刻（省略時はdatetime.now()）
+
+    Returns:
+        tuple[str, datetime, datetime]: (kind, start, end)
+            kind: "anchor"（本日最初のチェックイン。作業時間としては
+                  記録されない）または"interval"（start〜endが作業時間として
+                  記録される）
+    """
+    if now is None:
+        now = datetime.now()
+    now = now.replace(second=0, microsecond=0)
+
+    ensure_workbook_exists(path)
+    wb = _load_with_retry(path)
+    if TIMELOG_SHEET not in wb.sheetnames:
+        return "anchor", now, now
+    return _compute_time_range(wb[TIMELOG_SHEET], now)
+
+
 def record_check_in(tag: str, l: str, k: str, p: str, t: str,
                      path: str = EXCEL_PATH, now: datetime = None) -> tuple:
     """
@@ -226,31 +288,13 @@ def record_check_in(tag: str, l: str, k: str, p: str, t: str,
     _ensure_lkpt_columns(wb)
     ws_timelog = wb[TIMELOG_SHEET]
 
-    today = now.date()
-    last_checkpoint = None
-    for row in ws_timelog.iter_rows(min_row=2, values_only=True):
-        end_value = row[1]
-        if not end_value:
-            continue
-        end_dt = (
-            end_value if isinstance(end_value, datetime)
-            else datetime.strptime(str(end_value), "%Y-%m-%d %H:%M")
-        )
-        if end_dt.date() == today and (last_checkpoint is None or end_dt > last_checkpoint):
-            last_checkpoint = end_dt
-
-    if last_checkpoint is None:
+    kind, start, end = _compute_time_range(ws_timelog, now)
+    if kind == "anchor":
         ws_timelog.append([now, now, tag])
-        kind = "anchor"
         minutes = None
     else:
-        start = last_checkpoint
-        max_gap = timedelta(hours=MAX_TIMELOG_GAP_HOURS)
-        if now - start > max_gap:
-            start = now - max_gap
-        ws_timelog.append([start, now, tag])
-        kind = "interval"
-        minutes = int((now - start).total_seconds() // 60)
+        ws_timelog.append([start, end, tag])
+        minutes = int((end - start).total_seconds() // 60)
 
     has_lkpt = bool(l or k or p or t)
     if has_lkpt:
