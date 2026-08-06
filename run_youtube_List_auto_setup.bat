@@ -53,11 +53,10 @@ rem ========================================
 echo. >> "%LOG_FILE%" 2>&1
 echo [1/7] Checking whether a debug Chrome is already running on port !DEBUG_PORT!... >> "%LOG_FILE%" 2>&1
 
-rem [20260806] if(...)ブロックでこの区間全体を囲むと、途中のPowerShellコマンド文字列
-rem (エスケープ済み二重引用符や"Program Files (x86)"の丸括弧を含む)がcmd.exeの
-rem 括弧カウントを狂わせ、バッチ全体の解析が壊れる既知の落とし穴がある。
-rem そのためifブロックでの入れ子は使わず、goto :chrome_ready によるスキップで
-rem 同じ制御フローを実現している。
+rem [20260806] Do not wrap this section in an outer if(...) block: the
+rem PowerShell command text below contains escaped quotes and Program
+rem Files (x86) parentheses that confuse cmd.exe paren counting when
+rem nested. Use goto :chrome_ready instead to skip this section.
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "try { $c = New-Object System.Net.Sockets.TcpClient; $c.Connect('127.0.0.1', !DEBUG_PORT!); $c.Close(); exit 0 } catch { exit 1 }" >NUL 2>&1
 if !ERRORLEVEL! EQU 0 (
