@@ -23,10 +23,12 @@ EXCEL_PATH = r"C:\Users\nx023836\Documents\PythonScripts\Journal\journal_data.xl
 ENTRIES_SHEET = "Entries"
 TAGMASTER_SHEET = "TagMaster"
 TIMELOG_SHEET = "TimeLog"
+SUBITEM_SHEET = "SubItemMaster"
 
 ENTRIES_HEADER = ["日付", "タグ", "L", "K", "P", "T"]
 TAGMASTER_HEADER = ["タグ名", "色コード"]
-TIMELOG_HEADER = ["開始", "終了", "タグ"]
+TIMELOG_HEADER = ["開始", "終了", "タグ", "中項目"]
+SUBITEM_HEADER = ["タグ名", "中項目名", "表示順"]
 
 # 前回チェックポイントから長時間経過していた場合の安全弁（この時間で打ち切る）
 MAX_TIMELOG_GAP_HOURS = 2
@@ -36,6 +38,28 @@ DEFAULT_TAGS = [
     ("JP Site", "#2fa84f"),
     ("NPI", "#c2399e"),
     ("その他", "#e08830"),
+]
+
+# タグ選択と同時に「何をしていたか」を1タップで選べる中項目の既定値。
+# タグごとに5個以内（うち1つは自由記述の逃げ道）を目安に、SubItemMaster
+# シートをExcelで直接編集すれば自由に追加・変更できる
+OTHER_SUBITEM_LABEL = "Other"
+DEFAULT_SUBITEMS = [
+    ("R19", "メール返信", 1),
+    ("R19", "データ整理", 2),
+    ("R19", "会議", 3),
+    ("R19", OTHER_SUBITEM_LABEL, 4),
+    ("JP Site", "メール返信", 1),
+    ("JP Site", "データ整理", 2),
+    ("JP Site", "会議", 3),
+    ("JP Site", OTHER_SUBITEM_LABEL, 4),
+    ("NPI", "Caracal", 1),
+    ("NPI", "Wheeling", 2),
+    ("NPI", "GT", 3),
+    ("NPI", OTHER_SUBITEM_LABEL, 4),
+    # 「その他」タグ自体が既に受け皿のため、中項目は自由記述のみにしておく
+    # （細分化したい場合はSubItemMasterシートに行を追加すればよい）
+    ("その他", OTHER_SUBITEM_LABEL, 1),
 ]
 
 MAX_RETRIES = 3
@@ -67,6 +91,11 @@ def ensure_workbook_exists(path: str = EXCEL_PATH) -> None:
     ws_timelog = wb.create_sheet(TIMELOG_SHEET)
     ws_timelog.append(TIMELOG_HEADER)
 
+    ws_subitems = wb.create_sheet(SUBITEM_SHEET)
+    ws_subitems.append(SUBITEM_HEADER)
+    for tag_name, subitem_name, order in DEFAULT_SUBITEMS:
+        ws_subitems.append([tag_name, subitem_name, order])
+
     wb.save(path)
     print(f"✅ 新規ブックを作成しました: {path}")
 
@@ -80,6 +109,32 @@ def _ensure_timelog_sheet(wb) -> None:
         ws = wb.create_sheet(TIMELOG_SHEET)
         ws.append(TIMELOG_HEADER)
         print(f"🔧 既存ブックに'{TIMELOG_SHEET}'シートを追加しました。")
+
+
+def _ensure_timelog_subitem_column(wb) -> None:
+    """
+    TimeLogシートが旧形式（開始/終了/タグの3列）のままなら、
+    中項目列を追加する自己修復を行う。
+    """
+    ws = wb[TIMELOG_SHEET]
+    header = [cell.value for cell in ws[1]]
+    if len(header) == 3 and header[2] == "タグ":
+        ws.cell(row=1, column=4, value="中項目")
+        print(f"🔧 '{TIMELOG_SHEET}'シートに中項目列を追加しました。")
+
+
+def _ensure_subitem_sheet(wb) -> None:
+    """
+    SubItemMasterシートが無ければ、既定の中項目付きで作成する
+    （既存のjournal_data.xlsxには自動で追加されないため、書き込み前に
+    この関数で自己修復する）。
+    """
+    if SUBITEM_SHEET not in wb.sheetnames:
+        ws = wb.create_sheet(SUBITEM_SHEET)
+        ws.append(SUBITEM_HEADER)
+        for tag_name, subitem_name, order in DEFAULT_SUBITEMS:
+            ws.append([tag_name, subitem_name, order])
+        print(f"🔧 既存ブックに'{SUBITEM_SHEET}'シートを追加しました。")
 
 
 def _ensure_lkpt_columns(wb) -> None:
@@ -250,7 +305,7 @@ def peek_next_time_range(path: str = EXCEL_PATH, now: datetime = None) -> tuple:
     return _compute_time_range(wb[TIMELOG_SHEET], now)
 
 
-def record_check_in(tag: str, l: str, k: str, p: str, t: str,
+def record_check_in(tag: str, sub_item: str, l: str, k: str, p: str, t: str,
                      path: str = EXCEL_PATH, now: datetime = None) -> tuple:
     """
     タイムログのチェックインを記録する。
@@ -266,6 +321,7 @@ def record_check_in(tag: str, l: str, k: str, p: str, t: str,
 
     Args:
         tag: タグ名
+        sub_item: 中項目名（SubItemMasterの値、または自由記述。空文字列可）
         l: Learned（学び）1行メモ（空文字列可）
         k: Keep（継続すべき事）1行メモ（空文字列可）
         p: Problem（課題）1行メモ（空文字列可）
@@ -285,15 +341,17 @@ def record_check_in(tag: str, l: str, k: str, p: str, t: str,
     ensure_workbook_exists(path)
     wb = _load_with_retry(path)
     _ensure_timelog_sheet(wb)
+    _ensure_timelog_subitem_column(wb)
     _ensure_lkpt_columns(wb)
+    _ensure_subitem_sheet(wb)
     ws_timelog = wb[TIMELOG_SHEET]
 
     kind, start, end = _compute_time_range(ws_timelog, now)
     if kind == "anchor":
-        ws_timelog.append([now, now, tag])
+        ws_timelog.append([now, now, tag, sub_item])
         minutes = None
     else:
-        ws_timelog.append([start, end, tag])
+        ws_timelog.append([start, end, tag, sub_item])
         minutes = int((end - start).total_seconds() // 60)
 
     has_lkpt = bool(l or k or p or t)
@@ -311,7 +369,7 @@ def record_check_in(tag: str, l: str, k: str, p: str, t: str,
         else:
             print(
                 f"⏱️ 作業記録: [{start.strftime('%H:%M')}-{now.strftime('%H:%M')}] "
-                f"{tag} ({minutes}分)"
+                f"{tag} / {sub_item} ({minutes}分)"
             )
         if has_lkpt:
             print(f"📝 LKPTを記録しました → [{now.strftime('%Y-%m-%d %H:%M')}] [{tag}] "
@@ -359,6 +417,39 @@ def get_tag_master(path: str = EXCEL_PATH) -> list:
 
     print(f"🏷️ タグ一覧を取得しました（{len(tags)}件）")
     return tags
+
+
+def get_sub_item_master(path: str = EXCEL_PATH) -> dict:
+    """
+    SubItemMasterシートから、タグ別の中項目一覧を取得する（表示順でソート済み）。
+
+    読み取り専用の関数のため、SubItemMasterシートが無い旧形式のブックでも
+    書き込みは行わず、既定値をそのまま返すだけに留める（実際の自己修復・
+    永続化はrecord_check_in()が呼ばれた時に行われる）。
+
+    Returns:
+        dict[str, list[str]]: タグ名 -> 中項目名のリスト
+    """
+    ensure_workbook_exists(path)
+    wb = _load_with_retry(path)
+
+    if SUBITEM_SHEET not in wb.sheetnames:
+        rows = DEFAULT_SUBITEMS
+    else:
+        ws = wb[SUBITEM_SHEET]
+        rows = []
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if row[0] and row[1]:
+                order = row[2] if len(row) > 2 and row[2] is not None else 0
+                rows.append((row[0], row[1], order))
+        rows.sort(key=lambda r: (r[0], r[2]))
+
+    result = {}
+    for tag_name, subitem_name, _ in rows:
+        result.setdefault(tag_name, []).append(subitem_name)
+
+    print(f"📋 中項目マスタを取得しました（{len(rows)}件）")
+    return result
 
 
 def add_tag(tag_name: str, color_code: str, path: str = EXCEL_PATH) -> bool:
