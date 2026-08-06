@@ -90,118 +90,118 @@ rem ========================================
 echo. >> "%LOG_FILE%" 2>&1
 echo [1/8] Checking whether a debug Chrome is already running on port !DEBUG_PORT!... >> "%LOG_FILE%" 2>&1
 
-set "CHROME_ALREADY_RUNNING=0"
+rem [20260806] if(...)ブロックでこの区間全体を囲むと、途中のPowerShellコマンド文字列
+rem (エスケープ済み二重引用符や"Program Files (x86)"の丸括弧を含む)がcmd.exeの
+rem 括弧カウントを狂わせ、バッチ全体の解析が壊れる既知の落とし穴がある。
+rem そのためifブロックでの入れ子は使わず、goto :chrome_ready によるスキップで
+rem 同じ制御フローを実現している。
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "try { $c = New-Object System.Net.Sockets.TcpClient; $c.Connect('127.0.0.1', !DEBUG_PORT!); $c.Close(); exit 0 } catch { exit 1 }" >NUL 2>&1
 if !ERRORLEVEL! EQU 0 (
-    set "CHROME_ALREADY_RUNNING=1"
     echo Existing debug Chrome detected on port !DEBUG_PORT! - reusing it (no kill, no relaunch). >> "%LOG_FILE%" 2>&1
+    goto :chrome_ready
+)
+echo No debug Chrome detected on port !DEBUG_PORT! - will start a fresh one. >> "%LOG_FILE%" 2>&1
+
+rem ========================================
+rem Step 1b: Kill only target Chrome processes
+rem ========================================
+echo. >> "%LOG_FILE%" 2>&1
+echo [1b/8] Cleaning up target Chrome processes only... >> "%LOG_FILE%" 2>&1
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$targets = Get-CimInstance Win32_Process -Filter \"name = 'chrome.exe'\" | Where-Object { ($_.CommandLine -like '*%CHROME_PROFILE_NAME%*') -or ($_.CommandLine -like '*remote-debugging-port=%DEBUG_PORT%*') }; if ($targets) { $targets | ForEach-Object { Write-Output ('Stopping chrome PID=' + $_.ProcessId + ' CMD=' + $_.CommandLine); Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } } else { Write-Output 'No target Chrome process found.' }" >> "%LOG_FILE%" 2>&1
+
+timeout /t 2 /nobreak >NUL 2>&1
+
+rem ========================================
+rem Step 2: ChromeDriver cleanup
+rem ========================================
+echo. >> "%LOG_FILE%" 2>&1
+echo [2/8] Cleaning up potential driver processes... >> "%LOG_FILE%" 2>&1
+
+tasklist /FI "IMAGENAME eq chromedriver.exe" 2>NUL | find /I "chromedriver.exe" >NUL 2>&1
+if not errorlevel 1 (
+    echo ChromeDriver process found. Terminating... >> "%LOG_FILE%" 2>&1
+    taskkill /F /IM chromedriver.exe /T >> "%LOG_FILE%" 2>&1
+    timeout /t 1 /nobreak >NUL 2>&1
+    echo ChromeDriver processes terminated. >> "%LOG_FILE%" 2>&1
 ) else (
-    echo No debug Chrome detected on port !DEBUG_PORT! - will start a fresh one. >> "%LOG_FILE%" 2>&1
+    echo No ChromeDriver process found. >> "%LOG_FILE%" 2>&1
 )
 
-if "!CHROME_ALREADY_RUNNING!"=="0" (
+rem ========================================
+rem Step 3: Prepare Chrome profile and remove lock files
+rem ========================================
+echo. >> "%LOG_FILE%" 2>&1
+echo [3/8] Preparing Chrome debug profile... >> "%LOG_FILE%" 2>&1
 
-    rem ----------------------------------------
-    rem Step 1b: Kill only target Chrome processes
-    rem ----------------------------------------
-    echo. >> "%LOG_FILE%" 2>&1
-    echo [1b/8] Cleaning up target Chrome processes only... >> "%LOG_FILE%" 2>&1
-
-    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-      "$targets = Get-CimInstance Win32_Process -Filter \"name = 'chrome.exe'\" | Where-Object { ($_.CommandLine -like '*%CHROME_PROFILE_NAME%*') -or ($_.CommandLine -like '*remote-debugging-port=%DEBUG_PORT%*') }; if ($targets) { $targets | ForEach-Object { Write-Output ('Stopping chrome PID=' + $_.ProcessId + ' CMD=' + $_.CommandLine); Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } } else { Write-Output 'No target Chrome process found.' }" >> "%LOG_FILE%" 2>&1
-
-    timeout /t 2 /nobreak >NUL 2>&1
-
-    rem ----------------------------------------
-    rem Step 2: ChromeDriver cleanup
-    rem ----------------------------------------
-    echo. >> "%LOG_FILE%" 2>&1
-    echo [2/8] Cleaning up potential driver processes... >> "%LOG_FILE%" 2>&1
-
-    tasklist /FI "IMAGENAME eq chromedriver.exe" 2>NUL | find /I "chromedriver.exe" >NUL 2>&1
-    if not errorlevel 1 (
-        echo ChromeDriver process found. Terminating... >> "%LOG_FILE%" 2>&1
-        taskkill /F /IM chromedriver.exe /T >> "%LOG_FILE%" 2>&1
-        timeout /t 1 /nobreak >NUL 2>&1
-        echo ChromeDriver processes terminated. >> "%LOG_FILE%" 2>&1
-    ) else (
-        echo No ChromeDriver process found. >> "%LOG_FILE%" 2>&1
-    )
-
-    rem ----------------------------------------
-    rem Step 3: Prepare Chrome profile and remove lock files
-    rem ----------------------------------------
-    echo. >> "%LOG_FILE%" 2>&1
-    echo [3/8] Preparing Chrome debug profile... >> "%LOG_FILE%" 2>&1
-
-    if not exist "!CHROME_USER_DATA!" (
-        echo Directory not found: !CHROME_USER_DATA! >> "%LOG_FILE%" 2>&1
-        echo Creating directory... >> "%LOG_FILE%" 2>&1
-        mkdir "!CHROME_USER_DATA!" >> "%LOG_FILE%" 2>&1
-    ) else (
-        echo Directory found: !CHROME_USER_DATA! >> "%LOG_FILE%" 2>&1
-    )
-
-    if exist "!CHROME_USER_DATA!\SingletonLock" (
-        del /F /Q "!CHROME_USER_DATA!\SingletonLock" >NUL 2>&1
-        echo SingletonLock deleted. >> "%LOG_FILE%" 2>&1
-    )
-    if exist "!CHROME_USER_DATA!\SingletonSocket" (
-        del /F /Q "!CHROME_USER_DATA!\SingletonSocket" >NUL 2>&1
-        echo SingletonSocket deleted. >> "%LOG_FILE%" 2>&1
-    )
-    if exist "!CHROME_USER_DATA!\SingletonCookie" (
-        del /F /Q "!CHROME_USER_DATA!\SingletonCookie" >NUL 2>&1
-        echo SingletonCookie deleted. >> "%LOG_FILE%" 2>&1
-    )
-    if exist "!CHROME_USER_DATA!\lockfile" (
-        del /F /Q "!CHROME_USER_DATA!\lockfile" >NUL 2>&1
-        echo lockfile deleted. >> "%LOG_FILE%" 2>&1
-    )
-
-    echo Chrome profile preparation completed. >> "%LOG_FILE%" 2>&1
-    timeout /t 2 /nobreak >NUL 2>&1
-
-    rem ----------------------------------------
-    rem Step 4: Start Chrome with fixed debug port
-    rem ----------------------------------------
-    echo. >> "%LOG_FILE%" 2>&1
-    echo [4/8] Starting Chrome in debug mode... >> "%LOG_FILE%" 2>&1
-
-    set "CHROME_PATH="
-    if exist "C:\Program Files\Google\Chrome\Application\chrome.exe" (
-        set "CHROME_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe"
-    ) else if exist "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe" (
-        set "CHROME_PATH=C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
-    ) else (
-        echo ERROR: Chrome not found! >> "%LOG_FILE%" 2>&1
-        exit /b 1
-    )
-
-    echo Chrome path: !CHROME_PATH! >> "%LOG_FILE%" 2>&1
-    echo Starting Chrome with debug mode... >> "%LOG_FILE%" 2>&1
-
-    start "" "!CHROME_PATH!" ^
-      --remote-debugging-port=!DEBUG_PORT! ^
-      --user-data-dir="!CHROME_USER_DATA!" ^
-      --profile-directory=Default ^
-      --no-first-run ^
-      --no-default-browser-check ^
-      --disable-sync ^
-      --disable-blink-features=AutomationControlled ^
-      --disable-session-crashed-bubble ^
-      --disable-dev-shm-usage ^
-      --disable-gpu ^
-      --no-sandbox ^
-      --new-window "!INITIAL_URL!"
-
-    echo Chrome start command executed. >> "%LOG_FILE%" 2>&1
-    echo Waiting for initialization 8 seconds... >> "%LOG_FILE%" 2>&1
-    timeout /t 8 /nobreak >NUL 2>&1
-
-    echo Step 4 completed. >> "%LOG_FILE%" 2>&1
+if not exist "!CHROME_USER_DATA!" (
+    echo Directory not found: !CHROME_USER_DATA! >> "%LOG_FILE%" 2>&1
+    echo Creating directory... >> "%LOG_FILE%" 2>&1
+    mkdir "!CHROME_USER_DATA!" >> "%LOG_FILE%" 2>&1
+) else (
+    echo Directory found: !CHROME_USER_DATA! >> "%LOG_FILE%" 2>&1
 )
+
+if exist "!CHROME_USER_DATA!\SingletonLock" (
+    del /F /Q "!CHROME_USER_DATA!\SingletonLock" >NUL 2>&1
+    echo SingletonLock deleted. >> "%LOG_FILE%" 2>&1
+)
+if exist "!CHROME_USER_DATA!\SingletonSocket" (
+    del /F /Q "!CHROME_USER_DATA!\SingletonSocket" >NUL 2>&1
+    echo SingletonSocket deleted. >> "%LOG_FILE%" 2>&1
+)
+if exist "!CHROME_USER_DATA!\SingletonCookie" (
+    del /F /Q "!CHROME_USER_DATA!\SingletonCookie" >NUL 2>&1
+    echo SingletonCookie deleted. >> "%LOG_FILE%" 2>&1
+)
+if exist "!CHROME_USER_DATA!\lockfile" (
+    del /F /Q "!CHROME_USER_DATA!\lockfile" >NUL 2>&1
+    echo lockfile deleted. >> "%LOG_FILE%" 2>&1
+)
+
+echo Chrome profile preparation completed. >> "%LOG_FILE%" 2>&1
+timeout /t 2 /nobreak >NUL 2>&1
+
+rem ========================================
+rem Step 4: Start Chrome with fixed debug port
+rem ========================================
+echo. >> "%LOG_FILE%" 2>&1
+echo [4/8] Starting Chrome in debug mode... >> "%LOG_FILE%" 2>&1
+
+set "CHROME_PATH="
+if exist "C:\Program Files\Google\Chrome\Application\chrome.exe" set "CHROME_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe"
+if not defined CHROME_PATH if exist "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe" set "CHROME_PATH=C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
+if not defined CHROME_PATH (
+    echo ERROR: Chrome not found! >> "%LOG_FILE%" 2>&1
+    exit /b 1
+)
+
+echo Chrome path: !CHROME_PATH! >> "%LOG_FILE%" 2>&1
+echo Starting Chrome with debug mode... >> "%LOG_FILE%" 2>&1
+
+start "" "!CHROME_PATH!" ^
+  --remote-debugging-port=!DEBUG_PORT! ^
+  --user-data-dir="!CHROME_USER_DATA!" ^
+  --profile-directory=Default ^
+  --no-first-run ^
+  --no-default-browser-check ^
+  --disable-sync ^
+  --disable-blink-features=AutomationControlled ^
+  --disable-session-crashed-bubble ^
+  --disable-dev-shm-usage ^
+  --disable-gpu ^
+  --no-sandbox ^
+  --new-window "!INITIAL_URL!"
+
+echo Chrome start command executed. >> "%LOG_FILE%" 2>&1
+echo Waiting for initialization 8 seconds... >> "%LOG_FILE%" 2>&1
+timeout /t 8 /nobreak >NUL 2>&1
+
+echo Step 4 completed. >> "%LOG_FILE%" 2>&1
+
+:chrome_ready
 
 rem ========================================
 rem Step 5: Port check
