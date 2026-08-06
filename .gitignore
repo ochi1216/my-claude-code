@@ -1,2 +1,5 @@
 __pycache__/
 *.pyc
+
+# 実行時に生成される起動ログ（run_latest.pyが追記する）
+startup.log
