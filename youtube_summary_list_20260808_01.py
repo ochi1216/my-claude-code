@@ -2,7 +2,10 @@
 YouTube Summary Integrated System
 """
 # 定数定義
-VERSION = "20260801_03"
+# [20260808] 起動ログに出るバージョン。これまでファイル名のバージョンと連動して
+# おらず、どのファイルが実行中かログから判別できなかったため、以後はファイル名の
+# 日付_連番に合わせて更新する。
+VERSION = "20260808_01"
 
 # ============================================================================
 # SECTION 1: IMPORTS AND CONSTANTS
@@ -4670,34 +4673,44 @@ class GlaspEngine:
         protected_tabs = set([self.playlist_tab_handle]) if self.playlist_tab_handle else set()
         current_handles = self.driver.window_handles.copy()
 
-        # [20260807] プレイリストタブが見つからない場合、protected_tabsが空になり、
-        # 残っているwatch/geminiタブを全部閉じてウィンドウ数が0になる。すると
-        # Chromeプロセス自体が終了し、次のプレイリストの先頭で invalid session id
-        # となって例外ハンドラへ落ち、「ブラウザ強制リセット＋そのプレイリストを
-        # スキップ」が発生していた（実機ログでプレイリストS/B/Mが未処理のまま
-        # 飛ばされていることを確認）。
-        # 閉じる前に必ず生存用のタブを1つ確保して、Chromeが落ちないようにする。
-        if not protected_tabs:
+        # [20260808] クローズ対象の判定。越智さんの指示により、動画タブ
+        # (youtube.com/watch) は「夜間の自動実行が走ったかどうかを目視確認する
+        # ため」に残し、Geminiタブだけをクリーンアップ対象とする。
+        # 従来は動画タブもGeminiタブも両方閉じていたため、実行痕跡が残らなかった。
+        handles_to_close = []
+        kept_video_tabs = 0
+        for handle in current_handles:
+            if handle in protected_tabs:
+                continue
+            try:
+                self.driver.switch_to.window(handle)
+                url = self.driver.current_url
+            except Exception:
+                continue
+            if 'gemini.google.com' in url:
+                handles_to_close.append(handle)
+            elif 'youtube.com/watch' in url:
+                kept_video_tabs += 1
+
+        # [20260807] 全ウィンドウを閉じるとChromeプロセス自体が終了し、次の
+        # プレイリスト先頭で invalid session id となって例外ハンドラへ落ち、
+        # 「ブラウザ強制リセット＋そのプレイリストのスキップ」が発生していた
+        # （実機ログでプレイリストS/B/Mが未処理のまま飛ばされていた）。
+        # 生き残るタブが1つも無くなる場合は、閉じる前に空タブを確保する。
+        if handles_to_close and len(handles_to_close) >= len(current_handles):
             try:
                 self.browser.create_new_tab("about:blank")
-                survivor_handle = self.driver.current_window_handle
-                protected_tabs.add(survivor_handle)
-                log_message(
-                    "プレイリストタブが見つからないため、Chrome終了防止用の空タブを1つ作成しました",
-                    "INFO"
-                )
+                log_message("Chrome終了防止用の空タブを1つ作成しました", "INFO")
             except Exception as e:
                 log_message(f"⚠️ 生存用タブの作成に失敗しました: {e}", "WARNING")
 
         closed_count = 0
-        for handle in current_handles:
-            if handle not in protected_tabs:
-                try:
-                    self.driver.switch_to.window(handle)
-                    if 'youtube.com/watch' in self.driver.current_url or 'gemini.google.com' in self.driver.current_url:
-                        self.driver.close()
-                        closed_count += 1
-                except Exception: pass
+        for handle in handles_to_close:
+            try:
+                self.driver.switch_to.window(handle)
+                self.driver.close()
+                closed_count += 1
+            except Exception: pass
         self.youtube_tabs_pool = []
         # [20260807] クローズ直後はdriverの現在ウィンドウが閉じたタブを指したままになる。
         # プレイリストタブが無い場合も、必ず生き残っているタブへ切り替えておく。
@@ -4711,7 +4724,11 @@ class GlaspEngine:
                 log_message("⚠️ クリーンアップ後に残ったタブがありません", "WARNING")
         except Exception as e:
             log_message(f"⚠️ クリーンアップ後のタブ切り替えに失敗しました: {e}", "WARNING")
-        log_message(f"プレイリストタブクリーンアップ完了: YouTubeタブ {closed_count}個をクローズ", "SUCCESS")
+        log_message(
+            f"プレイリストタブクリーンアップ完了: Geminiタブ {closed_count}個をクローズ / "
+            f"動画タブ {kept_video_tabs}個は実行確認用に保持",
+            "SUCCESS"
+        )
 
     def _find_playlist_tab(self) -> Optional[str]:
         if not self.driver: return None
@@ -7830,9 +7847,13 @@ class IntegratedSummaryApp(tk.Tk):
                 try:
                     if config.mode == "glasp" and glasp_engine:
                         playlist_results = self.process_with_glasp(playlist_url, config)
-                        
-                        if playlist_index < len(playlist_names) - 1:
-                            glasp_engine.cleanup_playlist_tabs()
+
+                        # [20260808] 従来は「最後のプレイリスト以外」だけクリーンアップ
+                        # していたため、プレイリストを1個だけ実行した場合
+                        # (playlist_index=0, len=1 → 0 < 0 が偽) は一度も走らず、
+                        # Geminiタブが開きっぱなしになっていた。最後のプレイリストでも
+                        # 実行するようにする（動画タブは保持されるので実行痕跡は残る）。
+                        glasp_engine.cleanup_playlist_tabs()
                     else:
                         playlist_results = self.process_with_api(playlist_url, config)
                     
