@@ -1851,11 +1851,6 @@ class BrowserManager:
 
     def init_chrome_driver(self, debug_mode: bool = True, is_auto_mode: bool = False, force_new_session: bool = False) -> bool:
         """Chrome Driverの初期化（タイムアウトとリトライ、ポート競合対策付き）"""
-        from selenium import webdriver
-        from selenium.webdriver.chrome.service import Service
-        from selenium.common.exceptions import WebDriverException, InvalidSessionIdException
-        import threading
-
         profile_name = os.path.basename(self.user_data_dir)
         debug_port = config_manager.get('glasp.chrome_debug_port', 9222)
 
@@ -1880,9 +1875,29 @@ class BrowserManager:
             except Exception as e:
                 log_message(f"⚠️ ロックファイル削除失敗: {e}", "WARNING")
 
+        # [20260807] Chrome実行ファイルパスの解決。Youtube_List_Setup系・各バッチ
+        # ファイルと同じ2箇所を確認する。
+        def resolve_chrome_path():
+            candidates = [
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+            ]
+            for candidate in candidates:
+                if os.path.exists(candidate):
+                    return candidate
+            return candidates[0]
+
         max_retries = 3 if not is_auto_mode else 5
-        base_timeout = 20.0
-        
+
+        # [20260807] 従来はwebdriver.Chrome(options=...)に--user-data-dirを渡し、
+        # chromedriver自身にChromeプロセスを起動させていたが、この方式はChrome
+        # 151系で「unknown error: unable to discover open window in chrome」を
+        # 高確率で起こすことが実機ログで確認された。安定動作しているYoutube_List_Setup
+        # 系の登録コードは、常にChromeを素のsubprocess.Popenで別プロセスとして起動し、
+        # デバッグポートが応答するようになってからdebuggerAddressで後付けアタッチする
+        # 方式を使っており、この方式では同エラーが発生していない。
+        # ここでも同じ方式（起動はsubprocess、接続は_try_attach_existing_chrome()）に
+        # 統一する。
         for attempt in range(max_retries):
             try:
                 if self.driver:
@@ -1893,121 +1908,58 @@ class BrowserManager:
                     finally:
                         self.driver = None
                         self.main_window_handle = None
-                    
-                    if platform.system() == "Windows":
-                        kill_target_chrome_processes(profile_name)
-                    
-                    time.sleep(2)
-                    
-                cleanup_lock_files()
-                log_message(f"Chrome Driver初期化中 (Attempt {attempt + 1}/{max_retries})", "INFO")
-                
-                options = webdriver.ChromeOptions()
-                
-                # 自動モードの場合は確実に起動するために既存プロセスを終了させる
-                if is_auto_mode and platform.system() == "Windows":
-                    log_message("🤖 自動モード: クリーンな環境を作るためChromeを終了します", "WARNING")
+
+                if platform.system() != "Windows":
+                    raise Exception("この新規起動フォールバックはWindows専用です")
+
+                # 自動モード、またはリトライ時は既存プロセスを終了してから起動し直す
+                if is_auto_mode or attempt > 0:
+                    log_message("🤖 クリーンな環境を作るため対象Chromeを終了します", "WARNING")
                     kill_target_chrome_processes(profile_name)  # [20260407.01] 個別キル
                     time.sleep(1)
 
-                options.add_argument(f"--user-data-dir={self.user_data_dir}")
+                cleanup_lock_files()
+                log_message(f"Chrome Driver初期化中 (Attempt {attempt + 1}/{max_retries})", "INFO")
 
-                # [20260725.01] Googleの自動操作ブラウザ検知（サインイン拒否）対策
-                options.add_experimental_option("excludeSwitches", ["enable-automation"])
-                options.add_experimental_option("useAutomationExtension", False)
-                # [20260806] Youtube_List_Setup系スクリプトのバッチファイルには入っているが
-                # こちらには無かったフラグ。navigator.webdriver等の検知を抑える。
-                options.add_argument('--disable-blink-features=AutomationControlled')
-                # [20260806] Chromeをkill -9相当で強制終了した直後の起動時に出る
-                # 「ページを復元しますか？」クラッシュ復元ダイアログを抑制する。
-                # このダイアログはSeleniumのDOM操作では閉じられず、後続の自動操作を阻害しうる。
-                options.add_argument('--disable-session-crashed-bubble')
+                chrome_path = resolve_chrome_path()
+                chrome_args = [
+                    chrome_path,
+                    f"--remote-debugging-port={debug_port}",
+                    f"--user-data-dir={self.user_data_dir}",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    # [20260725.01] Googleの自動操作ブラウザ検知（サインイン拒否）対策
+                    "--disable-blink-features=AutomationControlled",
+                    # [20260806] Chromeをkill -9相当で強制終了した直後の起動時に出る
+                    # 「ページを復元しますか？」クラッシュ復元ダイアログを抑制する。
+                    "--disable-session-crashed-bubble",
+                    "--disable-dev-shm-usage",
+                    "--no-sandbox",
+                    "--disable-backgrounding-occluded-windows",
+                    "--disable-background-timer-throttling",
+                    "--disable-renderer-backgrounding",
+                ]
+                subprocess.Popen(chrome_args, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
 
-                options.add_argument('--no-sandbox')
-                options.add_argument('--disable-dev-shm-usage')
-                options.add_argument('--disable-gpu')
-                options.add_argument('--disable-features=Translate')
-                options.add_argument('--metrics-recording-only')
-                options.add_argument('--disable-default-apps')
-                options.add_argument('--no-first-run')
-                
-                # プロキシ設定の無効化（通信の安定化）
-                options.add_argument('--no-proxy-server')
-                
-                # [0210.19] ページロード戦略をeagerに変更し、DOMContentLoadedで制御を返す
-                options.page_load_strategy = 'eager'
-
-                # --- タイムアウト付きでWebDriverを起動するスレッド処理 ---
-                driver_result = [None]
-                driver_error = [None]
-                
-                def start_driver():
-                    try:
-                        # [20260807] Service()単体だとchromedriverの解決をSeleniumの
-                        # 自動解決（Selenium Manager）任せにしてしまい、インストール済み
-                        # Chromeとバージョンが合わず「unable to discover open window in
-                        # chrome」で失敗するケースがあった。Youtube_List_Setup系と同じく
-                        # ChromeDriverManager().install()で明示的に一致するドライバを取得する。
-                        service = Service(ChromeDriverManager().install())
-                        driver = webdriver.Chrome(service=service, options=options)
-                        # 初期タイムアウト設定
-                        driver.set_page_load_timeout(30.0)
-                        driver.implicitly_wait(5.0) # 暗黙の待機を短めに
-                        driver_result[0] = driver
-                    except Exception as e:
-                        driver_error[0] = e
-
-                init_thread = threading.Thread(target=start_driver)
-                init_thread.daemon = True
-                init_thread.start()
-                
-                # スレッドの終了を待つ (段階的なバックオフ付き)
-                current_timeout = base_timeout * (1.5 ** attempt)
-                init_thread.join(timeout=current_timeout)
-                
-                if init_thread.is_alive():
-                    log_message(f"WebDriver初期化がタイムアウト({current_timeout}秒)しました", "WARNING")
-                    # 強制終了処理（Windows）
-                    if platform.system() == "Windows":
-                        kill_target_chrome_processes(profile_name)  # [20260407.01] 個別キル
+                # デバッグポートが応答するまで待機
+                port_ready = False
+                for _ in range(15):
                     time.sleep(2)
-                    continue
-                    
-                if driver_error[0]:
-                    raise driver_error[0]
-                    
-                if not driver_result[0]:
-                    raise Exception("WebDriverのインスタンスが生成されませんでした")
+                    if check_chrome_debug_port(debug_port):
+                        port_ready = True
+                        break
 
-                candidate_driver = driver_result[0]
-                
-                try:
-                    handles = candidate_driver.window_handles
-                    if not handles:
-                        raise WebDriverException("Driver生存確認失敗: window_handles が空です")
-                    
-                    main_handle = candidate_driver.current_window_handle
-                    if not main_handle:
-                        raise WebDriverException("Driver生存確認失敗: current_window_handle が空です")
-                        
-                except (InvalidSessionIdException, WebDriverException) as alive_error:
-                    log_message(f"Driver生存確認失敗: {alive_error}", "WARNING")
-                    try:
-                        candidate_driver.quit()
-                    except:
-                        pass
-                    if platform.system() == "Windows":
-                        kill_target_chrome_processes(profile_name)
-                    time.sleep(3)
-                    continue
+                if not port_ready:
+                    raise Exception(f"Chrome起動後、デバッグポート{debug_port}が応答しませんでした")
 
-                self.driver = candidate_driver
-                self.main_window_handle = main_handle
-                
-                if debug_mode:
-                    log_message("Chrome Driver (Debug Profile) を起動しました（生存確認OK）", "SUCCESS")
-                
-                return True
+                time.sleep(2)  # 安定化待機
+
+                if self._try_attach_existing_chrome(debug_port):
+                    if debug_mode:
+                        log_message("Chrome Driver (Debug Profile) を起動しました（生存確認OK）", "SUCCESS")
+                    return True
+
+                raise Exception("新規起動したChromeへの接続(attach)に失敗しました")
 
             except Exception as e:
                 log_message(f"Chrome Driver初期化エラー (Attempt {attempt + 1}): {e}", "ERROR")
