@@ -4669,6 +4669,26 @@ class GlaspEngine:
         
         protected_tabs = set([self.playlist_tab_handle]) if self.playlist_tab_handle else set()
         current_handles = self.driver.window_handles.copy()
+
+        # [20260807] プレイリストタブが見つからない場合、protected_tabsが空になり、
+        # 残っているwatch/geminiタブを全部閉じてウィンドウ数が0になる。すると
+        # Chromeプロセス自体が終了し、次のプレイリストの先頭で invalid session id
+        # となって例外ハンドラへ落ち、「ブラウザ強制リセット＋そのプレイリストを
+        # スキップ」が発生していた（実機ログでプレイリストS/B/Mが未処理のまま
+        # 飛ばされていることを確認）。
+        # 閉じる前に必ず生存用のタブを1つ確保して、Chromeが落ちないようにする。
+        if not protected_tabs:
+            try:
+                self.browser.create_new_tab("about:blank")
+                survivor_handle = self.driver.current_window_handle
+                protected_tabs.add(survivor_handle)
+                log_message(
+                    "プレイリストタブが見つからないため、Chrome終了防止用の空タブを1つ作成しました",
+                    "INFO"
+                )
+            except Exception as e:
+                log_message(f"⚠️ 生存用タブの作成に失敗しました: {e}", "WARNING")
+
         closed_count = 0
         for handle in current_handles:
             if handle not in protected_tabs:
@@ -4679,9 +4699,18 @@ class GlaspEngine:
                         closed_count += 1
                 except Exception: pass
         self.youtube_tabs_pool = []
-        if self.playlist_tab_handle and self.playlist_tab_handle in self.driver.window_handles:
-            try: self.driver.switch_to.window(self.playlist_tab_handle)
-            except: pass
+        # [20260807] クローズ直後はdriverの現在ウィンドウが閉じたタブを指したままになる。
+        # プレイリストタブが無い場合も、必ず生き残っているタブへ切り替えておく。
+        try:
+            remaining = self.driver.window_handles
+            if self.playlist_tab_handle and self.playlist_tab_handle in remaining:
+                self.driver.switch_to.window(self.playlist_tab_handle)
+            elif remaining:
+                self.driver.switch_to.window(remaining[0])
+            else:
+                log_message("⚠️ クリーンアップ後に残ったタブがありません", "WARNING")
+        except Exception as e:
+            log_message(f"⚠️ クリーンアップ後のタブ切り替えに失敗しました: {e}", "WARNING")
         log_message(f"プレイリストタブクリーンアップ完了: YouTubeタブ {closed_count}個をクローズ", "SUCCESS")
 
     def _find_playlist_tab(self) -> Optional[str]:
