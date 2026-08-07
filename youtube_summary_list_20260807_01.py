@@ -3836,10 +3836,14 @@ class GlaspEngine:
                         document.querySelector('[aria-label*="停止"]') !== null ||
                         document.querySelector('[aria-busy="true"]') !== null;
 
+                    // [20260807] プロンプトが指示する終了マーカーは「■要約完了」。
+                    // 「■要約終了」しか見ていなかったため両方を許容する。
+                    const normBodyText = bodyText.replace(/[ 　]/g, '');
                     const rawSummaryPattern =
                         bodyText.includes('■ タイトル') ||
                         bodyText.includes('▪ タイトル') ||
-                        bodyText.includes('■要約終了');
+                        normBodyText.includes('■要約完了') ||
+                        normBodyText.includes('■要約終了');
 
                     const hasSummaryPattern =
                         rawSummaryPattern &&
@@ -5186,7 +5190,13 @@ class GlaspEngine:
                             : '';
 
                         const tail100 = summaryText.slice(-100);
-                        const hasEndTag = tail100.includes('■要約終了');
+                        // [20260807] プロンプト(_create_prompt)の出力形式例が指示している
+                        // 終了マーカーは「■要約完了」だが、ここでは「■要約終了」しか見て
+                        // いなかったため、Geminiが指示どおり出力しても永久に検出されず、
+                        // 毎回タイムアウト(60秒)まで待っていた。extract_section側の
+                        // end_markersと同じく、完了/終了の両方と全角スペース有無を許容する。
+                        const normTail100 = tail100.replace(/[ 　]/g, '');
+                        const hasEndTag = normTail100.includes('■要約完了') || normTail100.includes('■要約終了');
 
                         const hasConclusion = summaryText.includes('■ 結論');
                         const hasMainPoints = summaryText.includes('■ 主なポイント');
@@ -5320,7 +5330,9 @@ class GlaspEngine:
                         const transcriptEnd = fullText.indexOf('</Transcript>');
                         let summaryText = transcriptEnd > -1 ? fullText.substring(transcriptEnd + 13) : '';
                         const tail50 = summaryText.trim().slice(-50);
-                        const hasEndTag = tail50.includes('■要約終了');
+                        // [20260807] phase1と同じ理由で「■要約完了」も許容する。
+                        const normTail50 = tail50.replace(/[ 　]/g, '');
+                        const hasEndTag = normTail50.includes('■要約完了') || normTail50.includes('■要約終了');
                         const hasConclusion = summaryText.includes('■ 結論');
                         const hasMainPoints = summaryText.includes('■ 主なポイント');
                         const hasTitle = summaryText.includes('■ タイトル');
