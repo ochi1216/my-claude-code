@@ -1825,6 +1825,11 @@ class BrowserManager:
         try:
             options = webdriver.ChromeOptions()
             options.add_experimental_option("debuggerAddress", f"localhost:{debug_port}")
+            # [20260807] 旧・chromedriver起動方式では options.page_load_strategy='eager' を
+            # 指定していたが、アタッチ方式に統一した際に抜け落ちていた。'normal'のままだと
+            # driver.get()がGeminiのようなストリーミング系ページで完全ロードを待ち続け、
+            # 余計な待ちやタイムアウトの原因になるため復元する。
+            options.page_load_strategy = 'eager'
             # [20260807] 新規起動側と同じ理由でChromeDriverManager().install()を使い、
             # 接続先Chromeとバージョンが合ったchromedriverを明示的に取得する。
             service = Service(ChromeDriverManager().install())
@@ -1935,9 +1940,21 @@ class BrowserManager:
                     "--disable-session-crashed-bubble",
                     "--disable-dev-shm-usage",
                     "--no-sandbox",
+                    # [20260807] 旧・chromedriver起動方式では指定していたが、subprocess起動へ
+                    # 移行した際に抜け落ちていたフラグ群。翻訳バーや既定アプリのUIが混ざると
+                    # document.body.innerTextの末尾が変わり、要約終了タグの検出を妨げうる。
+                    "--disable-features=Translate",
+                    "--metrics-recording-only",
+                    "--disable-default-apps",
+                    "--no-proxy-server",
+                    # [20260807] 画面OFF・ウィンドウ非表示時でも描画を維持する（登録コードと同じ）。
                     "--disable-backgrounding-occluded-windows",
                     "--disable-background-timer-throttling",
                     "--disable-renderer-backgrounding",
+                    # [20260807] レイアウトを固定し、ウィンドウ幅によってGeminiのUI構成
+                    # （＝innerTextに含まれる文字列）が変わらないようにする。登録コードと同じ。
+                    "--window-size=1920,1080",
+                    "--force-device-scale-factor=1",
                 ]
                 subprocess.Popen(chrome_args, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
 
@@ -5137,6 +5154,10 @@ class GlaspEngine:
     def _wait_for_completion_phase1(self, timeout: float, start_time: float, video_index: int, batch_size: int) -> Dict:
         last_summary_length = 0
         input_error_count = 0
+        # [20260807] 「■要約終了が画面に出ているのに検出されない」事象の原因を特定するための
+        # 診断ログ。hasEndTagはsummaryTextの末尾100文字しか見ないため、要約の後ろに
+        # GeminiのUI文言などが付くと検出できない。実際の末尾を定期的に記録して確認する。
+        last_diag_time = 0.0
 
         log_message(
             f"SUMMARY_WAIT_START|phase=1|video_index={video_index}|batch_size={batch_size}|timeout={timeout}",
@@ -5210,6 +5231,19 @@ class GlaspEngine:
                     input_error_count = 0
 
                 current_length = page_status.get('summaryLength', 0)
+
+                # [20260807] 15秒ごとに末尾100文字を記録する診断ログ。
+                # ■要約終了が画面に出ているのに検出されない場合、この記録に
+                # 要約終了タグの後ろへ何が付いているかが残る。
+                if elapsed - last_diag_time >= 15.0:
+                    last_diag_time = elapsed
+                    log_message(
+                        f"SUMMARY_WAIT_DIAG|phase=1|video_index={video_index}|elapsed={elapsed:.1f}"
+                        f"|length={current_length}|sections={page_status.get('completedSections', 0)}"
+                        f"|animatedCount={page_status.get('animatedCount', -1)}"
+                        f"|tail100={page_status.get('tail100', '')}",
+                        "INFO"
+                    )
 
                 if page_status.get('hasEndTag', False):
                     log_message(
