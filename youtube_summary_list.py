@@ -412,6 +412,13 @@ DEFAULT_CONFIG = {
     },
 
     'glasp': {
+        # [20260808] 1巡目できらきらボタンを押すかどうか。
+        # False（既定）= 押さない。タブ切替・動画読込待ち・字幕確認・一時停止までは
+        # 行い、クリックだけしない。捨てるためのGeminiセッションを作らないので、
+        # Googleへのリクエストがほぼ半減する。
+        # True = 従来動作（1巡目もクリックし、開いたタブは捨てる）。
+        # 注意: PC上の config.json に設定が保存されている場合はそちらが優先される。
+        'round1_click': False,
         # === 基本設定（既存値維持）===
         'retry_count': 2,
         'retry_delay': 2,
@@ -1236,15 +1243,20 @@ class SummaryResult:
     glasp_handle_used: str = ""
     retry_count: int = 0
     skip_reason: str = ""
+    # [20260808] 失敗の種別。'no_transcript'（字幕が無く要約できない＝再実行しても
+    # 結果は変わらない）と 'failed'（Glasp起動失敗＝再実行で成功する見込みがある）を
+    # 区別する。従来はどちらも同じ「Glasp起動失敗」として記録されていた。
+    skip_kind: str = "failed"
     # === 新規追加: GeminiのチャットURL ===
     gemini_url: Optional[str] = None
-    
+
     def to_dict(self) -> Dict:
         return {
             'video': self.video_info.to_dict(),
             'success': self.success,
             'summary': self.formatted_summary if self.formatted_summary else self.summary,
             'error_message': self.error_message,
+            'skip_kind': self.skip_kind,
             'processing_time': self.processing_time,
             'model_used': self.model_used,
             'cost': self.cost,
@@ -3316,6 +3328,28 @@ class GlaspEngine:
         MAX_ROUND2_ATTEMPTS = 2  # 2巡目内でのきらきらボタンは動画1本あたり最大2回（1回目＋リトライ1回）
         GENERIC_FAIL_MSG = "Glasp起動失敗（Ctrl+X不発またはタイムアウト）"
 
+        # [20260808] 1巡目のきらきらクリックをやめ、「クリックせずに整えるだけ」にする。
+        #
+        # 経緯: 1巡目のクリックは、Glaspに文字起こしを読み込ませるための助走として
+        # 意図的に入れていたもので、その結果のGeminiタブは捨てていた。しかし実測で
+        # 1巡目64クリックに対し51枚のタブが実際に開いており（8割）、Googleへの
+        # リクエストを実質倍増させていた。同日中に確認画面(reCAPTCHA)が2回出ており、
+        # 無関係とは考えにくい。
+        #
+        # 一方、2巡目は52本中44本が1回目のクリックで成功している。助走として効いて
+        # いるのはクリックそのものではなく、タブを開いてから2巡目までに流れる時間の
+        # 可能性が高い。そこで1巡目からクリックだけを外し、タブ切替・動画読込待ち・
+        # 一時停止・字幕確認はそのまま残す。時間の経過は維持したまま、捨てるだけの
+        # Geminiセッションをゼロにする。
+        #
+        # config.json の glasp.round1_click を true にすれば従来動作に戻せる。
+        round1_prepare_only = not bool(config_manager.get('glasp.round1_click', False))
+        log_message(
+            f"GLASP_ROUND1_MODE|prepare_only={round1_prepare_only}|"
+            f"note={'クリックせず準備のみ' if round1_prepare_only else '従来どおりクリックする'}",
+            "INFO"
+        )
+
         slow_tab_threshold = config.tab_wait_timeout if config else 10.0
         input_mode = config.glasp_input_mode if config else 'js_click'
 
@@ -3378,16 +3412,29 @@ class GlaspEngine:
                 'skip_reason': None
             }
 
-        def _finalize_failure(item: Dict, error_msg: str):
+        def _finalize_failure(item: Dict, error_msg: str, skip_kind: str = 'failed'):
+            """
+            [20260808] 第2引数に必ずGENERIC_FAIL_MSGを渡していたため、字幕が無くて
+            要約できない動画も「Glasp起動失敗（Ctrl+X不発またはタイムアウト）」として
+            記録されていた。要約対象外の動画と、本当に失敗した動画が区別できず、
+            朝の一通でも同じ「失敗」として並んでいた。実際の理由を渡す。
+
+            skip_kind:
+              'no_transcript' … 字幕が無く、そもそも要約できない（再実行しても同じ）
+              'failed'        … Glaspの起動に失敗した（再実行で成功する見込みがある）
+            """
             nonlocal skipped_count
             _measure_video(item, False, None, error_msg)
-            log_message(f"動画{item['playlist_position']}: 処理失敗: {error_msg}", "WARNING")
+            level = "INFO" if skip_kind == 'no_transcript' else "WARNING"
+            label = "要約対象外" if skip_kind == 'no_transcript' else "処理失敗"
+            log_message(f"動画{item['playlist_position']}: {label}: {error_msg}", level)
             perf_log(
                 "glasp_video_total",
                 item['video_total_start'],
                 video_idx=item['playlist_position'],
                 video_id=item['video_id_for_log'][:12],
                 success=False,
+                skip_kind=skip_kind,
                 reason=str(error_msg)[:80]
             )
             results_by_index[item['index']] = {
@@ -3396,10 +3443,23 @@ class GlaspEngine:
                 'error': error_msg,
                 'skipped': True,
                 'skip_reason': error_msg,
+                'skip_kind': skip_kind,
                 'processing_time': time.time() - item['video_total_start'],
                 'retry_count': MAX_ROUND2_ATTEMPTS - 1
             }
             skipped_count += 1
+
+        def _classify_trigger_failure(trig: Dict) -> Tuple[str, str]:
+            """
+            _trigger_glasp_click の恒久的失敗から、記録すべき理由と種別を決める。
+            字幕データなしは「再実行しても結果が変わらない」ため、失敗とは区別する。
+            """
+            reason = str((trig or {}).get('error') or '').strip()
+            if not reason:
+                return GENERIC_FAIL_MSG, 'failed'
+            if '字幕' in reason:
+                return f"要約対象外: {reason}", 'no_transcript'
+            return reason, 'failed'
 
         try:
             if hasattr(self.driver.command_executor, '_client_config'):
@@ -3488,7 +3548,7 @@ class GlaspEngine:
                     trig = self._trigger_glasp_click(
                         item['tab_info'], item['playlist_position'], attempt_index=0,
                         timeout_threshold=slow_tab_threshold, input_mode=input_mode,
-                        round_label="1"
+                        round_label="1", prepare_only=round1_prepare_only
                     )
                 except Exception as e:
                     error_msg = str(e)
@@ -3501,7 +3561,8 @@ class GlaspEngine:
                 item['gate_r1'] = dict(getattr(self, '_last_transcript_measure', None) or {})
 
                 if not trig['ok'] and trig.get('permanent'):
-                    _finalize_failure(item, GENERIC_FAIL_MSG)
+                    fail_msg, fail_kind = _classify_trigger_failure(trig)
+                    _finalize_failure(item, fail_msg, fail_kind)
                     continue
 
                 # 送信できた場合・できなかった場合のいずれも、このクリック自体は
@@ -3528,6 +3589,7 @@ class GlaspEngine:
                 # 確認画面(reCAPTCHA)を誘発している負荷量の見積もりに使う。
                 measure_log(
                     "GLASP_MEASURE_STRAY|"
+                    f"round1_prepare_only={round1_prepare_only}|"
                     f"round1_attempted={len(pending)}|round1_candidates={len(candidate_items)}|"
                     f"stray_closed={stray_closed}"
                 )
@@ -3552,7 +3614,7 @@ class GlaspEngine:
                 if cancelled:
                     break
                 if check_user_input() == 'cancel':
-                    _finalize_failure(item, GENERIC_FAIL_MSG)
+                    _finalize_failure(item, "ユーザーによる中止", 'cancelled')
                     cancelled = True
                     break
 
@@ -3565,7 +3627,7 @@ class GlaspEngine:
                 except Exception:
                     pass
                 if not smart_sleep(0.5):
-                    _finalize_failure(item, GENERIC_FAIL_MSG)
+                    _finalize_failure(item, "ユーザーによる中止", 'cancelled')
                     cancelled = True
                     break
 
@@ -3588,7 +3650,8 @@ class GlaspEngine:
 
                     if not trig['ok']:
                         if trig.get('permanent'):
-                            _finalize_failure(item, GENERIC_FAIL_MSG)
+                            fail_msg, fail_kind = _classify_trigger_failure(trig)
+                            _finalize_failure(item, fail_msg, fail_kind)
                             finalized = True
                             break
                         continue
@@ -4352,7 +4415,7 @@ class GlaspEngine:
 
     def _trigger_glasp_click(self, tab_info: Dict, playlist_position: int, attempt_index: int,
                               timeout_threshold: float = 10.0, input_mode: str = 'js_click',
-                              round_label: str = "?") -> Dict:
+                              round_label: str = "?", prepare_only: bool = False) -> Dict:
         """
         [ADR-0001、S03再修正] Glasp起動の「クリック処理」のみを行う（タブ準備確認〜きらきらボタンクリックまで）。
         Geminiタブの検出待ちは行わない（検出は_wait_for_new_glasp_handle/_confirm_glasp_successへ分離）。
@@ -4572,6 +4635,14 @@ class GlaspEngine:
             )
             if not pause_success:
                 raise Exception("動画制御不能（pause失敗）")
+
+            # [20260808] prepare_only は1巡目用。ここまで（タブ切替・動画読込待ち・
+            # 字幕確認・一時停止）は行い、Glaspのきらきらボタンだけ押さずに戻る。
+            # 捨てるためのGeminiセッションを作らないようにするのが目的で、
+            # 2巡目までに時間を置くという1巡目本来の効果はそのまま残る。
+            if prepare_only:
+                _perf_step("trigger_total", click_phase_start, success=True, reason="prepare_only")
+                return {'ok': True, 'prepared': True, 'before_handles': set(), 'trigger_method': 'none'}
 
             before_handles = set(_safe_window_handles())
             step_start = time.time()
@@ -5519,7 +5590,10 @@ class GlaspEngine:
                         result = SummaryResult(
                             video_info=video_info, success=False, error_message=glasp_result.get('error', 'Unknown error'),
                             model_used="Glasp", processing_time=glasp_result.get('processing_time', 0), batch_number=batch_idx,
-                            retry_count=glasp_result.get('retry_count', 0), skip_reason=skip_reason_final
+                            retry_count=glasp_result.get('retry_count', 0), skip_reason=skip_reason_final,
+                            # [20260808] 字幕が無くて要約できない動画と、Glaspの起動に
+                            # 失敗した動画を、後段（HTML・朝の一通）で区別できるようにする。
+                            skip_kind=glasp_result.get('skip_kind', 'failed')
                         )
                     results.append(result)
                     state.current_progress += 1
