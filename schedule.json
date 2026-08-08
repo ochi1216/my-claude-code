@@ -13,6 +13,14 @@
     "安全: task_prefix で始まるタスクだけを管理する。他のタスクには一切触れない。",
     "     enabled を false にすると、次の --apply でそのタスクは削除される。"
   ],
+  "_comment_ignore": [
+    "ignore_tasks: --audit / --cleanup の対象から外すタスク名。",
+    "意図して残しているタスクが毎回警告されると、警告自体を見なくなるため。",
+    "ここに書いたものは棚卸しで『除外中』として静かに表示される。"
+  ],
+  "ignore_tasks": [
+    "Youtubemorning起動"
+  ],
   "task_prefix": "YouTubeSummary",
   "working_dir": "C:\\Users\\nx023836\\Documents\\PythonScripts\\Youtube",
   "interactive": true,

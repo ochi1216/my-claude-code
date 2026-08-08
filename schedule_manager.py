@@ -97,6 +97,9 @@ def load_config(path):
         'prefix': prefix,
         'working_dir': working_dir,
         'interactive': bool(cfg.get('interactive', True)),
+        # [20260808] 意図して残している管理外タスク。棚卸しの警告から外す。
+        # 残すと決めたものが毎回警告されると、警告そのものを見なくなるため。
+        'ignore_tasks': set(cfg.get('ignore_tasks') or []),
         'tasks': tasks,
     }
 
@@ -327,7 +330,7 @@ def cmd_audit(cfg):
         'run_morning_brief.bat',
     }
 
-    managed, others = [], []
+    managed, others, ignored = [], [], []
     for name in sorted(all_tasks):
         action = (all_tasks[name].get('action') or '').lower()
         if not action:
@@ -335,13 +338,24 @@ def cmd_audit(cfg):
         hit = (work and work in action) or any(n in action for n in names)
         if not hit:
             continue
-        (managed if name.startswith(cfg['prefix'] + '_') else others).append(name)
+        if name.startswith(cfg['prefix'] + '_'):
+            managed.append(name)
+        elif name in cfg['ignore_tasks']:
+            ignored.append(name)
+        else:
+            others.append(name)
 
     print(f"\n  [管理対象] {cfg['prefix']}_* : {len(managed)}件")
     for n in managed:
         info = all_tasks[n]
         print(f"    {n}")
         print(f"        次回実行: {info.get('next_run', '不明')}")
+
+    if ignored:
+        print(f"\n  [除外中] schedule.json の ignore_tasks で指定 : {len(ignored)}件")
+        for n in ignored:
+            print(f"    {n}")
+            print(f"        実行内容: {all_tasks[n].get('action', '不明')}")
 
     print(f"\n  [管理対象外] : {len(others)}件")
     if not others:
@@ -383,6 +397,8 @@ def find_unmanaged(cfg):
             continue
         action = (all_tasks[name].get('action') or '').lower()
         if not action:
+            continue
+        if name in cfg['ignore_tasks']:
             continue
         if (work and work in action) or any(n in action for n in names):
             found[name] = all_tasks[name]
