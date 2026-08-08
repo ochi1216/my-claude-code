@@ -823,8 +823,11 @@ URL: ${url}
         /* [20260805] 1行目=ファイル名、2行目=読み上げ位置、で固定表示するための子要素 */
         .header-position { display: block; font-size: 0.76rem; font-weight: 500; opacity: 0.85; margin-top: 1px; }
         .header-toggle-btn { position: absolute; right: 9px; top: 50%; transform: translateY(-50%); width: 28px; height: 24px; border-radius: 7px; background: #ffffff; color: #2b6cb0; display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,0.25); cursor: pointer; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; transition: background 0.15s, transform 0.15s;}
-        .header-toggle-btn svg { display: block; transition: transform 0.25s ease; }
-        .header-toggle-btn.closed svg { transform: rotate(180deg); }
+        /* [20260808] 矢印の向きが逆だった。SVGパス(M1 1L6 6L11 1)は下向きシェブロンで、
+           開いている状態で下向き・閉じている状態で上向きになっていた。
+           「開＝上向き（閉じられる方向を示す）／閉＝下向き（開ける方向を示す）」へ反転する。 */
+        .header-toggle-btn svg { display: block; transition: transform 0.25s ease; transform: rotate(180deg); }
+        .header-toggle-btn.closed svg { transform: rotate(0deg); }
         .header-toggle-btn:hover { background: #f3f7fc; }
         .header-toggle-btn:active { transform: translateY(-50%) scale(0.94); }
 
@@ -2046,14 +2049,15 @@ URL: ${url}
             }
 
             stopAutoMove(); // 追加: モード切替時に自動スクロールを強制停止
-            
-            if (isPlaying && currentFlatIndex !== -1 && !isAutoMoving) {
-                window.speechSynthesis.cancel();
-                if (playTimer) clearTimeout(playTimer);
-                
-                currentPart = flatQueue[currentFlatIndex].is_first ? 'file_intro' : 'title';
-                playTimer = setTimeout(() => { playCurrentPart(); }, 300);
-            }
+
+            // [20260808] 読み上げ中のモード変更で、読み上げを中断してタイトルから
+            // やり直す処理を廃止した。
+            // 従来は speechSynthesis.cancel() のうえ currentPart を title(または
+            // file_intro)へ戻していたため、タイトル読み上げ中に押すとタイトルが
+            // 読み直され、要旨の途中で押しても頭まで巻き戻っていた。
+            // handlePartEnd() は区切りごとに skipMode を都度参照しているので、
+            // ここで何もしなければ、今読んでいる部分はそのまま最後まで読まれ、
+            // 次の区切りから新しいモードが自然に適用される。
         }
 
 
@@ -2767,6 +2771,14 @@ URL: ${url}
             } 
             else if (currentPart === 'summary') {
                 if (skipMode === 0) {
+                    advanceAuto();
+                } else if (skipMode === 3) {
+                    // [20260808] タイトルのみモード。
+                    // モード変更で読み上げを中断しなくなったため、要旨の途中で
+                    // ▶▶▶ を押すとこの状態に到達しうる（従来はタイトルへ巻き戻って
+                    // いたため発生しなかった）。末尾のelseに落ちると主なポイントを
+                    // 読み始めてしまい、タイトルのみという指定に反するので、
+                    // 読み終えたら次のカードへ進む。
                     advanceAuto();
                 } else if (skipMode === 4) {
                     // skipMode 4: pointsではなくconclusionを読む。空なら次のカードへ
