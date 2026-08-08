@@ -46,10 +46,13 @@ DEFAULT_OUTPUT_DIR = r"C:\Users\nx023836\Nexperia\My Private - Documents\Summary
 DEFAULT_CONFIG_FILE = "config.json"
 DEFAULT_LOG_FILE = "youtube_summary.log"
 
-# 本体の ConfigManager.get_playlist_config() の既定値と同じ。
-# config.json に playlists 設定があればそちらを優先する。
-# [20260808] P+ と L が抜けており、出力があると「設定に無いプレイリスト」
-# として警告されてしまっていたため、本体の定義と揃えた。
+# 「あるべき姿」= 夜間バッチが実際に処理する分類。
+# run_youtube_summary_auto.bat が --playlists V S A B N M で起動するため、
+# この6つだけを期待値とする。
+# 本体の get_playlist_config() には P+ と L も定義されているが、
+# スケジュール実行の対象ではない。これらを期待値に入れると
+# 「出力がありません」という誤警報が毎回出てしまう（実機で確認）。
+# 手動実行でのみ使う分類は、下の KNOWN_MANUAL_PLAYLISTS 側で扱う。
 DEFAULT_PLAYLISTS = {
     "V":  "PL0UGJjoPnxKgZaJvHD5lGzOmGnEAdrn9H",
     "S":  "PL0UGJjoPnxKjT1ClcCwngoCDhModNIG3H",
@@ -57,9 +60,11 @@ DEFAULT_PLAYLISTS = {
     "B":  "PL0UGJjoPnxKhM3jXPMhNxONyvyZbClDuM",
     "N":  "PL0UGJjoPnxKj6T0VlBmyxVqVmBIK1h3G6",
     "M":  "PL0UGJjoPnxKhX6NN6K5GSPCzh9H8bK1F3",
-    "P+": "PL0UGJjoPnxKggbm7xrXUJQAExVbuca8-M",
-    "L":  "PL0UGJjoPnxKhEsnwZqNSkcUZow4Uklz5R",
 }
+
+# スケジュール対象外だが、手動実行などで出力されうる分類。
+# 台帳には表示するが「設定に無い」という警告は出さない。
+KNOWN_MANUAL_PLAYLISTS = {"P+", "L", "Short"}
 
 # [20260808] 同じフォルダに出力される別システム(Consolidated Manager/RSS)の
 # ファイルも summary_{名前}_{日時}.html の形式に一致してしまう。
@@ -436,8 +441,11 @@ def detect_anomalies(ledger, runs, log_file):
             "対象動画が無かったか、処理が丸ごとスキップされた可能性があります。"
         )
 
+    # [20260808] 手動実行で出うる分類（P+ / L / Short）まで警告すると、
+    # 毎回出る警告になって本当の異常が埋もれる。台帳には ❓ で表示されるため、
+    # 見落とすことはない。既知でないものだけを警告する。
     for row in ledger:
-        if row['status'] == 'unexpected':
+        if row['status'] == 'unexpected' and row['playlist'] not in KNOWN_MANUAL_PLAYLISTS:
             items.append(f"設定に無いプレイリスト {row['playlist']} の出力があります。")
 
     failed = [(r['playlist'], v) for r in runs for v in r['videos'] if not v['success']]

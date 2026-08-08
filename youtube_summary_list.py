@@ -6273,7 +6273,15 @@ class OutputGenerator:
             gemini_link = f'<a href="{gemini_url}" target="_blank" style="color:#8e44ad; font-weight:600; text-decoration:none; margin-left:20px;">Geminiで開く &#x2197;</a>' if gemini_url else ""
 
             if not result.success:
-                error_msg = getattr(result, 'error_msg', '要約失敗')
+                # [20260808] 属性名の誤りを修正。SummaryResultが持つのは
+                # error_message であり error_msg ではないため、getattrは常に
+                # 既定値の'要約失敗'を返し、実際の失敗理由は毎回捨てられていた。
+                # 1日30本以上の失敗が「要約失敗」の一語だけで記録されており、
+                # 原因の切り分けが不可能な状態だった。
+                # skip_reason にも理由が入る経路があるため、順に拾う。
+                error_msg = (getattr(result, 'error_message', '')
+                             or getattr(result, 'skip_reason', '')
+                             or '要約失敗（理由の記録なし）')
                 html += f"""
             <div id="{card_id}" class="video-card error-card" data-index="{i}">
                 <div class="video-title">{i}. {video.title}</div>
