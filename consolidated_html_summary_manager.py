@@ -953,6 +953,11 @@ URL: ${url}
            従来の配色に戻す。IDセレクタで.fab.skip-btn.tempの配色より優先させている。 */
         #btnSkipMode1Quick { background: rgba(160, 174, 192, 0.35); border-color: #718096; }
         #btnSkipMode1Quick.active-mode1 { background: rgba(255, 255, 255, 0.05); border-color: #3182ce; }
+        /* [20260808] mode3（タイトルのみ）専用クイックボタン。mode1と同じ配色ルール。
+           非アクティブ時はグレーで沈め、選択中のみ通常配色に戻して現在モードが
+           一目で分かるようにする。IDセレクタで .fab.skip-btn より優先させている。 */
+        #btnSkipMode3Quick { background: rgba(160, 174, 192, 0.35); border-color: #718096; font-size: 16px; }
+        #btnSkipMode3Quick.active-mode3 { background: rgba(255, 255, 255, 0.05); border-color: #3182ce; }
 
         /* Skip Mode Hover Buttons */
         .skip-hover-group { position: absolute; right: 62px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: row; gap: 5px; align-items: center; opacity: 0; pointer-events: none; transition: opacity 0.18s ease; white-space: nowrap; }
@@ -1056,6 +1061,7 @@ URL: ${url}
 
     <div class="fab-container">
         <div class="fab" id="btnPrev" title="前のカードへ">▲</div>
+        <div class="fab skip-btn" id="btnSkipMode3Quick" title="タイトルのみ読み上げ">▶▶▶</div>
         <div class="fab skip-btn" id="btnSkip" title="スキップモード切替">
             <span id="skipModeLabel">▶▶</span>
             <div class="skip-hover-group" id="skipHoverGroup"></div>
@@ -1104,10 +1110,11 @@ URL: ${url}
         let skipModeBeforeOneShot = null;
         // [20260804] mode1はFABに専用クイックボタン(btnSkipMode1Quick)を新設したため、
         // このホバー一覧からは外した（クイックボタンから直接changeSkipMode(1)を呼ぶ）。
+        // [20260808] mode3（タイトルのみ）も使用頻度が高いため、同様に専用クイック
+        // ボタン(btnSkipMode3Quick)を新設し、この一覧から外した。
         const skipModeOptions = [
             { mode: 0, label: '▶▶', className: '' },
             { mode: 2, label: '▶', className: 'fixed-skip' },
-            { mode: 3, label: '▶▶▶', className: '' },
             { mode: 4, label: '▶', className: 'conclusion-skip' }
         ];
 
@@ -1880,6 +1887,14 @@ URL: ${url}
                 changeSkipMode(1);
             });
 
+            // [20260808] Mode3（タイトルのみ）専用のクイックボタン。
+            // 使用頻度が高いのに、従来はホバー一覧を開いてから選ぶ2アクションが
+            // 必要だったため、ワンクリックで切り替えられるようにした。
+            // 読み上げロジックは既存のmode3をそのまま使い、新規実装はしていない。
+            document.getElementById('btnSkipMode3Quick').addEventListener('click', () => {
+                changeSkipMode(3);
+            });
+
 
             setupSkipBtn();
             setupSkipHoverBtns();
@@ -2066,6 +2081,10 @@ URL: ${url}
             // [20260805] mode1クイックボタン(▶)の非アクティブ/アクティブ配色切替
             const quickBtn = document.getElementById('btnSkipMode1Quick');
             if (quickBtn) quickBtn.classList.toggle('active-mode1', skipMode === 1);
+
+            // [20260808] mode3クイックボタン(▶▶▶)も同様に切り替える
+            const quickBtn3 = document.getElementById('btnSkipMode3Quick');
+            if (quickBtn3) quickBtn3.classList.toggle('active-mode3', skipMode === 3);
         }
     
         function applyAutoSkipMode() {
