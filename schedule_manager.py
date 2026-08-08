@@ -29,6 +29,9 @@ Schedule Manager - 夜間バッチのスケジュールをコードから管理�
     # 管理下のタスクをすべて削除
     python schedule_manager.py --remove
 
+    # このフォルダのバッチを叩く管理外タスクを洗い出す（二重実行の検出）
+    python schedule_manager.py --audit
+
 バージョンはファイル名ではなくGitで管理する。
 """
 
@@ -145,11 +148,11 @@ def run_schtasks(args, dry_run=False, check=True):
     return proc.returncode, out, err
 
 
-def query_managed_tasks(prefix, dry_run=False):
-    """現在登録されている、管理対象タスクの一覧を取得する。
+def query_all_tasks(dry_run=False):
+    """登録されている全タスクを取得する。
 
     schtasks /Query の出力を解析する。ロケールによって見出しが
-    変わるため、タスク名だけは英日どちらの表記でも拾えるようにする。
+    変わるため、英日どちらの表記でも拾えるようにする。
     """
     if dry_run:
         return {}
@@ -186,7 +189,12 @@ def query_managed_tasks(prefix, dry_run=False):
                 current['state'] = value
     if current_name:
         tasks[current_name] = current
+    return tasks
 
+
+def query_managed_tasks(prefix, dry_run=False):
+    """管理対象（task_prefix で始まる）タスクだけを返す。"""
+    tasks = query_all_tasks(dry_run)
     return {k: v for k, v in tasks.items() if k.startswith(prefix + '_')}
 
 
@@ -258,6 +266,68 @@ def cmd_list(cfg):
             print(f"  ! Windows側にのみ存在: {o}  (--apply で削除されます)")
         for m in sorted(missing):
             print(f"  ! 未登録: {m}  (--apply で登録されます)")
+    return 0
+
+
+def cmd_audit(cfg):
+    """このプロジェクトのバッチを叩いている、管理外のタスクを洗い出す。
+
+    [20260808] 手動でタスクスケジューラに登録した古いタスクが残っていると、
+    同じ処理が二重に走る。--apply は管理対象プレフィックスのタスクしか
+    触らないため、古い登録は自動では消えない。
+    読み取り専用で、削除は行わない（削除コマンドを提示するだけ）。
+    """
+    print("--- このフォルダのバッチを実行しているタスクの棚卸し ---")
+    all_tasks = query_all_tasks()
+    if not all_tasks:
+        print("  タスクを取得できませんでした。")
+        return 1
+
+    # 照合に使う手掛かり: 作業フォルダと、定義済みバッチのファイル名
+    work = (cfg['working_dir'] or '').lower()
+    names = {os.path.basename(t['command']).lower() for t in cfg['tasks']}
+    # 連鎖バッチが呼ぶ個別バッチも対象に含める（古い登録はこちらのはず）
+    names |= {
+        'run_youtube_channel_remove_auto.bat',
+        'run_youtube_list_auto_setup.bat',
+        'run_youtube_summary_auto.bat',
+        'run_youtube_all_tasks.bat',
+        'run_morning_brief.bat',
+    }
+
+    managed, others = [], []
+    for name in sorted(all_tasks):
+        action = (all_tasks[name].get('action') or '').lower()
+        if not action:
+            continue
+        hit = (work and work in action) or any(n in action for n in names)
+        if not hit:
+            continue
+        (managed if name.startswith(cfg['prefix'] + '_') else others).append(name)
+
+    print(f"\n  [管理対象] {cfg['prefix']}_* : {len(managed)}件")
+    for n in managed:
+        info = all_tasks[n]
+        print(f"    {n}")
+        print(f"        次回実行: {info.get('next_run', '不明')}")
+
+    print(f"\n  [管理対象外] : {len(others)}件")
+    if not others:
+        print("    なし。二重実行の心配はありません。")
+        return 0
+
+    print("    以下は schedule_manager の管理外です。")
+    print("    同じ処理を実行している場合、二重に走ります。")
+    for n in others:
+        info = all_tasks[n]
+        print(f"    {n}")
+        print(f"        次回実行: {info.get('next_run', '不明')}")
+        print(f"        実行内容: {info.get('action', '不明')}")
+
+    print("\n  不要であれば、次のコマンドで削除できます:")
+    for n in others:
+        print(f'    schtasks /Delete /TN "{n}" /F')
+    print("\n  ※ 内容をご確認のうえ実行してください。ここでは削除しません。")
     return 0
 
 
@@ -342,6 +412,8 @@ def main():
     group.add_argument('--list', action='store_true', help='現在の登録状況を表示する')
     group.add_argument('--apply', action='store_true', help='schedule.json を反映する')
     group.add_argument('--remove', action='store_true', help='管理下のタスクを削除する')
+    group.add_argument('--audit', action='store_true',
+                       help='このフォルダのバッチを叩く管理外タスクを洗い出す（読み取り専用）')
     args = parser.parse_args()
 
     if sys.platform != 'win32' and not args.dry_run:
@@ -359,6 +431,8 @@ def main():
         return cmd_apply(cfg, args.dry_run)
     if args.remove:
         return cmd_remove(cfg, args.dry_run)
+    if args.audit:
+        return cmd_audit(cfg)
     return cmd_list(cfg)
 
 
