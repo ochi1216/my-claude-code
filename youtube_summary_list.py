@@ -106,6 +106,40 @@ OUTPUT_DIR = r"C:\Users\nx023836\Nexperia\My Private - Documents\Summary"
 # OUTPUT_DIR.mkdir(exist_ok=True)
 RATE_LIMIT_STATE_FILE = "rate_limit_state.json"
 
+# [20260808] Googleの確認画面（BOT判定）で待機に入ったことを、後続の定時実行へ
+# 伝えるためのロックファイル。待機中は02:00/05:00のチェーンを丸ごと空振りさせる
+# （Step1のプレイリスト削除が先に走ると、未要約の動画が消えるおそれがあるため、
+# 要約だけでなくチェーン全体を止める必要がある）。
+SUSPEND_LOCK_FILE = "glasp_suspended.lock"
+# 待機の打ち切り時刻（翌朝この時刻を過ぎたら諦めて正常終了する）
+SUSPEND_DEADLINE_HOUR = 7
+# ただし待機は最長でもこの時間まで。夜間の検知を想定した仕組みなので、
+# 日中に検知したときに「翌朝7時まで24時間待つ」ことがないよう頭を押さえる。
+MAX_SUSPEND_HOURS = 11
+# 確認画面が解除されたかを見に行く間隔（秒）。解除の検知は、残しておいた
+# 確認画面タブのURLが変わったかを読むだけなので、Googleへの追加通信は発生しない。
+SUSPEND_POLL_INTERVAL = 30.0
+
+
+def is_challenge_url(url: str) -> bool:
+    """
+    GoogleがBOT判定時に表示する確認画面のURLかどうかを、ページ本文に依らず判定する。
+
+    実機ログ（20260808）では、Geminiへの遷移が
+        https://www.google.com/sorry/index?continue=https://gemini.google.com/...
+    に差し替えられていた。本文キーワードによる判定は、ページ文言が想定と違うと
+    すり抜ける（実際にすり抜けて、確認画面が「ただのエラー」として扱われ、
+    54回にわたり静かにリトライされ続けた）。URLは文言に左右されないため、
+    こちらを一次判定とする。
+
+    continue= パラメータに元のGemini URLが入るため、クエリ部分は見ずに
+    スキーム＋ホスト＋パスだけで判定する。
+    """
+    if not url:
+        return False
+    base = str(url).split('?', 1)[0].lower()
+    return '/sorry/' in base or '/recaptcha/' in base
+
 
 def switch_gemini_to_fast_mode(driver):
     """
@@ -3084,6 +3118,161 @@ class GlaspEngine:
 
         return closed_count
 
+    def _write_suspend_lock(self, deadline_ts: float, reason: str) -> None:
+        """待機中であることを、後続の定時実行へ伝えるロックファイルを書く。"""
+        try:
+            payload = {
+                'pid': _os.getpid(),
+                'reason': reason,
+                'suspended_at': _datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'expires_at': deadline_ts,
+                'expires_at_text': _datetime.fromtimestamp(deadline_ts).strftime('%Y-%m-%d %H:%M:%S'),
+            }
+            with open(SUSPEND_LOCK_FILE, 'w', encoding='utf-8') as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            log_message(f"SUSPEND_LOCK_WRITTEN|file={SUSPEND_LOCK_FILE}|expires={payload['expires_at_text']}", "INFO")
+        except Exception as e:
+            log_message(f"SUSPEND_LOCK_WRITE_ERROR|error={e}", "WARNING")
+
+    def _clear_suspend_lock(self) -> None:
+        """待機の終了時にロックファイルを必ず消す。"""
+        try:
+            if _os.path.exists(SUSPEND_LOCK_FILE):
+                _os.remove(SUSPEND_LOCK_FILE)
+                log_message("SUSPEND_LOCK_CLEARED", "INFO")
+        except Exception as e:
+            log_message(f"SUSPEND_LOCK_CLEAR_ERROR|error={e}", "WARNING")
+
+    def _suspend_until_challenge_cleared(self, protected_handles: set) -> bool:
+        """
+        Googleの確認画面を検知したとき、処理を止めて人が解除するのを待つ。
+
+        確認画面を突破する処理は一切行わない。解除は越智さんが手で行う前提であり、
+        ここでやるのは次の3つだけである。
+          1. これ以上Glaspを叩かない（叩き続けると状況が悪化するだけ）
+          2. 溜まったタブを片付け、確認画面のタブを1枚だけ画面に残す
+             （朝いちばんに目に入るようにするため）
+          3. その1枚のURLが変わるのを待つ。解除するとGoogleが continue= 先の
+             Geminiへ遷移させるので、URLを読むだけで解除が分かる。
+             Googleへの追加リクエストは発生しない。
+
+        戻り値: True=解除を確認した（処理を続行してよい） / False=期限切れ
+        """
+        now = time.time()
+        deadline_dt = _datetime.fromtimestamp(now).replace(
+            hour=SUSPEND_DEADLINE_HOUR, minute=0, second=0, microsecond=0
+        )
+        if deadline_dt.timestamp() <= now:
+            deadline_dt = deadline_dt + timedelta(days=1)
+        deadline_ts = min(deadline_dt.timestamp(), now + MAX_SUSPEND_HOURS * 3600)
+        deadline_dt = _datetime.fromtimestamp(deadline_ts)
+
+        log_message("=" * 60, "ERROR")
+        log_message("🛑 Googleの確認画面（reCAPTCHA等）を検知しました。", "ERROR")
+        log_message("   自動での突破は行いません。処理を中断して待機します。", "ERROR")
+        log_message(f"   Chromeに確認画面のタブを1枚残します。手動で解除してください。", "ERROR")
+        log_message(f"   解除を確認しだい、中断した動画から自動で再開します。", "ERROR")
+        log_message(f"   待機の期限: {deadline_dt.strftime('%Y-%m-%d %H:%M:%S')}", "ERROR")
+        log_message("=" * 60, "ERROR")
+        measure_log(f"GLASP_MEASURE_SUSPEND|event=start|deadline={deadline_dt.strftime('%Y-%m-%d %H:%M:%S')}")
+
+        # --- 確認画面タブを1枚だけ残し、他の余計なタブは閉じる ---
+        sensor_handle = None
+        try:
+            for handle in list(self.driver.window_handles):
+                if handle in protected_handles:
+                    continue
+                try:
+                    self.driver.switch_to.window(handle)
+                    url = self.driver.current_url or ""
+                except Exception:
+                    continue
+                if is_challenge_url(url) and sensor_handle is None:
+                    sensor_handle = handle
+                    continue
+                if "youtube.com/watch" not in url.lower():
+                    try:
+                        self.driver.close()
+                    except Exception:
+                        pass
+        except Exception as e:
+            log_message(f"SUSPEND_TAB_TIDY_ERROR|error={e}", "WARNING")
+
+        if sensor_handle:
+            try:
+                self.driver.switch_to.window(sensor_handle)
+            except Exception:
+                sensor_handle = None
+        log_message(f"SUSPEND_SENSOR_TAB|handle={str(sensor_handle)[:8] if sensor_handle else 'none'}", "INFO")
+
+        self._write_suspend_lock(deadline_ts, "google_challenge")
+
+        try:
+            while time.time() < deadline_ts:
+                if check_user_input() == 'cancel':
+                    log_message("待機中にユーザーによる中止を検知しました", "WARNING")
+                    measure_log("GLASP_MEASURE_SUSPEND|event=cancelled")
+                    return False
+
+                if not smart_sleep(SUSPEND_POLL_INTERVAL):
+                    if state.cancel_flag:
+                        measure_log("GLASP_MEASURE_SUSPEND|event=cancelled")
+                        return False
+                    # 待機中のスキップ操作は、再開後の処理へ持ち越さない
+                    state.skip_flag = False
+
+                current_url = None
+                try:
+                    handles = self.driver.window_handles
+                    if sensor_handle and sensor_handle in handles:
+                        self.driver.switch_to.window(sensor_handle)
+                        current_url = self.driver.current_url or ""
+                    else:
+                        # 監視用タブが閉じられていた場合のみ、こちらから1回だけ
+                        # Geminiを開いて状態を確かめ直す（これが唯一の追加通信）。
+                        self.driver.switch_to.new_window('tab')
+                        sensor_handle = self.driver.current_window_handle
+                        self.driver.get("https://gemini.google.com/app")
+                        current_url = self.driver.current_url or ""
+                        log_message(f"SUSPEND_SENSOR_TAB_REOPENED|handle={str(sensor_handle)[:8]}", "INFO")
+                except Exception as e:
+                    log_message(f"SUSPEND_POLL_ERROR|error={type(e).__name__}:{str(e)[:120]}", "WARNING")
+                    continue
+
+                if current_url and not is_challenge_url(current_url):
+                    remaining = int((deadline_ts - time.time()) / 60)
+                    log_message("✅ 確認画面の解除を確認しました。処理を再開します。", "SUCCESS")
+                    log_message(f"SUSPEND_CLEARED|url={current_url[:120]}|remaining_min={remaining}", "INFO")
+                    measure_log(f"GLASP_MEASURE_SUSPEND|event=cleared|url={current_url[:80]}")
+                    try:
+                        if sensor_handle and sensor_handle in self.driver.window_handles:
+                            self.driver.switch_to.window(sensor_handle)
+                            self.driver.close()
+                    except Exception:
+                        pass
+                    # 監視用タブを閉じた直後は、どのタブも選択されていない状態に
+                    # なりうるため、生存しているタブへ明示的に戻しておく。
+                    try:
+                        alive = self.driver.window_handles
+                        main_handle = getattr(self, 'main_window_handle', None)
+                        if not main_handle or main_handle not in alive:
+                            main_handle = next((h for h in protected_handles if h in alive), None)
+                            if not main_handle and alive:
+                                main_handle = alive[0]
+                            if main_handle:
+                                self.main_window_handle = main_handle
+                        if main_handle:
+                            self.driver.switch_to.window(main_handle)
+                    except Exception as e:
+                        log_message(f"SUSPEND_RESTORE_WINDOW_ERROR|error={e}", "WARNING")
+                    return True
+
+            log_message("⏰ 待機の期限に達しました。今回の実行は終了します。", "WARNING")
+            measure_log("GLASP_MEASURE_SUSPEND|event=deadline")
+            return False
+        finally:
+            self._clear_suspend_lock()
+
     def _batch_send_ctrl_x(self, video_tabs: List[Dict], config: ProcessConfig = None) -> List[Dict]:
         """
         [ADR-0001、S03五訂] Glasp起動処理を2ラウンド構成で実行する。
@@ -3417,6 +3606,15 @@ class GlaspEngine:
                         )
                     except Exception as e:
                         error_msg = str(e)
+                        # [20260808] 確認画面は「中止」ではなく「待機」で扱う。
+                        # 人が解除するまで止まり、解除を確認したら同じ動画から続行する。
+                        # 解除されないまま期限が来た場合だけ、従来どおり中止する。
+                        if "CHALLENGE_DETECTED" in error_msg:
+                            if self._suspend_until_challenge_cleared(
+                                protected_handles=video_tab_handles | claimed_handles
+                            ):
+                                continue
+                            raise Exception(error_msg)
                         if "FATAL" in error_msg:
                             raise Exception(error_msg)
                         conf = {'success': False}
@@ -4068,7 +4266,11 @@ class GlaspEngine:
                         kicked: kicked,
                         kickMethod: kickMethod,
                         bodyLength: bodyText.length,
-                        inputLength: inputText.length
+                        inputLength: inputText.length,
+                        // [20260808] 判定が外れたときに「そのページに何が書いてあったか」を
+                        // 追えるようにする。20260808はこれが無かったため、確認画面が
+                        // エラー扱いされた理由を後から特定できなかった。
+                        bodyTextSample: bodyText.slice(0, 200).replace(/\\s+/g, ' ')
                     };
                 """)
                 perf_log("quick_check_dom_probe", dom_probe_start, iteration=iteration_index)
@@ -4084,6 +4286,17 @@ class GlaspEngine:
                     )
 
                 if check_result['hasError']:
+                    # [20260808] ここで静かにFalseを返していたため、確認画面が
+                    # 「ただのエラー」として処理され、原因が分からないまま
+                    # リトライが繰り返された。何を見てエラーと判断したのかを残す。
+                    log_message(
+                        "QUICK_SUCCESS_ERROR_EXIT|"
+                        f"bodyLength={check_result.get('bodyLength', 0)}|"
+                        f"inputLength={check_result.get('inputLength', 0)}|"
+                        f"hasChallenge={check_result.get('hasChallenge')}|"
+                        f"body='{str(check_result.get('bodyTextSample', ''))[:200]}'",
+                        "WARNING"
+                    )
                     return False
 
                 if (
@@ -4679,6 +4892,11 @@ class GlaspEngine:
             try:
                 current_url = self.driver.current_url or ""
                 current_url_lower = current_url.lower()
+                # [20260808] "google" を含むだけで通していたため、確認画面
+                # （www.google.com/sorry/...）も正常なGeminiタブとして扱われ、
+                # 3秒×54回を無駄に待っていた。確認画面は明示的に弾く。
+                if is_challenge_url(current_url):
+                    return False, "challenge_page"
                 url_ok = ("gemini" in current_url_lower) or ("google" in current_url_lower)
                 if not url_ok:
                     return False, "url_not_ready"
@@ -4817,6 +5035,26 @@ class GlaspEngine:
         except Exception as e:
             log_message(f"GLASP_CONFIRM_DIAG|stage=switch_error|video_idx={playlist_position}|handle={str(glasp_handle)[:8]}|error={type(e).__name__}:{str(e)[:120]}", "WARNING")
             return {'success': False}
+
+        # [20260808] 確認画面の一次判定はURLで行う。
+        # ここより先（_fast_glasp_ready_check / _quick_success_check）はページ本文の
+        # 文言に依存した判定であり、20260808の実機では文言が想定と異なったため
+        # すり抜けて「ただのエラー」として54回リトライされ続けた。URLは文言に
+        # 左右されないので、本文を読む前に確定させる。
+        try:
+            confirm_url = self.driver.current_url or ""
+        except Exception:
+            confirm_url = ""
+        if is_challenge_url(confirm_url):
+            log_message(
+                f"CHALLENGE_URL_DETECTED|video_idx={playlist_position}|handle={str(glasp_handle)[:8]}|url={confirm_url[:160]}",
+                "ERROR"
+            )
+            measure_log(f"GLASP_MEASURE_CHALLENGE|video_idx={playlist_position}|url={confirm_url[:120]}")
+            raise Exception(
+                "FATAL: CHALLENGE_DETECTED: Googleの確認画面（reCAPTCHA等）が"
+                "表示されました。自動での続行は行いません。"
+            )
 
         step_start = time.time()
         fast_success, fast_reason = _fast_glasp_ready_check()

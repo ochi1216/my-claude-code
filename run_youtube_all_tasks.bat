@@ -24,6 +24,19 @@ rem ========================================
 
 cd /d "%~dp0"
 
+rem ========================================
+rem Suspend check
+rem A previous run may be paused, waiting for a human to clear Google's
+rem challenge page. While it waits, this whole chain must do nothing:
+rem Step 1 removes videos from the playlists, and running it before the
+rem summaries are finished would drop videos that were never summarized.
+rem Exit code 1 means suspended. Any other code means the check itself
+rem could not run, in which case we deliberately continue as usual.
+rem ========================================
+python check_suspend_lock.py
+set "LOCKRC=!ERRORLEVEL!"
+if "!LOCKRC!"=="1" goto :suspended
+
 set "RC1=0"
 set "RC2=0"
 set "RC3=0"
@@ -88,5 +101,13 @@ rem must not block on user input.
 if /I not "%~1"=="auto" pause
 
 exit /b !EXIT_CODE!
+
+:suspended
+echo =========================================================
+echo SKIPPED: 前回の実行が確認画面の解除待ちで停止中です。
+echo このチェーンは何もせずに終了します。
+echo =========================================================
+if /I not "%~1"=="auto" pause
+exit /b 0
 
 endlocal
