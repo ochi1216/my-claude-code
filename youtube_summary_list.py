@@ -7969,15 +7969,31 @@ class IntegratedSummaryApp(tk.Tk):
                     
                 except Exception as e:
                     self.log_to_ui(f"プレイリスト {playlist_name} 処理エラー: {e}", "ERROR")
-                    
+
                     if playlist_results:
                         self.log_to_ui("途中経過の保存を試みます...", "WARNING")
                         self._save_playlist_results(playlist_results, playlist_name, config)
                         all_results.extend(playlist_results)
                         state.playlist_progress[playlist_name] = 'completed_with_errors'
-                    
+
                     state.playlist_progress[playlist_name] = 'failed'
-                    
+
+                    # [20260808] 確認画面(reCAPTCHA)を検知した場合は、実行全体を中止する。
+                    # ここで continue すると次のプレイリストへ進み、そちらでも同じ確認画面に
+                    # 突き当たる。実機では、止まったのはGeminiだけで処理は次の動画へ移り、
+                    # 結果としてすべての動画タブが確認画面の状態になっていった。
+                    # 叩き続けても解除されず、無人実行では誰も応答できないため、
+                    # ここで打ち切って次の実行時刻(1日4回)に委ねる。
+                    if "CHALLENGE_DETECTED" in str(e):
+                        self.log_to_ui(
+                            "🛑 Googleの確認画面を検知したため、残りのプレイリストを含めて"
+                            "今回の実行を中止します。次の実行時刻に自動で再挑戦します。",
+                            "ERROR"
+                        )
+                        state.playlist_progress[playlist_name] = 'aborted_challenge'
+                        break
+
+
                     if self.browser_manager:
                         self.log_to_ui("⚠️ エラー発生のため、次のプレイリストに向けてブラウザを強制リセットします", "WARNING")
                         self.browser_manager.force_restart_browser(is_auto_mode=is_auto)
