@@ -51,16 +51,14 @@ rem Step 2: Locate the latest morning_brief script
 rem ========================================
 echo [2/3] Searching for morning_brief_*.py in %CD% ...
 
-set "LATEST_SCRIPT="
-for /f "delims=" %%f in ('dir /b /o-n morning_brief_*.py 2^>nul') do (
-    set "LATEST_SCRIPT=%%f"
-    goto :found
-)
+rem [20260808] Version is managed by Git, not by file name.
+rem The previous "dir /b /o-n" search picked the newest name, which
+rem would silently prefer a leftover dated copy over this fixed name.
+set "LATEST_SCRIPT=morning_brief.py"
 
-:found
-if not defined LATEST_SCRIPT (
-    echo   ERROR: No morning_brief_*.py found in this folder.
-    echo   Copy morning_brief_20260808_01.py next to this .bat file.
+if not exist "!LATEST_SCRIPT!" (
+    echo   ERROR: !LATEST_SCRIPT! was not found in this folder.
+    echo   Copy morning_brief.py next to this .bat file.
     goto :fail
 )
 echo   OK: !LATEST_SCRIPT!

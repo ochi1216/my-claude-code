@@ -1,31 +1,35 @@
 """
 Morning Brief - YouTube要約システム 朝の1通
-VERSION 20260808_01
 
 目的:
     夜間バッチ(02:00 / 05:00)の実行結果を、毎朝1通のメールにまとめて届ける。
     「Chromeのタブを見て実行有無を確認する」運用をやめるための実行台帳が主役。
 
 設計方針:
-    - youtube_summary_list_*.py 本体には一切手を入れない独立スクリプト。
+    - youtube_summary_list.py 本体には一切手を入れない独立スクリプト。
       本スクリプトが落ちても夜間バッチには影響しない。
-    - 真実の情報源は OUTPUT_DIR に残る summary_*.json。
+    - 情報源は OUTPUT_DIR 配下の summary_{分類}_{日時}.json / .html。
+      Consolidated Manager(RSS側)が動くと archive サブフォルダへ
+      移動されるため、サブフォルダまで再帰的に走査する。
       youtube_summary.log は FileHandler(mode='w') で毎回上書きされ、
-      02:00実行分のログが05:00実行分で消えるため、台帳の根拠には使わない。
+      02:00実行分が05:00実行分で消えるため、台帳の根拠には使わない。
     - AI呼び出しゼロ。集計と突合だけなのでコストも失敗要因も無い。
+
+    バージョンはファイル名ではなくGitで管理する。
+    履歴は git log / git blame / git log -L :関数名:ファイル で追える。
 
 使い方:
     # プレビュー（メールを送らずHTMLファイルに書き出す）
-    python morning_brief_20260808_01.py
+    python morning_brief.py
 
     # Outlookの下書きに保存
-    python morning_brief_20260808_01.py --draft
+    python morning_brief.py --draft
 
     # 実際に送信（夜間バッチに組み込むのはこれ）
-    python morning_brief_20260808_01.py --send
+    python morning_brief.py --send
 
     # 集計対象の時間幅を変える（既定は12時間前まで）
-    python morning_brief_20260808_01.py --hours 18 --send
+    python morning_brief.py --hours 18 --send
 """
 
 import os
@@ -188,18 +192,30 @@ def collect_runs(output_dir, since):
         'in_window': 0,
         'newest_name': '',
         'newest_ts': None,
+        'by_dir': {},
         'sample': [],
     }
     if not scan['dir_exists']:
         return None, [], scan
 
-    all_names = sorted(os.listdir(output_dir))
-    scan['files_total'] = len(all_names)
-    scan['sample'] = [n for n in all_names if n.lower().endswith(('.json', '.html'))][-5:]
+    # [20260808] Consolidated Manager(RSS側)が動くと、要約の出力ファイルは
+    # OUTPUT_DIR\archive へ移動される。直下だけを見ていると
+    # 「生成されたのに0件」となるため、サブフォルダも再帰的に走査する。
+    all_entries = []   # (ファイル名, フルパス, 相対フォルダ)
+    for root, _dirs, files in os.walk(output_dir):
+        rel = os.path.relpath(root, output_dir)
+        rel = '' if rel == '.' else rel
+        for name in files:
+            all_entries.append((name, os.path.join(root, name), rel))
+    all_entries.sort(key=lambda e: (e[2], e[0]))
+
+    scan['files_total'] = len(all_entries)
+    scan['sample'] = [e[0] for e in all_entries
+                      if e[0].lower().endswith(('.json', '.html'))][-5:]
 
     # (playlist, stamp) -> {'json': path, 'html': path}
     found = {}
-    for name in all_names:
+    for name, full_path, rel_dir in all_entries:
         mj = RE_SUMMARY_JSON.match(name)
         mh = RE_SUMMARY_HTML.match(name)
         if mj:
@@ -214,8 +230,9 @@ def collect_runs(output_dir, since):
         ts = parse_timestamp(key[1])
         if ts is not None and (scan['newest_ts'] is None or ts > scan['newest_ts']):
             scan['newest_ts'] = ts
-            scan['newest_name'] = name
-        found.setdefault(key, {})[kind] = os.path.join(output_dir, name)
+            scan['newest_name'] = os.path.join(rel_dir, name) if rel_dir else name
+        scan['by_dir'][rel_dir or '(直下)'] = scan['by_dir'].get(rel_dir or '(直下)', 0) + 1
+        found.setdefault(key, {})[kind] = full_path
 
     runs = []
     problems = []
@@ -287,6 +304,9 @@ def describe_scan(scan, output_dir, since):
         f"summary_*.html {scan['html_matched']}件 / "
         f"対象期間内 {scan['in_window']}件"
     )
+    if scan['by_dir']:
+        where = ", ".join(f"{d}: {n}件" for d, n in sorted(scan['by_dir'].items()))
+        lines.append(f"見つかった場所: {where}")
     if scan['json_matched'] == 0 and scan['html_matched'] > 0:
         lines.append(
             "→ JSONが1件もありません。本体の output_format 既定値が 'html' のため "

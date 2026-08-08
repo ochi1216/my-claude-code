@@ -223,19 +223,17 @@ rem ========================================
 echo. >> "%LOG_FILE%" 2>&1
 echo [6/8] Searching for latest remove script... >> "%LOG_FILE%" 2>&1
 
-set "LATEST_SCRIPT="
-for /f "delims=" %%f in ('dir /b /o-n youtube_list_remove_*.py 2^>nul') do (
-    set "LATEST_SCRIPT=%%f"
-    goto :found
-)
+rem [20260808] Version is managed by Git, not by file name.
+rem The previous "dir /b /o-n" search picked the newest name, which
+rem would silently prefer a leftover dated copy over this fixed name.
+set "LATEST_SCRIPT=youtube_list_remove.py"
 
-:found
-if not defined LATEST_SCRIPT (
-    echo ERROR: No youtube_list_remove script found! >> "%LOG_FILE%" 2>&1
+if not exist "!LATEST_SCRIPT!" (
+    echo ERROR: !LATEST_SCRIPT! was not found! >> "%LOG_FILE%" 2>&1
     exit /b 1
 )
 
-echo Latest script found: !LATEST_SCRIPT! >> "%LOG_FILE%" 2>&1
+echo Target script: !LATEST_SCRIPT! >> "%LOG_FILE%" 2>&1
 echo. >> "%LOG_FILE%" 2>&1
 
 rem ========================================

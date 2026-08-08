@@ -181,18 +181,18 @@ rem ========================================
 echo. >> "%LOG_FILE%" 2>&1
 echo [6/7] Searching for latest setup script... >> "%LOG_FILE%" 2>&1
 
-set "LATEST_FILE="
-for /f "delims=" %%F in ('dir /b /o-n Youtube_List_Setup_*.py 2^>nul') do (
-    set "LATEST_FILE=%%F"
-    goto :found
+rem [20260808] Version is managed by Git, not by file name.
+rem The previous "dir /b /o-n" search picked the newest name, which
+rem would silently prefer a leftover dated copy over this fixed name.
+set "LATEST_FILE=Youtube_List_Setup.py"
+
+if not exist "!LATEST_FILE!" (
+    echo ERROR: !LATEST_FILE! was not found. >> "%LOG_FILE%" 2>&1
+    echo [%date% %time%] エラー: !LATEST_FILE! が見つかりません >> auto_launch.log
+    exit /b 1
 )
 
-echo ERROR: Youtube_List_Setup_*.py was not found. >> "%LOG_FILE%" 2>&1
-echo [%date% %time%] エラー: Youtube_List_Setup_*.py が見つかりません >> auto_launch.log
-exit /b 1
-
-:found
-echo Latest script found: !LATEST_FILE! >> "%LOG_FILE%" 2>&1
+echo Target script: !LATEST_FILE! >> "%LOG_FILE%" 2>&1
 echo [%date% %time%] ヘッドレスモード開始: !LATEST_FILE! >> auto_launch.log
 
 rem ========================================
