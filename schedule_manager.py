@@ -32,6 +32,9 @@ Schedule Manager - 夜間バッチのスケジュールをコードから管理�
     # このフォルダのバッチを叩く管理外タスクを洗い出す（二重実行の検出）
     python schedule_manager.py --audit
 
+    # 管理外タスクを1件ずつ確認しながら削除する
+    python schedule_manager.py --cleanup
+
 バージョンはファイル名ではなくGitで管理する。
 """
 
@@ -122,6 +125,25 @@ def resolve_command(working_dir, command):
 # ============================================================================
 # schtasks の呼び出し
 # ============================================================================
+def decode_console(data):
+    """schtasks の出力バイト列を、環境に依らず正しく文字列化する。
+
+    コンソールのコードページ次第で UTF-8 にも CP932 にもなるため、
+    厳密デコードが通る方を採用する。CP932のバイト列はUTF-8として
+    ほぼ必ず失敗するので、UTF-8を先に試す順序で判別できる。
+    """
+    if not data:
+        return ''
+    if isinstance(data, str):
+        return data
+    for enc in ('utf-8', 'cp932', 'cp437'):
+        try:
+            return data.decode(enc)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return data.decode('utf-8', errors='replace')
+
+
 def run_schtasks(args, dry_run=False, check=True):
     """schtasks.exe を呼ぶ。dry_run のときは実行せずコマンドだけ返す。"""
     cmd = ['schtasks'] + args
@@ -132,13 +154,17 @@ def run_schtasks(args, dry_run=False, check=True):
         return 0, printable, ''
 
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True,
-                              encoding='cp932', errors='replace')
+        # [20260808] 文字コードを決め打ちしない。
+        # schtasks の出力はコンソールのコードページに依存し、chcp 65001 の
+        # 環境では UTF-8、既定の日本語環境では CP932 になる。
+        # cp932 固定にしていたため、UTF-8環境で日本語のタスク名が化け、
+        # 提示した削除コマンドが実際の名前と一致しなくなっていた。
+        proc = subprocess.run(cmd, capture_output=True)
     except FileNotFoundError:
         raise SystemExit("[ERROR] schtasks.exe が見つかりません。Windowsで実行してください。")
 
-    out = (proc.stdout or '').strip()
-    err = (proc.stderr or '').strip()
+    out = decode_console(proc.stdout).strip()
+    err = decode_console(proc.stderr).strip()
     if check and proc.returncode != 0:
         print(f"[ERROR] コマンド失敗 (終了コード {proc.returncode}): {printable}")
         if err:
@@ -324,11 +350,80 @@ def cmd_audit(cfg):
         print(f"        次回実行: {info.get('next_run', '不明')}")
         print(f"        実行内容: {info.get('action', '不明')}")
 
-    print("\n  不要であれば、次のコマンドで削除できます:")
+    print("\n  削除するには、次のいずれかを実行してください:")
+    print("    python schedule_manager.py --cleanup    ← 1件ずつ確認しながら削除")
+    print("  または個別に:")
     for n in others:
         print(f'    schtasks /Delete /TN "{n}" /F')
-    print("\n  ※ 内容をご確認のうえ実行してください。ここでは削除しません。")
+    print("\n  ※ ここでは削除しません。")
     return 0
+
+
+def find_unmanaged(cfg):
+    """管理外だが、このプロジェクトのバッチを実行しているタスクを返す。"""
+    all_tasks = query_all_tasks()
+    work = (cfg['working_dir'] or '').lower()
+    names = {os.path.basename(t['command']).lower() for t in cfg['tasks']}
+    names |= {
+        'run_youtube_channel_remove_auto.bat',
+        'run_youtube_list_auto_setup.bat',
+        'run_youtube_summary_auto.bat',
+        'run_youtube_all_tasks.bat',
+        'run_morning_brief.bat',
+    }
+    found = {}
+    for name in sorted(all_tasks):
+        if name.startswith(cfg['prefix'] + '_'):
+            continue
+        action = (all_tasks[name].get('action') or '').lower()
+        if not action:
+            continue
+        if (work and work in action) or any(n in action for n in names):
+            found[name] = all_tasks[name]
+    return found
+
+
+def cmd_cleanup(cfg, dry_run):
+    """管理外タスクを1件ずつ確認しながら削除する。
+
+    [20260808] 日本語のタスク名はコンソール間のコピー＆ペーストで
+    失敗しやすいため、名前を手入力させずに削除できる経路を用意する。
+    既定は保守的に「削除しない(n)」とし、明示的に y と答えたものだけ消す。
+    """
+    targets = find_unmanaged(cfg)
+    if not targets:
+        print("  管理外タスクは見つかりませんでした。")
+        return 0
+
+    print("--- 管理外タスクの削除 ---")
+    print("  各タスクについて y / n を選んでください（既定は n = 削除しない）。\n")
+
+    deleted = failed = skipped = 0
+    for name, info in targets.items():
+        print(f"  タスク名  : {name}")
+        print(f"  実行内容  : {info.get('action', '不明')}")
+        print(f"  次回実行  : {info.get('next_run', '不明')}")
+        try:
+            ans = input("  削除しますか? [y/N]: ").strip().lower()
+        except EOFError:
+            ans = 'n'
+        if ans != 'y':
+            print("  → 残します。\n")
+            skipped += 1
+            continue
+
+        rc, printable, _ = run_schtasks(['/Delete', '/TN', name, '/F'], dry_run)
+        if dry_run:
+            print(f"  → 確認のみ: {printable}\n")
+        elif rc == 0:
+            print("  → 削除しました。\n")
+            deleted += 1
+        else:
+            print("  → 削除に失敗しました。\n")
+            failed += 1
+
+    print(f"[結果] 削除 {deleted}件 / 残した {skipped}件 / 失敗 {failed}件")
+    return 1 if failed else 0
 
 
 def cmd_apply(cfg, dry_run):
@@ -414,6 +509,8 @@ def main():
     group.add_argument('--remove', action='store_true', help='管理下のタスクを削除する')
     group.add_argument('--audit', action='store_true',
                        help='このフォルダのバッチを叩く管理外タスクを洗い出す（読み取り専用）')
+    group.add_argument('--cleanup', action='store_true',
+                       help='管理外タスクを1件ずつ確認しながら削除する')
     args = parser.parse_args()
 
     if sys.platform != 'win32' and not args.dry_run:
@@ -433,6 +530,8 @@ def main():
         return cmd_remove(cfg, args.dry_run)
     if args.audit:
         return cmd_audit(cfg)
+    if args.cleanup:
+        return cmd_cleanup(cfg, args.dry_run)
     return cmd_list(cfg)
 
 
