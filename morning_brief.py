@@ -48,6 +48,8 @@ DEFAULT_LOG_FILE = "youtube_summary.log"
 
 # 本体の ConfigManager.get_playlist_config() の既定値と同じ。
 # config.json に playlists 設定があればそちらを優先する。
+# [20260808] P+ と L が抜けており、出力があると「設定に無いプレイリスト」
+# として警告されてしまっていたため、本体の定義と揃えた。
 DEFAULT_PLAYLISTS = {
     "V":  "PL0UGJjoPnxKgZaJvHD5lGzOmGnEAdrn9H",
     "S":  "PL0UGJjoPnxKjT1ClcCwngoCDhModNIG3H",
@@ -55,7 +57,15 @@ DEFAULT_PLAYLISTS = {
     "B":  "PL0UGJjoPnxKhM3jXPMhNxONyvyZbClDuM",
     "N":  "PL0UGJjoPnxKj6T0VlBmyxVqVmBIK1h3G6",
     "M":  "PL0UGJjoPnxKhX6NN6K5GSPCzh9H8bK1F3",
+    "P+": "PL0UGJjoPnxKggbm7xrXUJQAExVbuca8-M",
+    "L":  "PL0UGJjoPnxKhEsnwZqNSkcUZow4Uklz5R",
 }
+
+# [20260808] 同じフォルダに出力される別システム(Consolidated Manager/RSS)の
+# ファイルも summary_{名前}_{日時}.html の形式に一致してしまう。
+# 要約カードを含まないため0本と表示され、毎回「設定に無いプレイリスト」
+# として警告が出るので、集計対象から除外する。
+IGNORE_PLAYLISTS = {"RSS"}
 
 # 異常判定のしきい値
 SHORT_SUMMARY_CHARS = 300      # これ未満の要約は「中身が薄い」として警告
@@ -72,8 +82,18 @@ RE_SUMMARY_HTML = re.compile(r'^summary_(.*)_(\d{8}_\d{6})\.html$')
 #   <div id="card-{i}" class="video-card" data-index="{i}">           成功
 #   <div id="card-{i}" class="video-card error-card" data-index="{i}"> 失敗
 #   <div class="video-title">{i}. {タイトル}</div>
-RE_CARD = re.compile(r'class="video-card( error-card)?"')
-RE_CARD_TITLE = re.compile(r'<div class="video-title">(.*?)</div>', re.DOTALL)
+# [20260808] 成功カードとエラーカードでタイトルの書式が違う。
+#   成功  : <div class="video-title" id="t-txt-3">3. タイトル</div>   ← id属性あり
+#   エラー: <div class="video-title">3. タイトル</div>                ← id属性なし
+# 当初 <div class="video-title"> だけを探していたため、エラーカードの
+# タイトルしか拾えず、成功・失敗の並び順とずれて紐づけが全て壊れていた
+# (失敗の件数は正しいが、表示されるタイトルが別動画のものになっていた)。
+# カードごとに切り出してから、その中のタイトルを取る方式に変更する。
+RE_CARD = re.compile(r'<div\s+id="card-\d+"\s+class="video-card( error-card)?"')
+RE_CARD_TITLE = re.compile(r'<div\s+class="video-title"[^>]*>(.*?)</div>', re.DOTALL)
+# エラーカードは失敗理由を alert-danger で持っている。これを拾えば
+# 「(HTMLでは理由不明)」ではなく実際の理由を台帳に出せる。
+RE_CARD_ERROR = re.compile(r'<div\s+class="alert alert-danger[^"]*"[^>]*>(.*?)</div>', re.DOTALL)
 RE_TAG = re.compile(r'<[^>]+>')
 
 
@@ -146,15 +166,24 @@ def parse_summary_html(path):
     except Exception:
         return None
 
-    statuses = [bool(m.group(1)) for m in RE_CARD.finditer(html)]
-    titles = [unescape_min(RE_TAG.sub('', t)).strip()
-              for t in RE_CARD_TITLE.findall(html)]
+    # カードの開始位置で区切り、各カードの範囲内でタイトルを探す。
+    marks = [(m.start(), bool(m.group(1))) for m in RE_CARD.finditer(html)]
 
     videos = []
-    for idx, is_error in enumerate(statuses):
-        raw = titles[idx] if idx < len(titles) else ''
+    for n, (pos, is_error) in enumerate(marks):
+        end = marks[n + 1][0] if n + 1 < len(marks) else len(html)
+        chunk = html[pos:end]
+        m = RE_CARD_TITLE.search(chunk)
+        raw = unescape_min(RE_TAG.sub('', m.group(1))).strip() if m else ''
         # 生成側は "1. タイトル" の形式で出力している
         title = re.sub(r'^\s*\d+\.\s*', '', raw) or '(タイトル不明)'
+
+        err_msg = ''
+        if is_error:
+            me = RE_CARD_ERROR.search(chunk)
+            err_msg = (unescape_min(RE_TAG.sub('', me.group(1))).strip()
+                       if me else '(理由の記載なし)')
+
         videos.append({
             'title': title,
             'channel': '',
@@ -163,7 +192,7 @@ def parse_summary_html(path):
             'success': not is_error,
             'summary_len': -1,        # HTML経路では取得できない
             'processing_time': 0.0,   # 同上（60秒張り付き判定は行わない）
-            'error_message': '' if not is_error else '(HTMLでは理由不明)',
+            'error_message': err_msg,
             'gemini_url': '',
         })
     return videos
@@ -225,6 +254,10 @@ def collect_runs(output_dir, since):
             scan['html_matched'] += 1
             key, kind = (mh.group(1), mh.group(2)), 'html'
         else:
+            continue
+
+        # 別システムの出力は集計対象外
+        if key[0] in IGNORE_PLAYLISTS:
             continue
 
         ts = parse_timestamp(key[1])
