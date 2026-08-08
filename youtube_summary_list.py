@@ -4696,12 +4696,19 @@ class GlaspEngine:
         protected_tabs = set([self.playlist_tab_handle]) if self.playlist_tab_handle else set()
         current_handles = self.driver.window_handles.copy()
 
-        # [20260808] クローズ対象の判定。越智さんの指示により、動画タブ
-        # (youtube.com/watch) は「夜間の自動実行が走ったかどうかを目視確認する
-        # ため」に残し、Geminiタブだけをクリーンアップ対象とする。
-        # 従来は動画タブもGeminiタブも両方閉じていたため、実行痕跡が残らなかった。
+        # [20260808] クローズ対象の判定。
+        # 動画タブ(youtube.com/watch)は「夜間の自動実行が走ったか目視確認する」
+        # ために残す方針だが、全部残すとChromeが処理不能になる。実機ログで
+        # 動画タブが 13 → 17 → 32 枚と解放されずに積み上がり、タブ切り替えだけで
+        # 41.7秒、chromedriverとの通信が60秒でタイムアウト(FATAL)し、
+        # 「Slow Tab Detected」で全動画が要約失敗する事象が発生した。
+        # YouTubeの視聴ページは1枚あたりの負荷が大きいため、残す枚数に上限を設ける。
+        # KEEP_VIDEO_TABS を増やすほど実行痕跡は残るが、Chromeが重くなる。
+        # 0 にすれば従来どおり全て閉じる（実行確認は朝の1通の実行台帳で行う）。
+        KEEP_VIDEO_TABS = 3
+
         handles_to_close = []
-        kept_video_tabs = 0
+        video_handles = []
         for handle in current_handles:
             if handle in protected_tabs:
                 continue
@@ -4713,7 +4720,13 @@ class GlaspEngine:
             if 'gemini.google.com' in url:
                 handles_to_close.append(handle)
             elif 'youtube.com/watch' in url:
-                kept_video_tabs += 1
+                video_handles.append(handle)
+
+        # 新しい方(window_handlesの後ろ)から KEEP_VIDEO_TABS 枚だけ残し、
+        # それより古い動画タブは閉じる。
+        keep_video = video_handles[-KEEP_VIDEO_TABS:] if KEEP_VIDEO_TABS > 0 else []
+        handles_to_close.extend(h for h in video_handles if h not in keep_video)
+        kept_video_tabs = len(keep_video)
 
         # [20260807] 全ウィンドウを閉じるとChromeプロセス自体が終了し、次の
         # プレイリスト先頭で invalid session id となって例外ハンドラへ落ち、
@@ -4747,11 +4760,23 @@ class GlaspEngine:
                 log_message("⚠️ クリーンアップ後に残ったタブがありません", "WARNING")
         except Exception as e:
             log_message(f"⚠️ クリーンアップ後のタブ切り替えに失敗しました: {e}", "WARNING")
+        try:
+            remaining_total = len(self.driver.window_handles)
+        except Exception:
+            remaining_total = -1
         log_message(
-            f"プレイリストタブクリーンアップ完了: Geminiタブ {closed_count}個をクローズ / "
-            f"動画タブ {kept_video_tabs}個は実行確認用に保持",
+            f"プレイリストタブクリーンアップ完了: {closed_count}個をクローズ / "
+            f"動画タブ {kept_video_tabs}個を実行確認用に保持 / 残タブ合計 {remaining_total}枚",
             "SUCCESS"
         )
+        # [20260808] タブが増え続けるとChromeが処理不能になり全動画が失敗する。
+        # 気づけるよう、残タブが多い場合は警告を出す。
+        if remaining_total >= 15:
+            log_message(
+                f"⚠️ 残タブが{remaining_total}枚あります。Chromeの応答が遅くなり "
+                f"要約が失敗しやすくなります（cleanup_playlist_tabs の KEEP_VIDEO_TABS を確認）",
+                "WARNING"
+            )
 
     def _find_playlist_tab(self) -> Optional[str]:
         if not self.driver: return None
