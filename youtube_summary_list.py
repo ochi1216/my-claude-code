@@ -3847,6 +3847,21 @@ class GlaspEngine:
 
                     const hasTranscript = hasTranscriptInPage || hasPromptInInput;
 
+                    // [20260808] 「私はロボットではありません」等の確認画面の検知。
+                    // 突破は行わない（そういう性質のものではない）。検知したら
+                    // 呼び出し側が処理全体を速やかに中止するための信号として返す。
+                    // 無人実行中に出た場合、叩き続けると状況が悪化するだけなので、
+                    // 早く諦めて次の実行時刻に回す方が安全である。
+                    const challengeMarkers = [
+                        'recaptcha', 'ロボットではありません', "i'm not a robot",
+                        '通常と異なるトラフィック', 'unusual traffic',
+                        'システムによって', 'verify it', 'ご本人確認', '本人確認'
+                    ];
+                    const hasChallenge =
+                        challengeMarkers.some(k => lowerText.includes(k.toLowerCase())) ||
+                        document.querySelector('iframe[src*="recaptcha"]') !== null ||
+                        document.querySelector('iframe[title*="reCAPTCHA"]') !== null;
+
                     const criticalErrors = ['error occurred', 'something went wrong', 'エラーが発生', '生成に失敗'];
                     const ambiguousErrors = ['failed', '失敗しました', '利用できません', 'try again', 'もう一度', '再試行'];
 
@@ -3935,6 +3950,7 @@ class GlaspEngine:
 
                     return {
                         hasError: hasError,
+                        hasChallenge: hasChallenge,
                         hasTranscript: hasTranscript,
                         hasTranscriptInPage: hasTranscriptInPage,
                         hasPromptInInput: hasPromptInInput,
@@ -3949,6 +3965,16 @@ class GlaspEngine:
                     };
                 """)
                 perf_log("quick_check_dom_probe", dom_probe_start, iteration=iteration_index)
+
+                # [20260808] 確認画面（reCAPTCHA等）を検知したら、処理全体を中止する。
+                # 無人実行中は誰も応答できないため、叩き続けても状況が悪化するだけで
+                # あり、アカウントへの負荷も増す。FATALとして送出し、上位で
+                # 「今回は諦めて次の実行時刻に回す」判断ができるようにする。
+                if check_result.get('hasChallenge', False):
+                    raise Exception(
+                        "FATAL: CHALLENGE_DETECTED: Googleの確認画面（reCAPTCHA等）が"
+                        "表示されました。自動での続行は行いません。"
+                    )
 
                 if check_result['hasError']:
                     return False
@@ -7004,7 +7030,15 @@ class IntegratedSummaryApp(tk.Tk):
         
         ttk.Label(batch_frame, text="バッチサイズ:").grid(row=0, column=0, sticky=tk.W)
         
-        self.batch_size_var = tk.IntVar(value=config_manager.get('glasp.batch_size', DEFAULT_GLASP_BATCH_SIZE))
+        # [20260808] ここで batch_size_var を作り直すと、__init__ で反映済みの
+        # コマンドライン引数 --batch-size が上書きされて失われる。
+        # 実際、run_youtube_summary_auto.bat は --batch-size 1 を渡しているのに
+        # 設定値の20が使われ、20本を一度に開いてChromeとGeminiに負荷が集中していた
+        # （実機ログでSプレイリストが videos=20 の1バッチになっていることを確認）。
+        # 既に存在する場合は作り直さず、そのまま使う。
+        if not hasattr(self, 'batch_size_var'):
+            self.batch_size_var = tk.IntVar(
+                value=config_manager.get('glasp.batch_size', DEFAULT_GLASP_BATCH_SIZE))
         batch_spinbox = ttk.Spinbox(batch_frame, from_=1, to=20,
                                    textvariable=self.batch_size_var, width=10)
         batch_spinbox.grid(row=0, column=1, padx=5, sticky=tk.W)
