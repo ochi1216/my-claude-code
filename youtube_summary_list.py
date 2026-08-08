@@ -87,7 +87,10 @@ APP_TITLE = f"YouTube Summary Integrated System v{VERSION}"
 DEFAULT_MAX_VIDEOS = 10
 MAX_VIDEOS_LIMIT = 5000
 DEFAULT_PARALLEL_COUNT = 3
-DEFAULT_GLASP_BATCH_SIZE = 20
+# [20260808] 20 から 10 へ変更。20本を一度に処理すると、短時間に大量の
+# Geminiセッションが集中してGoogleの確認画面(reCAPTCHA)を誘発し、無人実行が
+# 復旧不能になる事象が実機で発生したため。UIの初期表示値もこれに従う。
+DEFAULT_GLASP_BATCH_SIZE = 10
 CHANNEL_METADATA_MAX_OBSERVED_VIDEOS = 30
 MAX_PARALLEL_COUNT = 10
 MAX_MEMORY_MB = 8000 # システムの最大メモリ（MB）

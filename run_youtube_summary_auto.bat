@@ -208,7 +208,7 @@ echo [DIAG] Python fixed path check:
 "C:\Users\nx023836\AppData\Local\Programs\Python\Python313\python.exe" -c "import sys; print(sys.executable)"
 "C:\Users\nx023836\AppData\Local\Programs\Python\Python313\python.exe" -c "import psutil; print('psutil OK', psutil.__version__)"
 
-"C:\Users\nx023836\AppData\Local\Programs\Python\Python313\python.exe" "!LATEST_SCRIPT!" --auto --batch-size 1 --playlists V S A B N M
+"C:\Users\nx023836\AppData\Local\Programs\Python\Python313\python.exe" "!LATEST_SCRIPT!" --auto --batch-size 10 --playlists V S A B N M
 
 set "EXIT_CODE=!ERRORLEVEL!"
 
