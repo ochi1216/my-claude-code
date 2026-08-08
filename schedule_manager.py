@@ -195,11 +195,17 @@ def build_create_args(cfg, task):
     tn = full_task_name(cfg['prefix'], task['name'])
     tr = resolve_command(cfg['working_dir'], task['command'])
 
+    # [20260808] バッチへ渡す引数に対応する。
+    # command に "x.bat auto" と書くと全体がパスとして扱われてしまうため、
+    # 引数は args に分けて指定する。
+    extra = (task.get('args') or '').strip()
+    tr_value = f'"{tr}" {extra}'.strip() if extra else f'"{tr}"'
+
     args = [
         '/Create',
         '/TN', tn,
         # パスに空白が含まれるため、値自体を引用符で囲んだ状態で渡す
-        '/TR', f'"{tr}"',
+        '/TR', tr_value,
         '/SC', 'DAILY',
         '/ST', task['time'],
         '/F',                     # 同名タスクがあれば上書き

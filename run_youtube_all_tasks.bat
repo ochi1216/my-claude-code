@@ -16,7 +16,9 @@ rem     working directory (Task Scheduler "Start in" is often different).
 rem   - Record each step's exit code and report them together at the end.
 rem     Previously a failing step was echoed and then silently ignored,
 rem     so a night where a step died looked the same as a healthy one.
-rem   - Added the morning brief as Step 4.
+rem   - The morning brief is NOT part of this chain: this chain runs
+rem     4 times a day (02:00 / 05:00 / 11:30 / 20:00) and the brief
+rem     must be sent once, so it is scheduled separately.
 rem   - pause only in interactive mode; unattended runs would hang forever.
 rem ========================================
 
@@ -25,11 +27,10 @@ cd /d "%~dp0"
 set "RC1=0"
 set "RC2=0"
 set "RC3=0"
-set "RC4=0"
 set "FAILED="
 
 echo =========================================================
-echo [Step 1/4] run_youtube_channel_remove_auto.bat を実行します
+echo [Step 1/3] run_youtube_channel_remove_auto.bat を実行します
 echo =========================================================
 call run_youtube_channel_remove_auto.bat
 set "RC1=!ERRORLEVEL!"
@@ -43,7 +44,7 @@ echo ---------------------------------------------------------
 timeout /t 5 /nobreak >nul
 
 echo =========================================================
-echo [Step 2/4] run_youtube_List_auto_setup.bat を実行します
+echo [Step 2/3] run_youtube_List_auto_setup.bat を実行します
 echo =========================================================
 call run_youtube_List_auto_setup.bat
 set "RC2=!ERRORLEVEL!"
@@ -57,28 +58,12 @@ echo ---------------------------------------------------------
 timeout /t 5 /nobreak >nul
 
 echo =========================================================
-echo [Step 3/4] run_youtube_summary_auto.bat を実行します
+echo [Step 3/3] run_youtube_summary_auto.bat を実行します
 echo =========================================================
 call run_youtube_summary_auto.bat
 set "RC3=!ERRORLEVEL!"
 echo [Step 3] 完了. 終了コード: !RC3!
 if not "!RC3!"=="0" set "FAILED=!FAILED! Step3-summary"
-echo.
-
-echo ---------------------------------------------------------
-echo 次の処理まで 5秒間 待機します...
-echo ---------------------------------------------------------
-timeout /t 5 /nobreak >nul
-
-echo =========================================================
-echo [Step 4/4] run_morning_brief.bat を実行します
-echo =========================================================
-rem The brief reports what the three steps above actually produced,
-rem so it must run last.
-call run_morning_brief.bat
-set "RC4=!ERRORLEVEL!"
-echo [Step 4] 完了. 終了コード: !RC4!
-if not "!RC4!"=="0" set "FAILED=!FAILED! Step4-brief"
 echo.
 
 echo =========================================================
@@ -87,7 +72,6 @@ echo =========================================================
 echo   Step 1 remove  : !RC1!
 echo   Step 2 setup   : !RC2!
 echo   Step 3 summary : !RC3!
-echo   Step 4 brief   : !RC4!
 echo =========================================================
 
 if defined FAILED (

@@ -67,13 +67,14 @@ for %%A in ("!LATEST_SCRIPT!") do echo   Script timestamp: %%~tA
 rem ========================================
 rem Step 3: Execute
 rem ========================================
-rem   --hours 12 covers both the 02:00 and 05:00 runs when scheduled at 06:00.
+rem   --hours 24 covers a full day of runs (02:00 / 05:00 / 11:30 / 20:00),
+rem   so the morning mail reports everything since the previous morning.
 rem   Use --draft instead of --send while checking the layout.
 rem   Use no flag at all to only write an HTML preview file.
 echo [3/3] Running...
 echo.
 
-"%PYTHON_EXE%" "!LATEST_SCRIPT!" --hours 12 --send > "%TMP_OUT%" 2>&1
+"%PYTHON_EXE%" "!LATEST_SCRIPT!" --hours 24 --send > "%TMP_OUT%" 2>&1
 set "EXIT_CODE=!ERRORLEVEL!"
 
 rem Show on screen, then keep a copy in the log.

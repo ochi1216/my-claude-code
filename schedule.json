@@ -1,41 +1,60 @@
 {
   "_comment": [
-    "夜間バッチのスケジュール定義。時刻を変えたら schedule_manager.py --apply を実行する。",
+    "夜間・日中バッチのスケジュール定義。",
+    "時刻を変えたら python schedule_manager.py --apply を実行するだけでよい。",
     "Windowsタスクスケジューラの画面を開く必要はない。",
-    "task_prefix で始まるタスクだけを管理対象とし、他のタスクには一切触れない。",
-    "enabled を false にすると、次の --apply でそのタスクは削除される。"
+    "",
+    "運用: 削除→登録→要約の3作業を1日4回まわす。",
+    "     run_youtube_all_tasks.bat が3つを順番に呼ぶため、1回につき1タスクでよい。",
+    "     引数 auto は無人実行の指定（末尾のpauseを抑止する）。",
+    "     朝の1通は連鎖に含めない。4回まわるとメールが日に4通届いてしまうため、",
+    "     05:00の回が終わった後に1日1回だけ送る。",
+    "",
+    "安全: task_prefix で始まるタスクだけを管理する。他のタスクには一切触れない。",
+    "     enabled を false にすると、次の --apply でそのタスクは削除される。"
   ],
   "task_prefix": "YouTubeSummary",
   "working_dir": "C:\\Users\\nx023836\\Documents\\PythonScripts\\Youtube",
   "interactive": true,
   "tasks": [
     {
-      "name": "01_Remove",
-      "time": "01:30",
-      "command": "run_youtube_channel_remove_auto.bat",
-      "enabled": true,
-      "note": "過去プレイリストの動画を削除"
-    },
-    {
-      "name": "02_Setup",
+      "name": "Chain_0200",
       "time": "02:00",
-      "command": "run_youtube_List_auto_setup.bat",
+      "command": "run_youtube_all_tasks.bat",
       "enabled": true,
-      "note": "新着動画をプレイリストへ登録"
+      "note": "削除→登録→要約",
+      "args": "auto"
     },
     {
-      "name": "03_Summary",
+      "name": "Chain_0500",
       "time": "05:00",
-      "command": "run_youtube_summary_auto.bat",
+      "command": "run_youtube_all_tasks.bat",
       "enabled": true,
-      "note": "要約の実行"
+      "note": "削除→登録→要約",
+      "args": "auto"
     },
     {
-      "name": "04_Brief",
-      "time": "06:00",
+      "name": "Chain_1130",
+      "time": "11:30",
+      "command": "run_youtube_all_tasks.bat",
+      "enabled": true,
+      "note": "削除→登録→要約",
+      "args": "auto"
+    },
+    {
+      "name": "Chain_2000",
+      "time": "20:00",
+      "command": "run_youtube_all_tasks.bat",
+      "enabled": true,
+      "note": "削除→登録→要約",
+      "args": "auto"
+    },
+    {
+      "name": "Brief_0700",
+      "time": "07:00",
       "command": "run_morning_brief.bat",
       "enabled": true,
-      "note": "朝の1通。上の3つの結果を集計するため最後に実行する"
+      "note": "朝の1通。05:00の回の完了後に、直近24時間ぶんを集計して送る"
     }
   ]
 }
