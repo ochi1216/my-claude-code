@@ -1,11 +1,28 @@
 """
 YouTube Summary Integrated System
+
+バージョンはファイル名ではなくGitで管理する。
+履歴は次で追える:
+    git log --follow -- youtube_summary_list.py
+    git blame youtube_summary_list.py
+    git log -L :関数名:youtube_summary_list.py
 """
-# 定数定義
-# [20260808] 起動ログに出るバージョン。これまでファイル名のバージョンと連動して
-# おらず、どのファイルが実行中かログから判別できなかったため、以後はファイル名の
-# 日付_連番に合わせて更新する。
-VERSION = "20260808_02"
+import os as _os
+from datetime import datetime as _datetime
+
+# [20260808] 起動ログに出すバージョン表記。
+# 従来は手書きの定数で、ファイル名の版数と食い違ったまま放置されていた
+# (ファイル名が 20260806_01 でも VERSION は "20260801_03" のままだった)。
+# ファイル名による版数管理を廃止したため、手書きの値は必ず陳腐化する。
+# そこで、このファイル自身の更新日時から生成する。
+# 常に真であり、更新を忘れることがなく、
+# 「このログを出したのはどのファイルか」に確実に答えられる。
+try:
+    VERSION = _datetime.fromtimestamp(
+        _os.path.getmtime(_os.path.abspath(__file__))
+    ).strftime("%Y%m%d_%H%M")
+except Exception:
+    VERSION = "unknown"
 
 # ============================================================================
 # SECTION 1: IMPORTS AND CONSTANTS

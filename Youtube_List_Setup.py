@@ -1,11 +1,18 @@
 
 """
 YouTube Play List Set up　System
-## 履歴は現バージョンより、CHANGELOG_***.mdで管理
 
+バージョンはファイル名ではなくGitで管理する。
+履歴は次で追える:
+    git log --follow -- Youtube_List_Setup.py
+    git blame Youtube_List_Setup.py
+    git log -L :関数名:Youtube_List_Setup.py
 """
-# 定数定義
-VERSION = "2026.0707_02"
+# [20260808] VERSION = "2026.0707_02" を削除した。
+# どこからも参照されていない未使用定数で、値もファイル名の版数
+# (20260806_01) と食い違ったまま放置されていた。
+# 実行中のファイルを特定する用途は、バッチが出力するスクリプトの
+# 更新日時ログで代替する。
 
 import sys
 import os

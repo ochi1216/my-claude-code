@@ -5,8 +5,8 @@ set PYTHONIOENCODING=utf-8
 
 rem ========================================
 rem YouTube Playlist Remove Auto Runner
-rem Target: youtube_list_remove_yyyymmdd_rr.py
-rem VERSION 20260806_01
+rem Target: youtube_list_remove.py
+rem Version is tracked in Git, not in this file.
 rem Purpose:
 rem   - Use fixed debug port 9222
 rem   - Use isolated Chrome profile ChromeDebugProfile_20260725
@@ -34,7 +34,6 @@ set "LOG_FILE=%LOG_DIR%\remove_log_%TIMESTAMP%.log"
 
 echo ========================================= >> "%LOG_FILE%" 2>&1
 echo YouTube Playlist Remove Auto Execution >> "%LOG_FILE%" 2>&1
-echo VERSION: 20260806_01 >> "%LOG_FILE%" 2>&1
 echo Start: %date% %time% >> "%LOG_FILE%" 2>&1
 echo Working Directory: %CD% >> "%LOG_FILE%" 2>&1
 echo Python EXE: %PYTHON_EXE% >> "%LOG_FILE%" 2>&1
@@ -218,10 +217,10 @@ if errorlevel 1 (
 echo Port check completed. >> "%LOG_FILE%" 2>&1
 
 rem ========================================
-rem Step 6: Search latest remove script
+rem Step 6: Resolve target script
 rem ========================================
 echo. >> "%LOG_FILE%" 2>&1
-echo [6/8] Searching for latest remove script... >> "%LOG_FILE%" 2>&1
+echo [6/8] Resolving target script... >> "%LOG_FILE%" 2>&1
 
 rem [20260808] Version is managed by Git, not by file name.
 rem The previous "dir /b /o-n" search picked the newest name, which
@@ -234,6 +233,9 @@ if not exist "!LATEST_SCRIPT!" (
 )
 
 echo Target script: !LATEST_SCRIPT! >> "%LOG_FILE%" 2>&1
+rem [20260808] Record the actual file timestamp instead of a
+rem hand-written version string, which always goes stale.
+for %%A in ("!LATEST_SCRIPT!") do echo Script timestamp: %%~tA >> "%LOG_FILE%" 2>&1
 echo. >> "%LOG_FILE%" 2>&1
 
 rem ========================================

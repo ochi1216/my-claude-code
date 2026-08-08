@@ -5,7 +5,7 @@ set PYTHONIOENCODING=utf-8
 
 rem ========================================
 rem YouTube Summary Auto Runner
-rem VERSION 20260806_01
+rem Version is tracked in Git, not in this file.
 rem Purpose:
 rem   - Use isolated Chrome profile
 rem   - Fixed debug port 9222
@@ -27,7 +27,6 @@ set "LOG_FILE=%LOG_DIR%\run_log_%TIMESTAMP%.log"
 
 echo ========================================= >> "%LOG_FILE%" 2>&1
 echo YouTube Summary Auto Execution >> "%LOG_FILE%" 2>&1
-echo VERSION: 20260806_01 >> "%LOG_FILE%" 2>&1
 echo Start: %date% %time% >> "%LOG_FILE%" 2>&1
 echo ========================================= >> "%LOG_FILE%" 2>&1
 
@@ -175,10 +174,10 @@ if errorlevel 1 (
 )
 
 rem ========================================
-rem Step 6: Search latest Python script
+rem Step 6: Resolve target script
 rem ========================================
 echo. >> "%LOG_FILE%" 2>&1
-echo [6/7] Searching for latest script... >> "%LOG_FILE%" 2>&1
+echo [6/7] Resolving target script... >> "%LOG_FILE%" 2>&1
 
 rem [20260808] Version is managed by Git, not by file name.
 rem The previous "dir /b /o-n" search picked the newest name, which
@@ -191,6 +190,9 @@ if not exist "!LATEST_SCRIPT!" (
 )
 
 echo Target script: !LATEST_SCRIPT! >> "%LOG_FILE%" 2>&1
+rem [20260808] Record the actual file timestamp instead of a
+rem hand-written version string, which always goes stale.
+for %%A in ("!LATEST_SCRIPT!") do echo Script timestamp: %%~tA >> "%LOG_FILE%" 2>&1
 
 rem ========================================
 rem Step 7: Execute Python

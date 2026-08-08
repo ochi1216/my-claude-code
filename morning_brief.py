@@ -40,7 +40,7 @@ import argparse
 from datetime import datetime, timedelta
 
 # ============================================================================
-# 既定値（youtube_summary_list_20260808_01.py と揃えている）
+# 既定値（youtube_summary_list.py と揃えている）
 # ============================================================================
 DEFAULT_OUTPUT_DIR = r"C:\Users\nx023836\Nexperia\My Private - Documents\Summary"
 DEFAULT_CONFIG_FILE = "config.json"
@@ -564,7 +564,7 @@ font-size:14px;color:#1f2328;line-height:1.6;">
 
 <hr style="border:none;border-top:1px solid #d0d7de;margin:20px 0;">
 <div style="color:#8b949e;font-size:11px;">
-morning_brief_20260808_01 ／ 出力先: {esc(output_dir)} ／ プレイリスト定義: {esc(config_source)}
+morning_brief ／ 出力先: {esc(output_dir)} ／ プレイリスト定義: {esc(config_source)}
 </div>
 
 </div></body></html>"""

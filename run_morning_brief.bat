@@ -5,8 +5,8 @@ set PYTHONIOENCODING=utf-8
 
 rem ========================================
 rem Morning Brief Runner
-rem Target: morning_brief_yyyymmdd_rr.py
-rem VERSION 20260808_02
+rem Target: morning_brief.py
+rem Version is tracked in Git, not in this file.
 rem Purpose:
 rem   - Send one summary mail every morning (schedule around 06:00)
 rem   - Independent from the nightly summary batch: never touches Chrome
@@ -29,7 +29,7 @@ set "LOG_FILE=%LOG_DIR%\morning_brief_%TIMESTAMP%.log"
 set "TMP_OUT=%LOG_DIR%\morning_brief_%TIMESTAMP%.tmp"
 
 echo =========================================
-echo Morning Brief  VERSION 20260808_02
+echo Morning Brief
 echo Start: %date% %time%
 echo Working Directory: %CD%
 echo Log: %LOG_FILE%
@@ -47,9 +47,9 @@ if not exist "%PYTHON_EXE%" (
 echo   OK: %PYTHON_EXE%
 
 rem ========================================
-rem Step 2: Locate the latest morning_brief script
+rem Step 2: Resolve target script
 rem ========================================
-echo [2/3] Searching for morning_brief_*.py in %CD% ...
+echo [2/3] Resolving target script in %CD% ...
 
 rem [20260808] Version is managed by Git, not by file name.
 rem The previous "dir /b /o-n" search picked the newest name, which
@@ -62,6 +62,7 @@ if not exist "!LATEST_SCRIPT!" (
     goto :fail
 )
 echo   OK: !LATEST_SCRIPT!
+for %%A in ("!LATEST_SCRIPT!") do echo   Script timestamp: %%~tA
 
 rem ========================================
 rem Step 3: Execute

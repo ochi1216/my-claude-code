@@ -5,8 +5,8 @@ set PYTHONIOENCODING=utf-8
 
 rem ========================================
 rem YouTube Playlist Add / List Setup Auto Runner
-rem Target: Youtube_List_Setup_*.py
-rem VERSION 20260806_01
+rem Target: Youtube_List_Setup.py
+rem Version is tracked in Git, not in this file.
 rem Purpose:
 rem   - Use fixed debug port 9222
 rem   - Use isolated Chrome profile ChromeDebugProfile_20260725
@@ -28,7 +28,6 @@ set "LOG_FILE=%LOG_DIR%\list_setup_log_%TIMESTAMP%.log"
 
 echo ========================================= >> "%LOG_FILE%" 2>&1
 echo YouTube Playlist Add / List Setup Auto Execution >> "%LOG_FILE%" 2>&1
-echo VERSION: 20260806_01 >> "%LOG_FILE%" 2>&1
 echo Start: %date% %time% >> "%LOG_FILE%" 2>&1
 echo ========================================= >> "%LOG_FILE%" 2>&1
 
@@ -176,10 +175,10 @@ if errorlevel 1 (
 )
 
 rem ========================================
-rem Step 6: Search latest setup script
+rem Step 6: Resolve target script
 rem ========================================
 echo. >> "%LOG_FILE%" 2>&1
-echo [6/7] Searching for latest setup script... >> "%LOG_FILE%" 2>&1
+echo [6/7] Resolving target script... >> "%LOG_FILE%" 2>&1
 
 rem [20260808] Version is managed by Git, not by file name.
 rem The previous "dir /b /o-n" search picked the newest name, which
@@ -193,6 +192,9 @@ if not exist "!LATEST_FILE!" (
 )
 
 echo Target script: !LATEST_FILE! >> "%LOG_FILE%" 2>&1
+rem [20260808] Record the actual file timestamp instead of a
+rem hand-written version string, which always goes stale.
+for %%A in ("!LATEST_FILE!") do echo Script timestamp: %%~tA >> "%LOG_FILE%" 2>&1
 echo [%date% %time%] ヘッドレスモード開始: !LATEST_FILE! >> auto_launch.log
 
 rem ========================================
