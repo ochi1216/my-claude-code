@@ -2,7 +2,7 @@
 """
 dashboard.py
 LKPT Dashboard - 日次〜年次の集計ダッシュボード
-Version: 0.17.0
+Version: 0.18.0
 """
 
 import json
@@ -17,7 +17,11 @@ from datetime import datetime, timedelta
 
 from openpyxl import load_workbook
 
-from storage import EXCEL_PATH, ENTRIES_SHEET, TAGMASTER_SHEET, TIMELOG_SHEET
+from storage import (
+    EXCEL_PATH, ENTRIES_SHEET, TAGMASTER_SHEET, TIMELOG_SHEET,
+    ACTION_STATUS_DONE, ACTION_STATUS_PENDING, UNRECORDED_TAG,
+    complete_action, get_actions,
+)
 
 # COACHビュー（LKPTの期間要約）用。追加ライブラリを増やさない方針のため、
 # SDKは使わずurllib（標準ライブラリ）でGemini APIのREST版を直接呼ぶ。
@@ -49,7 +53,7 @@ BADGE_BG = "#454360"       # L/K/P/Tバッジの地色
 BADGE_FG = "#e8e6f2"
 
 PERIODS = ["D", "W", "M", "Q", "Y"]
-MODES = ["LKPT", "TIME"]
+MODES = ["LKPT", "TIME", "ACTION"]
 # HISTORYの並べ方。CARD=記録単位、FLOW=時間軸、GROUP=カテゴリ軸、
 # COACH=Gemini APIによるLKPT要約・アドバイスで並べる。
 HISTORY_VIEWS = ["CARD", "FLOW", "GROUP", "COACH"]
@@ -69,6 +73,13 @@ LKPT_FIELD_COLORS = {
     "K": "#66bb6a",
     "P": "#ef5350",
     "T": "#ba68c8",
+}
+
+# ACTIONモードの棒グラフ・チェック印の色。PROBLEM(P)と同じ赤系=未対応、
+# KEEP(K)と同じ緑系=解消済み、という意味の重なりをそのまま踏襲する
+ACTION_STATUS_COLORS = {
+    ACTION_STATUS_PENDING: "#ef5350",
+    ACTION_STATUS_DONE: "#66bb6a",
 }
 
 # COACHビューの見出し（build_coach_prompt()が指示する4見出しと対応）に
@@ -132,7 +143,12 @@ def load_entries(path: str = EXCEL_PATH) -> list:
         k = row[3] if len(row) > 3 and row[3] else ""
         p = row[4] if len(row) > 4 and row[4] else ""
         t = row[5] if len(row) > 5 and row[5] else ""
-        entries.append({"datetime": dt, "tag": tag, "l": l, "k": k, "p": p, "t": t})
+        # LKPTはタグ無しでも記録できるようになったため、必ず正規化する。
+        # openpyxlは空セルをNoneで返すので、ここで潰さないとf文字列に
+        # 文字列"None"が混入する（特にCOACHのプロンプト）
+        entries.append({
+            "datetime": dt, "tag": tag or "", "l": l, "k": k, "p": p, "t": t,
+        })
 
     print(f"📊 記録を読み込みました（{len(entries)}件）")
     return entries
@@ -149,6 +165,11 @@ def load_tag_colors(path: str = EXCEL_PATH) -> dict:
     for row in ws.iter_rows(min_row=2, values_only=True):
         if row[0]:
             colors[row[0]] = row[1] or "#888888"
+    # 「未記録」は、上限を超えて空いた時間に自動で付く印であってユーザーが
+    # 選ぶタグではないため、TagMasterには登録していない（＝ポップアップの
+    # 選択肢に出ない）。その代わり、ここで灰色を与えて棒グラフ・円グラフ・
+    # チップに「埋まっていない時間」として表示できるようにする
+    colors.setdefault(UNRECORDED_TAG, "#5a5a72")
     return colors
 
 
@@ -166,6 +187,9 @@ def load_time_log_entries(path: str = EXCEL_PATH) -> list:
     entries = []
     for row in ws.iter_rows(min_row=2, values_only=True):
         start_value, end_value, tag = row[0], row[1], row[2]
+        # 中項目（4列目）。これまで書き込むだけで一度も読んでいなかったため、
+        # 「R19の中で何をしていたか」が画面から確認できなかった
+        sub_item = (row[3] if len(row) > 3 else "") or ""
         if not start_value or not end_value:
             continue
         try:
@@ -180,7 +204,10 @@ def load_time_log_entries(path: str = EXCEL_PATH) -> list:
         except ValueError:
             print(f"⚠️ 日時の解析に失敗した行をスキップしました: {start_value} - {end_value}")
             continue
-        entries.append({"start": start_dt, "end": end_dt, "tag": tag, "datetime": end_dt})
+        entries.append({
+            "start": start_dt, "end": end_dt, "tag": tag or "",
+            "sub_item": sub_item, "datetime": end_dt,
+        })
 
     print(f"⏱️ 作業記録を読み込みました（{len(entries)}件）")
     return entries
@@ -274,7 +301,10 @@ def build_coach_prompt(entries: list, period_label: str) -> str:
             f"  {letter}: {e[key]}" for letter, key, _ in LKPT_FIELDS if e[key]
         ]
         if body_lines:
-            lines.append(f"[{stamp}] {e['tag']}")
+            # タグ無しのLKPTがあり得るため、末尾の余白を落として
+            # 「[08-07 10:07]」だけの行にする。「（タグなし）」のような
+            # 代替語は入れない（AIが実在のタグ名だと誤解するため）
+            lines.append(f"[{stamp}] {e['tag']}".rstrip())
             lines.extend(body_lines)
     records_text = "\n".join(lines) if lines else "（この期間に記録された内容はありません）"
 
@@ -362,10 +392,10 @@ def aggregate_time_by_tag(entries: list) -> dict:
 class DashboardWindow:
     """LKPT／作業時間の集計ダッシュボードウィンドウ。"""
 
-    def __init__(self, root: tk.Tk):
+    def __init__(self, root: tk.Tk, initial_mode: str = "LKPT"):
         self.root = root
         self.current_period = "D"
-        self.current_mode = "LKPT"
+        self.current_mode = initial_mode
         self.current_view = "CARD"
         self.reference_date = datetime.now()
         # 棒グラフクリックによる絞り込み。LKPTモードではL/K/P/Tの文字、
@@ -374,6 +404,7 @@ class DashboardWindow:
         self.tag_colors = {}
         self.entries = []
         self.time_entries = []
+        self.actions = []
         self._history_rows = []
         self.period_buttons = {}
         self.mode_buttons = {}
@@ -396,7 +427,11 @@ class DashboardWindow:
 
         self._init_fonts()
         self._build_ui()
-        self.refresh()
+        # _build_ui()はモードに関わらず一律の見た目で組み立てるため、
+        # ハイライト・VIEW行の表示切替・絞り込み解除・再描画をまとめて
+        # 行う_on_mode_change()を呼び、initial_modeに応じた画面に揃える
+        # （initial_mode="LKPT"の場合、従来のrefresh()単独呼び出しと同じ結果になる）
+        self._on_mode_change(self.current_mode)
 
     # ------------------------------------------------------------------
     # 構築
@@ -716,16 +751,16 @@ class DashboardWindow:
             self.tag_colors = load_tag_colors()
             if self.current_mode == "LKPT":
                 all_entries = load_entries()
-            else:
+            elif self.current_mode == "TIME":
                 all_entries = load_time_log_entries()
+            else:
+                all_entries = None  # ACTIONモードはget_actions()で別途読む
+                self.actions = get_actions()
         except Exception as e:
             self.summary_label.config(text=f"❌ 読込エラー: {e}")
             print(f"❌ ダッシュボードのデータ読込に失敗しました: {e}")
             return
 
-        filtered = filter_entries_by_period(
-            all_entries, self.current_period, reference=self.reference_date,
-        )
         period_label = format_period_label(self.current_period, self.reference_date)
 
         if self.chart_filter and self.current_mode == "LKPT":
@@ -738,6 +773,9 @@ class DashboardWindow:
         self.filter_label.config(text=filter_text)
 
         if self.current_mode == "LKPT":
+            filtered = filter_entries_by_period(
+                all_entries, self.current_period, reference=self.reference_date,
+            )
             self.entries = sorted(filtered, key=lambda e: e["datetime"])
             # LKPTモードの棒グラフはタグではなくL/K/P/Tで分類する
             field_counts = aggregate_lkpt_field_counts(self.entries)
@@ -752,7 +790,10 @@ class DashboardWindow:
             self.hist_count_label.config(text=f"{len(self._history_rows)} entries")
             self._draw_count_chart(field_counts)
             self._render_lkpt_history()
-        else:
+        elif self.current_mode == "TIME":
+            filtered = filter_entries_by_period(
+                all_entries, self.current_period, reference=self.reference_date,
+            )
             self.time_entries = sorted(filtered, key=lambda e: e["start"])
             # TIMEモードの棒グラフは今まで通りタグで分類する
             minutes_by_tag = aggregate_time_by_tag(self.time_entries)
@@ -768,6 +809,47 @@ class DashboardWindow:
             self.hist_count_label.config(text=f"{len(blocks)} blocks")
             self._draw_time_charts(minutes_by_tag)
             self._render_time_history(blocks)
+        else:
+            self._refresh_action_mode(period_label)
+
+    def _refresh_action_mode(self, period_label: str) -> None:
+        """
+        ACTIONモード: 未着手は期間に関わらず常に全件、完了は表示中の期間で
+        絞り込む（未完了のタスクが期間フィルタで見えなくなるのを防ぐため）。
+        """
+        start, end = _period_range(self.current_period, self.reference_date)
+        pending = [a for a in self.actions if a["status"] == ACTION_STATUS_PENDING]
+        pending.sort(key=lambda a: a["created_at"])
+        completed = [
+            a for a in self.actions
+            if a["status"] == ACTION_STATUS_DONE and a["completed_at"]
+            and start <= a["completed_at"] < end
+        ]
+        completed.sort(key=lambda a: a["completed_at"], reverse=True)
+
+        counts = {}
+        if pending:
+            counts[ACTION_STATUS_PENDING] = len(pending)
+        if completed:
+            counts[ACTION_STATUS_DONE] = len(completed)
+
+        show_pending = (
+            pending if not self.chart_filter or self.chart_filter == ACTION_STATUS_PENDING
+            else []
+        )
+        show_completed = (
+            completed if not self.chart_filter or self.chart_filter == ACTION_STATUS_DONE
+            else []
+        )
+
+        self.summary_label.config(
+            text=f"{period_label} ／ 未着手 {len(pending)}件 ・ 完了(期間内) {len(completed)}件"
+        )
+        self.hist_count_label.config(
+            text=f"{len(show_pending) + len(show_completed)} items"
+        )
+        self._draw_action_chart(counts)
+        self._render_action_list(show_pending, show_completed)
 
     # ------------------------------------------------------------------
     # グラフ
@@ -856,6 +938,18 @@ class DashboardWindow:
             color_map=self.tag_colors,
         )
         self._draw_pie(minutes_by_tag, cx=545, cy=118, r=84)
+
+    def _draw_action_chart(self, counts: dict) -> None:
+        """ACTIONモード: 未着手/完了(期間内)の件数を棒グラフで描く。"""
+        self.canvas.config(height=CHART_HEIGHT_LKPT)
+        self.canvas.delete("all")
+        if not counts:
+            self._draw_empty_chart()
+            return
+        self._draw_bars(
+            counts, x0=60, width=580, value_formatter=str,
+            color_map=ACTION_STATUS_COLORS,
+        )
 
     def _draw_pie(self, minutes_by_tag: dict, cx: int, cy: int, r: int) -> None:
         """
@@ -957,9 +1051,11 @@ class DashboardWindow:
         タグ名をプレーンテキストで表示する（LKPTモードのHISTORY用）。
         LKPTモードの色の主役はL/K/P/Tなので、タグ色のチップは使わず
         タグ名は補助情報として控えめに出す。
+        tagがNoneでも文字列"None"を描画しないよう、ここでも正規化しておく
+        （呼び出し側でも空判定しているが、構造的に起こり得なくしておく）。
         """
         return tk.Label(
-            parent, text=tag, bg=parent.cget("bg"), fg=DIM_TEXT, font=self.f_time,
+            parent, text=tag or "", bg=parent.cget("bg"), fg=DIM_TEXT, font=self.f_time,
         )
 
     def _badge(self, parent, letter: str):
@@ -1012,7 +1108,8 @@ class DashboardWindow:
                 bg=CARD_BG, fg=DIM_TEXT, font=self.f_time,
             ).pack(side="left")
             self._badge(row, letter).pack(side="left", padx=(8, 8))
-            self._tag_text(row, entry["tag"]).pack(side="left", padx=(0, 8))
+            if entry["tag"]:
+                self._tag_text(row, entry["tag"]).pack(side="left", padx=(0, 8))
             tk.Label(
                 row, text=self._truncate_to_width(entry[key], self.f_body, max_width),
                 bg=CARD_BG, fg=BODY_TEXT, font=self.f_body, anchor="w",
@@ -1049,7 +1146,8 @@ class DashboardWindow:
             )
 
             self._badge(item, letter).pack(side="left", padx=(0, 8))
-            self._tag_text(item, entry["tag"]).pack(side="left", padx=(0, 8))
+            if entry["tag"]:
+                self._tag_text(item, entry["tag"]).pack(side="left", padx=(0, 8))
             tk.Label(
                 item, text=self._truncate_to_width(entry[key], self.f_body, max_width),
                 bg=BG_COLOR, fg=BODY_TEXT, font=self.f_body, anchor="w",
@@ -1087,7 +1185,8 @@ class DashboardWindow:
                     row, text=entry["datetime"].strftime("%m-%d %H:%M"),
                     bg=BG_COLOR, fg=DIM_TEXT, font=self.f_time,
                 ).pack(side="left")
-                self._tag_text(row, entry["tag"]).pack(side="left", padx=(10, 0))
+                if entry["tag"]:
+                    self._tag_text(row, entry["tag"]).pack(side="left", padx=(10, 0))
                 tk.Label(
                     row,
                     text=self._truncate_to_width(entry[key], self.f_body, max_width),
@@ -1321,6 +1420,13 @@ class DashboardWindow:
                 row, text=span, bg=BG_COLOR, fg=DIM_TEXT, font=self.f_time,
             ).pack(side="left")
             self._tag_chip(row, entry["tag"]).pack(side="left", padx=(10, 0))
+            # 中項目（何をしていたか）。これまで書き込むだけで表示していな
+            # かったため、「R19の中で何をしていたか」が画面から分からなかった
+            if entry.get("sub_item"):
+                tk.Label(
+                    row, text=entry["sub_item"], bg=BG_COLOR, fg=DIM_TEXT,
+                    font=self.f_time,
+                ).pack(side="left", padx=(6, 0))
             tk.Label(
                 row, text=_format_duration(minutes), bg=BG_COLOR, fg=TEXT_COLOR,
                 font=self.f_chart_value, width=7, anchor="e",
@@ -1334,6 +1440,111 @@ class DashboardWindow:
             tk.Frame(track, bg=color).place(
                 x=0, y=0, relwidth=ratio, relheight=1.0,
             )
+
+    # --- ACTIONモードの一覧（VIEWの選択に関わらず共通） ---
+    def _render_action_list(self, pending: list, completed: list) -> None:
+        """
+        未着手・完了(期間内)を別セクションで表示する。未着手の行はクリックで
+        即座に完了にできる（dashboard.py初めての書き込み操作）。
+        """
+        self._clear_history()
+        if not pending and not completed:
+            self._show_history_empty()
+            return
+
+        max_width = self._wrap_length(70)
+
+        if pending:
+            section = tk.Frame(self.hist_inner, bg=BG_COLOR)
+            section.pack(fill="x", pady=(4, 0))
+            head = tk.Frame(section, bg=BG_COLOR)
+            head.pack(fill="x")
+            tk.Label(
+                head, text="🔲 未着手", bg=BG_COLOR, fg=TEXT_COLOR, font=self.f_chip,
+            ).pack(side="left")
+            tk.Label(
+                head, text=f"({len(pending)})", bg=BG_COLOR, fg=DIM_TEXT,
+                font=self.f_time,
+            ).pack(side="left", padx=(8, 0))
+            tk.Frame(section, bg=LINE_COLOR, height=1).pack(fill="x", pady=(6, 2))
+
+            for action in pending:
+                row = tk.Frame(section, bg=CARD_BG, cursor="hand2")
+                row.pack(fill="x", pady=2)
+
+                check = tk.Label(
+                    row, text="☐", bg=CARD_BG,
+                    fg=ACTION_STATUS_COLORS[ACTION_STATUS_PENDING], font=self.f_body,
+                )
+                check.pack(side="left", padx=(10, 8), pady=8)
+
+                body = tk.Frame(row, bg=CARD_BG)
+                body.pack(side="left", fill="both", expand=True, pady=8, padx=(0, 10))
+                tk.Label(
+                    body, text=action["content"], bg=CARD_BG, fg=BODY_TEXT,
+                    font=self.f_body, anchor="w", justify="left", wraplength=max_width,
+                ).pack(fill="x")
+
+                meta = tk.Frame(body, bg=CARD_BG)
+                meta.pack(fill="x", pady=(2, 0))
+                tk.Label(
+                    meta, text=action["created_at"].strftime("%m-%d %H:%M"),
+                    bg=CARD_BG, fg=DIM_TEXT, font=self.f_time,
+                ).pack(side="left")
+                if action["tag"]:
+                    self._tag_text(meta, action["tag"]).pack(side="left", padx=(8, 0))
+                if action["origin"] == "P":
+                    tk.Label(
+                        meta, text="from P", bg=CARD_BG, fg=DIM_TEXT, font=self.f_time,
+                    ).pack(side="left", padx=(8, 0))
+
+                for widget in (row, check, body):
+                    widget.bind(
+                        "<Button-1>",
+                        lambda e, r=action["row"]: self._complete_action(r),
+                    )
+
+        if completed:
+            section = tk.Frame(self.hist_inner, bg=BG_COLOR)
+            section.pack(fill="x", pady=(14, 0))
+            head = tk.Frame(section, bg=BG_COLOR)
+            head.pack(fill="x")
+            tk.Label(
+                head, text="☑ 完了", bg=BG_COLOR, fg=TEXT_COLOR, font=self.f_chip,
+            ).pack(side="left")
+            tk.Label(
+                head, text=f"({len(completed)})", bg=BG_COLOR, fg=DIM_TEXT,
+                font=self.f_time,
+            ).pack(side="left", padx=(8, 0))
+            tk.Frame(section, bg=LINE_COLOR, height=1).pack(fill="x", pady=(6, 2))
+
+            for action in completed:
+                row = tk.Frame(section, bg=BG_COLOR)
+                row.pack(fill="x", pady=2)
+                tk.Label(
+                    row, text="☑", bg=BG_COLOR,
+                    fg=ACTION_STATUS_COLORS[ACTION_STATUS_DONE], font=self.f_body,
+                ).pack(side="left", padx=(10, 8))
+
+                body = tk.Frame(row, bg=BG_COLOR)
+                body.pack(side="left", fill="both", expand=True)
+                tk.Label(
+                    body, text=action["content"], bg=BG_COLOR, fg=DIM_TEXT,
+                    font=self.f_body, anchor="w", justify="left", wraplength=max_width,
+                ).pack(fill="x")
+                tk.Label(
+                    body, text=action["completed_at"].strftime("%m-%d %H:%M"),
+                    bg=BG_COLOR, fg=DIM_TEXT, font=self.f_time,
+                ).pack(anchor="w", pady=(2, 0))
+
+    def _complete_action(self, row: int) -> None:
+        """未着手のアクションをクリックした時、その場で完了にする。"""
+        try:
+            complete_action(row)
+        except Exception as e:
+            print(f"❌ アクションの完了処理に失敗しました: {e}")
+            return
+        self.refresh()
 
 
 def run() -> None:
