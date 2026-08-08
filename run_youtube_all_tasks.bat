@@ -1,12 +1,40 @@
 @echo off
+setlocal enabledelayedexpansion
 chcp 65001 > nul
-setlocal
+
+rem ========================================
+rem YouTube All Tasks Runner (chained)
+rem Version is tracked in Git, not in this file.
+rem
+rem Usage:
+rem   run_youtube_all_tasks.bat        ... interactive (pauses at the end)
+rem   run_youtube_all_tasks.bat auto   ... unattended (no pause; for Task Scheduler)
+rem
+rem [20260808] Changes:
+rem   - cd /d "%~dp0" so the chain works regardless of the caller's
+rem     working directory (Task Scheduler "Start in" is often different).
+rem   - Record each step's exit code and report them together at the end.
+rem     Previously a failing step was echoed and then silently ignored,
+rem     so a night where a step died looked the same as a healthy one.
+rem   - Added the morning brief as Step 4.
+rem   - pause only in interactive mode; unattended runs would hang forever.
+rem ========================================
+
+cd /d "%~dp0"
+
+set "RC1=0"
+set "RC2=0"
+set "RC3=0"
+set "RC4=0"
+set "FAILED="
 
 echo =========================================================
-echo [Step 1/3] run_youtube_channel_remove_auto.bat を実行します
+echo [Step 1/4] run_youtube_channel_remove_auto.bat を実行します
 echo =========================================================
 call run_youtube_channel_remove_auto.bat
-echo [Step 1] 完了. 終了コード: %ERRORLEVEL%
+set "RC1=!ERRORLEVEL!"
+echo [Step 1] 完了. 終了コード: !RC1!
+if not "!RC1!"=="0" set "FAILED=!FAILED! Step1-remove"
 echo.
 
 echo ---------------------------------------------------------
@@ -15,10 +43,12 @@ echo ---------------------------------------------------------
 timeout /t 5 /nobreak >nul
 
 echo =========================================================
-echo [Step 2/3] run_youtube_List_auto_setup.bat を実行します
+echo [Step 2/4] run_youtube_List_auto_setup.bat を実行します
 echo =========================================================
 call run_youtube_List_auto_setup.bat
-echo [Step 2] 完了. 終了コード: %ERRORLEVEL%
+set "RC2=!ERRORLEVEL!"
+echo [Step 2] 完了. 終了コード: !RC2!
+if not "!RC2!"=="0" set "FAILED=!FAILED! Step2-setup"
 echo.
 
 echo ---------------------------------------------------------
@@ -27,14 +57,52 @@ echo ---------------------------------------------------------
 timeout /t 5 /nobreak >nul
 
 echo =========================================================
-echo [Step 3/3] run_youtube_summary_auto.bat を実行します
+echo [Step 3/4] run_youtube_summary_auto.bat を実行します
 echo =========================================================
 call run_youtube_summary_auto.bat
-echo [Step 3] 完了. 終了コード: %ERRORLEVEL%
+set "RC3=!ERRORLEVEL!"
+echo [Step 3] 完了. 終了コード: !RC3!
+if not "!RC3!"=="0" set "FAILED=!FAILED! Step3-summary"
+echo.
+
+echo ---------------------------------------------------------
+echo 次の処理まで 5秒間 待機します...
+echo ---------------------------------------------------------
+timeout /t 5 /nobreak >nul
+
+echo =========================================================
+echo [Step 4/4] run_morning_brief.bat を実行します
+echo =========================================================
+rem The brief reports what the three steps above actually produced,
+rem so it must run last.
+call run_morning_brief.bat
+set "RC4=!ERRORLEVEL!"
+echo [Step 4] 完了. 終了コード: !RC4!
+if not "!RC4!"=="0" set "FAILED=!FAILED! Step4-brief"
 echo.
 
 echo =========================================================
-echo 全てのタスクが完了しました。
+echo Execution Summary
 echo =========================================================
-pause
-exit /b
+echo   Step 1 remove  : !RC1!
+echo   Step 2 setup   : !RC2!
+echo   Step 3 summary : !RC3!
+echo   Step 4 brief   : !RC4!
+echo =========================================================
+
+if defined FAILED (
+    echo RESULT: FAILED -!FAILED!
+    set "EXIT_CODE=1"
+) else (
+    echo RESULT: All steps completed successfully.
+    set "EXIT_CODE=0"
+)
+echo =========================================================
+
+rem Pause only when run interactively. A scheduled run passing "auto"
+rem must not block on user input.
+if /I not "%~1"=="auto" pause
+
+exit /b !EXIT_CODE!
+
+endlocal
