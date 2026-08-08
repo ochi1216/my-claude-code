@@ -166,11 +166,17 @@ def run_schtasks(args, dry_run=False, check=True):
     out = decode_console(proc.stdout).strip()
     err = decode_console(proc.stderr).strip()
     if check and proc.returncode != 0:
+        detail = err or out
         print(f"[ERROR] コマンド失敗 (終了コード {proc.returncode}): {printable}")
-        if err:
-            print(f"        {err}")
-        elif out:
-            print(f"        {out}")
+        if detail:
+            print(f"        {detail}")
+        # [20260808] 「Access is denied.」は原因が分かりにくいので補足する。
+        # 管理者権限で作成されたタスクは、通常権限では削除・変更できない。
+        if 'access is denied' in detail.lower() or 'アクセスが拒否' in detail:
+            print("        → このタスクは管理者権限で作成されているため、")
+            print("          通常のコマンドプロンプトでは削除・変更できません。")
+            print("          コマンドプロンプトを「管理者として実行」してから")
+            print("          もう一度お試しください。")
     return proc.returncode, out, err
 
 
@@ -383,6 +389,17 @@ def find_unmanaged(cfg):
     return found
 
 
+def is_admin():
+    """管理者権限で実行されているかを判定する。判定不能なら None を返す。"""
+    if sys.platform != 'win32':
+        return None
+    try:
+        import ctypes
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return None
+
+
 def cmd_cleanup(cfg, dry_run):
     """管理外タスクを1件ずつ確認しながら削除する。
 
@@ -396,6 +413,15 @@ def cmd_cleanup(cfg, dry_run):
         return 0
 
     print("--- 管理外タスクの削除 ---")
+    # [20260808] 管理者権限で作成されたタスクは通常権限では削除できず、
+    # 「Access is denied.」で全件失敗する。先に警告して無駄足を防ぐ。
+    if is_admin() is False and not dry_run:
+        print("  ⚠ 管理者権限で実行されていません。")
+        print("    以前に管理者権限で作成されたタスクは削除できず、")
+        print("    「Access is denied.」となる可能性があります。")
+        print("    その場合はコマンドプロンプトを「管理者として実行」して")
+        print("    もう一度お試しください。")
+        print()
     print("  各タスクについて y / n を選んでください（既定は n = 削除しない）。\n")
 
     deleted = failed = skipped = 0
