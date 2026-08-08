@@ -1,2 +1,5 @@
 __pycache__/
 *.pyc
+
+# 実行時に生成されるログ（計測ログ glasp_measure.log を含む）
+*.log

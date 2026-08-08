@@ -98,6 +98,9 @@ MAX_MEMORY_MB = 8000 # システムの最大メモリ（MB）
 # ファイルパス
 CONFIG_FILE = "config.json"
 LOG_FILE = "youtube_summary.log"
+# [計測] youtube_summary.log は実行ごとに mode='w' で作り直されるため、
+# 夜間の複数回の実行を横断して集計するための追記専用ファイルを別に持つ。
+MEASURE_LOG_FILE = "glasp_measure.log"
 # OUTPUT_DIR = Path("output")
 OUTPUT_DIR = r"C:\Users\nx023836\Nexperia\My Private - Documents\Summary"
 # OUTPUT_DIR.mkdir(exist_ok=True)
@@ -1483,6 +1486,21 @@ def perf_log(metric_name: str, start_time: float, **fields):
         log_message(f"PERF|{metric_name}|sec={elapsed:.3f}{suffix}", "INFO")
     except Exception as e:
         log_message(f"PERF_LOG_ERROR|{metric_name}|{e}", "WARNING")
+
+def measure_log(line: str):
+    """
+    [計測] Glasp起動の判定内訳を、実行をまたいで蓄積するための追記専用ログ。
+    通常ログ（youtube_summary.log）は実行ごとに作り直されるため、そちらに出すと
+    02:00/05:00/11:30/20:00 の各回の記録が次の回で消えてしまう。
+    集計専用であり、処理の分岐には一切使用しない。
+    """
+    log_message(line, "INFO")
+    try:
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(MEASURE_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"{stamp}\t{line}\n")
+    except Exception as e:
+        log_message(f"GLASP_MEASURE_ERROR|stage=measure_log_write|error={e}", "WARNING")
 
 def auto_askyesno(title: str, message: str, default: bool = True) -> bool:
     """askyesnoの自動化ラッパー
@@ -3123,7 +3141,34 @@ class GlaspEngine:
         original_socket_timeout = 60.0
         temp_socket_timeout = 15.0
 
+        def _measure_video(item: Dict, success: bool, r2_click: Optional[int], reason: str = ""):
+            """
+            [計測] 動画1本の最終結果を、1巡目/2巡目それぞれのゲート判定内訳と
+            突き合わせて1行にまとめる。「api宣言だけで通過した動画」と
+            「文字起こし行の実体まで揃っていた動画」で、2巡目の成功率および
+            必要クリック数に差が出るかを見るための材料。集計専用で、
+            処理の分岐には一切使用しない。
+            """
+            try:
+                g1 = item.get('gate_r1') or {}
+                g2 = item.get('gate_r2') or {}
+                measure_log(
+                    "GLASP_MEASURE_VIDEO|"
+                    f"video_idx={item.get('playlist_position')}|"
+                    f"video_id={str(item.get('video_id_for_log', ''))[:12]}|"
+                    f"success={bool(success)}|"
+                    f"r2_click={'-' if r2_click is None else r2_click + 1}|"
+                    f"r1_api={g1.get('api')}|r1_seg={g1.get('seg')}|r1_seg_count={g1.get('seg_count')}|"
+                    f"r1_seg_len={g1.get('seg_len')}|"
+                    f"r2_api={g2.get('api')}|r2_seg={g2.get('seg')}|r2_seg_count={g2.get('seg_count')}|"
+                    f"r2_seg_len={g2.get('seg_len')}|"
+                    f"reason={str(reason)[:60]}"
+                )
+            except Exception as measure_error:
+                log_message(f"GLASP_MEASURE_ERROR|stage=video_line|error={measure_error}", "WARNING")
+
         def _finalize_success(item: Dict, glasp_handle: str, retry_count: int):
+            _measure_video(item, True, retry_count)
             perf_log(
                 "glasp_video_total",
                 item['video_total_start'],
@@ -3146,6 +3191,7 @@ class GlaspEngine:
 
         def _finalize_failure(item: Dict, error_msg: str):
             nonlocal skipped_count
+            _measure_video(item, False, None, error_msg)
             log_message(f"動画{item['playlist_position']}: 処理失敗: {error_msg}", "WARNING")
             perf_log(
                 "glasp_video_total",
@@ -3252,14 +3298,18 @@ class GlaspEngine:
                 try:
                     trig = self._trigger_glasp_click(
                         item['tab_info'], item['playlist_position'], attempt_index=0,
-                        timeout_threshold=slow_tab_threshold, input_mode=input_mode
+                        timeout_threshold=slow_tab_threshold, input_mode=input_mode,
+                        round_label="1"
                     )
                 except Exception as e:
                     error_msg = str(e)
+                    item['gate_r1'] = dict(getattr(self, '_last_transcript_measure', None) or {})
                     if "FATAL" in error_msg:
                         raise Exception(error_msg)
                     candidate_items.append(item)
                     continue
+
+                item['gate_r1'] = dict(getattr(self, '_last_transcript_measure', None) or {})
 
                 if not trig['ok'] and trig.get('permanent'):
                     _finalize_failure(item, GENERIC_FAIL_MSG)
@@ -3283,6 +3333,15 @@ class GlaspEngine:
                 stray_closed = self._cleanup_stray_glasp_tabs(protected_handles)
                 if stray_closed:
                     log_message(f"予期しないGeminiタブを{stray_closed}個クリーンアップしました", "INFO")
+
+                # [計測] 1巡目のクリックが実際に何枚のタブを開いてしまったか。
+                # 「1巡目で捨てているGeminiセッション数」の実測値であり、
+                # 確認画面(reCAPTCHA)を誘発している負荷量の見積もりに使う。
+                measure_log(
+                    "GLASP_MEASURE_STRAY|"
+                    f"round1_attempted={len(pending)}|round1_candidates={len(candidate_items)}|"
+                    f"stray_closed={stray_closed}"
+                )
 
                 # [S03十七訂] クリーンアップ直後、2巡目の最初の1本だけクリックは
                 # 成功してもGeminiタブが一切出現しない、という現象が実機ログで
@@ -3326,13 +3385,17 @@ class GlaspEngine:
                     try:
                         trig = self._trigger_glasp_click(
                             item['tab_info'], item['playlist_position'], attempt_index=r2_attempt,
-                            timeout_threshold=slow_tab_threshold, input_mode=input_mode
+                            timeout_threshold=slow_tab_threshold, input_mode=input_mode,
+                            round_label="2"
                         )
                     except Exception as e:
                         error_msg = str(e)
+                        item['gate_r2'] = dict(getattr(self, '_last_transcript_measure', None) or {})
                         if "FATAL" in error_msg:
                             raise Exception(error_msg)
                         continue
+
+                    item['gate_r2'] = dict(getattr(self, '_last_transcript_measure', None) or {})
 
                     if not trig['ok']:
                         if trig.get('permanent'):
@@ -3652,6 +3715,11 @@ class GlaspEngine:
             except Exception as e:
                 log_message(f"TRANSCRIPT_DIAG_ERROR|stage={stage}|error={type(e).__name__}:{e}", "WARNING")
 
+        # [計測] 直近のゲート判定の内訳を保持する。呼び出し側（_trigger_glasp_click）が
+        # 動画番号と紐付けてGLASP_MEASURE_GATE行として出力するための受け渡し用。
+        # 判定ロジックそのものには影響しない。
+        self._last_transcript_measure: Dict = {'captured': False}
+
         _log_transcript_diag("start")
         try:
             try:
@@ -3672,13 +3740,49 @@ class GlaspEngine:
                 result = self.driver.execute_script("""
                     const captions = window.ytInitialPlayerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
                     const hasApiCaptions = captions && captions.length > 0;
-                    const hasTranscriptSegments = document.querySelectorAll('ytd-transcript-segment-renderer').length > 0;
-                    return { 
-                        available: hasApiCaptions || hasTranscriptSegments, 
-                        reason: hasApiCaptions ? 'API確認OK' : (hasTranscriptSegments ? 'UI要素検出' : '未検出')
+                    const segs = document.querySelectorAll('ytd-transcript-segment-renderer');
+                    const hasTranscriptSegments = segs.length > 0;
+                    // --- ここから下は計測用の付加情報。available/reason の算出には関与しない ---
+                    let segTextLength = 0;
+                    try {
+                        const sampleMax = Math.min(segs.length, 40);
+                        for (let i = 0; i < sampleMax; i++) {
+                            segTextLength += ((segs[i].innerText) || '').length;
+                        }
+                    } catch (e) { segTextLength = -1; }
+                    let panelOpen = false;
+                    try {
+                        panelOpen = !!document.querySelector('ytd-transcript-renderer');
+                    } catch (e) { panelOpen = false; }
+                    return {
+                        available: hasApiCaptions || hasTranscriptSegments,
+                        reason: hasApiCaptions ? 'API確認OK' : (hasTranscriptSegments ? 'UI要素検出' : '未検出'),
+                        measureApiCaptions: !!hasApiCaptions,
+                        measureSegments: !!hasTranscriptSegments,
+                        measureSegmentCount: segs.length,
+                        measureSegmentTextLength: segTextLength,
+                        measurePanelPresent: panelOpen,
+                        measureTrackCount: captions ? captions.length : 0
                     };
                 """)
                 _log_transcript_diag("after_transcript_script", attempt=attempt, result=result)
+
+                # [計測] 判定の内訳を記録する（判定そのものは上のJSの available をそのまま使う）
+                try:
+                    if isinstance(result, dict):
+                        self._last_transcript_measure = {
+                            'captured': True,
+                            'gate_attempt': attempt,
+                            'available': bool(result.get('available')),
+                            'api': bool(result.get('measureApiCaptions')),
+                            'seg': bool(result.get('measureSegments')),
+                            'seg_count': result.get('measureSegmentCount', -1),
+                            'seg_len': result.get('measureSegmentTextLength', -1),
+                            'panel': bool(result.get('measurePanelPresent')),
+                            'tracks': result.get('measureTrackCount', -1),
+                        }
+                except Exception as measure_error:
+                    log_message(f"GLASP_MEASURE_ERROR|stage=gate_capture|error={measure_error}", "WARNING")
 
                 if result['available']:
                     _log_transcript_diag("return_available_true", attempt=attempt, result=result)
@@ -4034,7 +4138,8 @@ class GlaspEngine:
 
 
     def _trigger_glasp_click(self, tab_info: Dict, playlist_position: int, attempt_index: int,
-                              timeout_threshold: float = 10.0, input_mode: str = 'js_click') -> Dict:
+                              timeout_threshold: float = 10.0, input_mode: str = 'js_click',
+                              round_label: str = "?") -> Dict:
         """
         [ADR-0001、S03再修正] Glasp起動の「クリック処理」のみを行う（タブ準備確認〜きらきらボタンクリックまで）。
         Geminiタブの検出待ちは行わない（検出は_wait_for_new_glasp_handle/_confirm_glasp_successへ分離）。
@@ -4076,6 +4181,10 @@ class GlaspEngine:
                 return self.driver.window_handles
             except:
                 return []
+
+        # [計測] 前の動画の判定内訳が残ったまま次の動画の記録として拾われないよう、
+        # クリック処理に入る時点で必ず初期化する（判定ロジックには無関係）。
+        self._last_transcript_measure = {'captured': False}
 
         click_phase_start = time.time()
         try:
@@ -4131,6 +4240,27 @@ class GlaspEngine:
 
             step_start = time.time()
             has_transcript, reason = self._check_transcript_availability(tab_info["tab_handle"])
+
+            # [計測] 「字幕が存在するという宣言(api)だけで通過したのか、
+            #   実際に描画された文字起こし行(seg)まで揃って通過したのか」を1行で記録する。
+            #   Glaspをクリックする直前の状態であり、後段のGeminiが空になる現象との
+            #   相関を見るための材料。判定・分岐には一切使用しない。
+            try:
+                m = getattr(self, '_last_transcript_measure', None) or {}
+                if isinstance(tab_info, dict):
+                    tab_info['last_gate_measure'] = dict(m)
+                measure_log(
+                    "GLASP_MEASURE_GATE|"
+                    f"round={round_label}|attempt={attempt_index + 1}|"
+                    f"video_idx={playlist_position}|video_id={video_id_for_log[:12]}|"
+                    f"pass={bool(has_transcript)}|api={m.get('api')}|seg={m.get('seg')}|"
+                    f"seg_count={m.get('seg_count')}|seg_len={m.get('seg_len')}|"
+                    f"panel={m.get('panel')}|tracks={m.get('tracks')}|"
+                    f"gate_attempt={m.get('gate_attempt')}|captured={m.get('captured', False)}"
+                )
+            except Exception as measure_error:
+                log_message(f"GLASP_MEASURE_ERROR|stage=gate_log|error={measure_error}", "WARNING")
+
             if not has_transcript:
                 _perf_step("video_ready_check", step_start, success=False, reason=reason)
                 log_message(f"動画{playlist_position}: {reason} - Glaspスキップ", "INFO")
