@@ -3,8 +3,9 @@ setlocal enabledelayedexpansion
 chcp 65001 > nul
 cd /d "%~dp0"
 
-echo [1] python を呼び出します...
-python check_suspend_lock.py
+echo [1] フルパスのpython.exeで呼び出します（修正後の本番と同じ方式）...
+set "PYTHON_EXE=C:\Users\nx023836\AppData\Local\Programs\Python\Python313\python.exe"
+"%PYTHON_EXE%" check_suspend_lock.py
 set "LOCKRC=!ERRORLEVEL!"
 echo [2] 戻り値を確認します。 LOCKRC=[!LOCKRC!]
 

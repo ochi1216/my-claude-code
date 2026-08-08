@@ -32,8 +32,18 @@ rem Step 1 removes videos from the playlists, and running it before the
 rem summaries are finished would drop videos that were never summarized.
 rem Exit code 1 means suspended. Any other code means the check itself
 rem could not run, in which case we deliberately continue as usual.
+rem
+rem [20260809] Bare "python ..." (without "call") silently handed control
+rem to whatever "python" resolves to on PATH and never returned to this
+rem script - every line after it, including the very next "set", simply
+rem never ran. This is why the whole chain looked like it finished in
+rem under a second: it never got past this line. The other scripts in
+rem this project already avoid bare "python" for exactly this kind of
+rem reason and call the interpreter by its full path; this one line had
+rem not been brought in line with that.
 rem ========================================
-python check_suspend_lock.py
+set "PYTHON_EXE=C:\Users\nx023836\AppData\Local\Programs\Python\Python313\python.exe"
+"%PYTHON_EXE%" check_suspend_lock.py
 set "LOCKRC=!ERRORLEVEL!"
 if "!LOCKRC!"=="1" goto :suspended
 
