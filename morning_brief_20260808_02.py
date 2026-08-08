@@ -57,9 +57,20 @@ DEFAULT_PLAYLISTS = {
 SHORT_SUMMARY_CHARS = 300      # これ未満の要約は「中身が薄い」として警告
 SLOW_PROCESSING_SEC = 55.0     # 60秒タイムアウトに張り付いた疑い
 
-# summary_{playlist}_{YYYYMMDD_HHMMSS}.json
+# summary_{playlist}_{YYYYMMDD_HHMMSS}.json / .html
 RE_SUMMARY_JSON = re.compile(r'^summary_(.*)_(\d{8}_\d{6})\.json$')
 RE_SUMMARY_HTML = re.compile(r'^summary_(.*)_(\d{8}_\d{6})\.html$')
+
+# [20260808_02] 本体の output_format 既定値は 'html' で 'both' ではないため、
+# save_json() は呼ばれずJSONは1件も出力されない（実機で確認）。
+# HTMLしか無くても台帳が成立するよう、生成HTMLから直接読み取る。
+# 生成側 _generate_modern_html() の実際の出力:
+#   <div id="card-{i}" class="video-card" data-index="{i}">           成功
+#   <div id="card-{i}" class="video-card error-card" data-index="{i}"> 失敗
+#   <div class="video-title">{i}. {タイトル}</div>
+RE_CARD = re.compile(r'class="video-card( error-card)?"')
+RE_CARD_TITLE = re.compile(r'<div class="video-title">(.*?)</div>', re.DOTALL)
+RE_TAG = re.compile(r'<[^>]+>')
 
 
 # ============================================================================
@@ -84,6 +95,48 @@ def load_expected_playlists(config_file):
     return dict(DEFAULT_PLAYLISTS), "(既定値)"
 
 
+def unescape_min(text):
+    return (text.replace('&amp;', '&').replace('&lt;', '<')
+            .replace('&gt;', '>').replace('&quot;', '"').replace('&#39;', "'"))
+
+
+def parse_summary_html(path):
+    """生成済みの要約HTMLから動画の一覧と成否を読み取る。
+
+    JSONが出力されていない環境（output_format='html'）でも
+    実行台帳が成立するようにするための読み取り経路。
+    JSONほどの情報量は無いが、台帳に必要な
+    「どの分類が・いつ・何本・何本失敗したか」は取得できる。
+    """
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            html = f.read()
+    except Exception:
+        return None
+
+    statuses = [bool(m.group(1)) for m in RE_CARD.finditer(html)]
+    titles = [unescape_min(RE_TAG.sub('', t)).strip()
+              for t in RE_CARD_TITLE.findall(html)]
+
+    videos = []
+    for idx, is_error in enumerate(statuses):
+        raw = titles[idx] if idx < len(titles) else ''
+        # 生成側は "1. タイトル" の形式で出力している
+        title = re.sub(r'^\s*\d+\.\s*', '', raw) or '(タイトル不明)'
+        videos.append({
+            'title': title,
+            'channel': '',
+            'url': '',
+            'duration': '',
+            'success': not is_error,
+            'summary_len': -1,        # HTML経路では取得できない
+            'processing_time': 0.0,   # 同上（60秒張り付き判定は行わない）
+            'error_message': '' if not is_error else '(HTMLでは理由不明)',
+            'gemini_url': '',
+        })
+    return videos
+
+
 def parse_timestamp(stamp):
     """'YYYYMMDD_HHMMSS' を datetime に変換する。失敗時は None。"""
     try:
@@ -103,6 +156,7 @@ def collect_runs(output_dir, since):
         'dir_exists': os.path.isdir(output_dir),
         'files_total': 0,
         'json_matched': 0,
+        'html_matched': 0,
         'in_window': 0,
         'newest_name': '',
         'newest_ts': None,
@@ -111,62 +165,81 @@ def collect_runs(output_dir, since):
     if not scan['dir_exists']:
         return None, [], scan
 
-    html_by_key = {}
-    for name in os.listdir(output_dir):
-        m = RE_SUMMARY_HTML.match(name)
-        if m:
-            html_by_key[(m.group(1), m.group(2))] = os.path.join(output_dir, name)
-
-    runs = []
-    problems = []
     all_names = sorted(os.listdir(output_dir))
     scan['files_total'] = len(all_names)
     scan['sample'] = [n for n in all_names if n.lower().endswith(('.json', '.html'))][-5:]
 
+    # (playlist, stamp) -> {'json': path, 'html': path}
+    found = {}
     for name in all_names:
-        m = RE_SUMMARY_JSON.match(name)
-        if not m:
+        mj = RE_SUMMARY_JSON.match(name)
+        mh = RE_SUMMARY_HTML.match(name)
+        if mj:
+            scan['json_matched'] += 1
+            key, kind = (mj.group(1), mj.group(2)), 'json'
+        elif mh:
+            scan['html_matched'] += 1
+            key, kind = (mh.group(1), mh.group(2)), 'html'
+        else:
             continue
-        scan['json_matched'] += 1
-        playlist, stamp = m.group(1), m.group(2)
-        ts = parse_timestamp(stamp)
+
+        ts = parse_timestamp(key[1])
         if ts is not None and (scan['newest_ts'] is None or ts > scan['newest_ts']):
             scan['newest_ts'] = ts
             scan['newest_name'] = name
+        found.setdefault(key, {})[kind] = os.path.join(output_dir, name)
+
+    runs = []
+    problems = []
+    for (playlist, stamp), paths in sorted(found.items(), key=lambda kv: kv[0][1]):
+        ts = parse_timestamp(stamp)
         if ts is None or ts < since:
             continue
         scan['in_window'] += 1
 
-        path = os.path.join(output_dir, name)
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-        except Exception as e:
-            problems.append(f"{name} を読めませんでした: {e}")
-            continue
+        videos = None
+        source = ''
+        # JSONがあれば情報量が多いので優先。無ければHTMLから読む。
+        if 'json' in paths:
+            try:
+                with open(paths['json'], 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                videos = []
+                for r in (data.get('results') or []):
+                    video = r.get('video') or {}
+                    summary = r.get('summary') or ""
+                    videos.append({
+                        'title': video.get('title') or '(タイトル不明)',
+                        'channel': video.get('channel') or '',
+                        'url': video.get('url') or '',
+                        'duration': video.get('duration') or '',
+                        'success': bool(r.get('success')),
+                        'summary_len': len(summary),
+                        'processing_time': float(r.get('processing_time') or 0.0),
+                        'error_message': r.get('error_message') or '',
+                        'gemini_url': r.get('gemini_url') or '',
+                    })
+                source = 'json'
+            except Exception as e:
+                problems.append(f"{os.path.basename(paths['json'])} を読めませんでした: {e}")
+                videos = None
 
-        results = data.get('results') or []
-        videos = []
-        for r in results:
-            video = r.get('video') or {}
-            summary = r.get('summary') or ""
-            videos.append({
-                'title': video.get('title') or '(タイトル不明)',
-                'channel': video.get('channel') or '',
-                'url': video.get('url') or '',
-                'duration': video.get('duration') or '',
-                'success': bool(r.get('success')),
-                'summary_len': len(summary),
-                'processing_time': float(r.get('processing_time') or 0.0),
-                'error_message': r.get('error_message') or '',
-                'gemini_url': r.get('gemini_url') or '',
-            })
+        if videos is None and 'html' in paths:
+            videos = parse_summary_html(paths['html'])
+            source = 'html'
+            if videos is None:
+                problems.append(f"{os.path.basename(paths['html'])} を読めませんでした")
+                continue
+
+        if videos is None:
+            continue
 
         runs.append({
             'playlist': playlist,
             'timestamp': ts,
-            'json_path': path,
-            'html_path': html_by_key.get((playlist, stamp), ''),
+            'json_path': paths.get('json', ''),
+            'html_path': paths.get('html', ''),
+            'source': source,
             'videos': videos,
         })
 
@@ -182,13 +255,20 @@ def describe_scan(scan, output_dir, since):
 
     lines.append(
         f"ファイル総数 {scan['files_total']} / "
-        f"summary_*.json 命名一致 {scan['json_matched']} / "
-        f"対象期間内 {scan['in_window']}"
+        f"summary_*.json {scan['json_matched']}件 / "
+        f"summary_*.html {scan['html_matched']}件 / "
+        f"対象期間内 {scan['in_window']}件"
     )
+    if scan['json_matched'] == 0 and scan['html_matched'] > 0:
+        lines.append(
+            "→ JSONが1件もありません。本体の output_format 既定値が 'html' のため "
+            "save_json() が呼ばれていません。HTMLから読み取って台帳を作ります"
+            "（config.json の general.output_format を 'both' にすると詳細が増えます）。"
+        )
     if scan['newest_ts']:
         age = (datetime.now() - scan['newest_ts']).total_seconds() / 3600.0
         lines.append(
-            f"最新の要約JSON: {scan['newest_name']} "
+            f"最新の要約ファイル: {scan['newest_name']} "
             f"({scan['newest_ts']:%m/%d %H:%M} = {age:.1f}時間前)"
         )
         if scan['in_window'] == 0:
@@ -284,8 +364,9 @@ def detect_anomalies(ledger, runs, log_file):
         reason = v['error_message'] or '理由不明'
         items.append(f"[{playlist}] 要約失敗: {v['title'][:40]} — {reason[:60]}")
 
+    # summary_len が -1 の動画はHTML経路で情報が取れていないため判定対象外
     short = [(r['playlist'], v) for r in runs for v in r['videos']
-             if v['success'] and v['summary_len'] < SHORT_SUMMARY_CHARS]
+             if v['success'] and 0 <= v['summary_len'] < SHORT_SUMMARY_CHARS]
     for playlist, v in short:
         items.append(
             f"[{playlist}] 要約が短すぎます({v['summary_len']}字): {v['title'][:40]}"
