@@ -2,7 +2,7 @@
 """
 dashboard.py
 LKPT Dashboard - 日次〜年次の集計ダッシュボード
-Version: 0.19.0
+Version: 0.20.0
 """
 
 import json
@@ -498,6 +498,12 @@ class DashboardWindow:
         # メインスレッド側でafter()による定期ポーリングで取り出す
         self._coach_result_queue = queue.Queue()
 
+        # 高さを画面いっぱいに広げるトグルボタン用。展開前のジオメトリを
+        # 覚えておき、もう一度押した時にそこへ戻す（MS To Doの展開ボタンと
+        # 同じ挙動）。幅・横位置は変えず、高さと縦位置だけを操作する
+        self._height_expanded = False
+        self._normal_geometry = None
+
         self.root.title("LKPT Dashboard")
         self.root.configure(bg=BG_COLOR)
         self.root.geometry("760x720")
@@ -541,6 +547,17 @@ class DashboardWindow:
             font=self.f_title,
         )
         title.pack(pady=(14, 8))
+
+        # 高さを画面いっぱいに広げる／元に戻すトグル（MS To Doの展開ボタンと同じ）。
+        # 中央揃えのタイトル行とは独立させたいため、packではなくplace()で
+        # ウィンドウ右上に固定する（TODAYボタンと同じ手法）
+        self.expand_height_btn = tk.Button(
+            self.root, text="⤢", bg=BG_COLOR, fg=DIM_TEXT,
+            activebackground=BG_COLOR, activeforeground=ACCENT_COLOR,
+            relief="flat", bd=0, font=self.f_button, cursor="hand2",
+            command=self._toggle_height_expand,
+        )
+        self.expand_height_btn.place(relx=1.0, x=-14, y=14, anchor="ne")
 
         self.mode_frame = tk.Frame(self.root, bg=BG_COLOR)
         self.mode_frame.pack(pady=(0, 5))
@@ -800,6 +817,32 @@ class DashboardWindow:
     def _go_to_today(self) -> None:
         self.reference_date = datetime.now()
         self.refresh()
+
+    def _toggle_height_expand(self) -> None:
+        """
+        ウィンドウの高さを画面いっぱいに広げる／元に戻すトグル
+        （MS To Doの展開ボタンと同じ動作）。幅・横位置(x)はそのままに、
+        高さと縦位置(y)だけを操作する。展開前のジオメトリは
+        self.root.geometry()（引数無し）でその時点の実際の値を控えておき、
+        ユーザーが手動でリサイズしていた場合もその状態へ戻せるようにする。
+        """
+        if self._height_expanded:
+            if self._normal_geometry:
+                self.root.geometry(self._normal_geometry)
+            self._height_expanded = False
+            self.expand_height_btn.config(text="⤢")
+            return
+
+        self.root.update_idletasks()
+        self._normal_geometry = self.root.geometry()
+        width = self.root.winfo_width()
+        x = self.root.winfo_x()
+        screen_h = self.root.winfo_screenheight()
+        # タスクバー等を考慮し、画面高さぴったりではなく少し余白を残す
+        new_height = max(self.root.winfo_reqheight(), screen_h - 60)
+        self.root.geometry(f"{width}x{new_height}+{x}+0")
+        self._height_expanded = True
+        self.expand_height_btn.config(text="⤡")
 
     def _on_view_change(self, view: str) -> None:
         self.current_view = view
