@@ -1,13 +1,18 @@
 # -*- coding: utf-8 -*-
 """
 forecast_ui.py
-学びジャーナル - 「雨（予測）」の入力・一覧・答え合わせ画面
+学びジャーナル - 「読み（予測）」の入力・一覧・答え合わせ画面
 
-この機能の目的は「予測を書くこと」ではなく「後から答え合わせが必ず
+画面上は 事実 / 読み / 打ち手 の3項目として扱う（空・雨・傘に対応する）。
+「読み」を採っているのは、日本語として最初から外れることと採点される
+ことを含んでいるため（「読みが外れた」「読みが甘かった」）。
+保存側のキーは sky / rain / umbrella のままで、表示だけを切り替えている。
+
+この機能の目的は「読みを書くこと」ではなく「後から答え合わせが必ず
 行われること」なので、画面の作りも入力のしやすさより答え合わせが確実に
 回ることを優先している。具体的には:
 
-  ・確認期日の来た雨は、起動時に向こうから出てくる（ReviewWindow）
+  ・確認期日の来た読みは、起動時に向こうから出てくる（ReviewWindow）
   ・○×△だけでなく「延期」「判定不能」という正直な出口を用意する
     （出口が無いと嘘をつくか無視するかになり、無視が始まると仕組みが死ぬ）
   ・外れ方は自由記述ではなく選択肢にする（「当たったが理由違い」を
@@ -56,10 +61,16 @@ DUE_COLOR = "#ef5350"
 
 SKY_PLACEHOLDER = "何を見てそう思ったか"
 RAIN_PLACEHOLDER = "「〜になる」と断定で1つだけ"
-REASON_PLACEHOLDER = "なぜそうなると見るのか（ここが最重要）"
+REASON_PLACEHOLDER = "なぜそう読むのか（ここが最重要）"
 UMBRELLA_PLACEHOLDER = "そのとき取る手（任意）"
 
-# 雨に混じると外れが確定しなくなる表現。
+# 画面上の3項目の呼び名とアイコン。保存側のキー(sky/rain/umbrella)は
+# 既存のforecasts.jsonとの互換のためそのままにし、表示だけを切り替える
+ICON_FACT = "👁️"
+ICON_READ = "🔮"
+ICON_MOVE = "♟️"
+
+# 読みに混じると外れが確定しなくなる表現。
 # リスク管理なら「〜の可能性がある」で構わないが、Forecastは1つに絞った
 # 瞬間に外れが確定することが存在理由なので、ヘッジや併記が入ると
 # ただのリスク一覧に戻ってしまう。見つけたら気づかせる（保存は止めない）
@@ -84,7 +95,7 @@ def _fonts():
 class _PlaceholderText(tk.Text):
     """
     複数行入力欄。空のときは薄字でプレースホルダを出す。
-    雨の理由や実際どうなったかは1行に収まらないことが多いため、
+    読みの理由や実際どうなったかは1行に収まらないことが多いため、
     ポップアップ側のEntryではなくTextを使う。
     """
 
@@ -145,7 +156,7 @@ def _labeled(parent, text: str, font, required: bool = False):
 
 
 class ForecastEntryWindow:
-    """雨を1本書くためのフォーム。"""
+    """読みを1本書くためのフォーム。"""
 
     def __init__(self, root, on_saved=None, seed_umbrella: str = "",
                   seed_reason: str = ""):
@@ -154,7 +165,7 @@ class ForecastEntryWindow:
         self.f = _fonts()
 
         self.win = tk.Toplevel(root)
-        self.win.title("予測を書く")
+        self.win.title("読みを書く")
         self.win.configure(bg=BG_COLOR)
         self.win.geometry("520x780")
         self.win.attributes("-topmost", True)
@@ -167,7 +178,7 @@ class ForecastEntryWindow:
         w = self.win
         f = self.f
 
-        tk.Label(w, text="🔮 予測を書く", bg=BG_COLOR, fg=TEXT_COLOR,
+        tk.Label(w, text=f"{ICON_READ} 読みを書く", bg=BG_COLOR, fg=TEXT_COLOR,
                  font=f["title"]).pack(pady=(14, 2))
         tk.Label(w, text="外れが分かる形で書くこと。当たり外れより、"
                           "どういう理屈で読む癖があるかが分かることに価値があります。",
@@ -190,12 +201,13 @@ class ForecastEntryWindow:
                 font=f["small"], bd=0, highlightthickness=0, cursor="hand2",
             ).pack(side="left", padx=(0, 12))
 
-        # --- 空 / 雨 / 理由 ---
-        _labeled(body, "空 ── 観測した事実", f["label"], required=True)
+        # --- 事実 / 読み / 理由 ---
+        _labeled(body, f"{ICON_FACT} 事実 ── 何を見たか", f["label"], required=True)
         self.sky = _PlaceholderText(body, SKY_PLACEHOLDER, height=2, font=f["body"])
         self.sky.pack(fill="x")
 
-        _labeled(body, "予測", f["label"], required=True)
+        _labeled(body, f"{ICON_READ} 読み ── この先どうなると読むか", f["label"],
+                 required=True)
         tk.Label(body, text="1件につき1つ。「〜の可能性がある」ではなく"
                              "「〜になる」と言い切る（外れが確定する形にする）",
                  bg=BG_COLOR, fg=DIM_TEXT, font=f["small"],
@@ -212,7 +224,7 @@ class ForecastEntryWindow:
         self.rain.bind("<FocusIn>", self._rain_focus_in)
         self.rain.bind("<FocusOut>", self._rain_focus_out)
 
-        _labeled(body, "理由 ── なぜそうなると見るのか", f["label"], required=True)
+        _labeled(body, "理由 ── なぜそう読むのか", f["label"], required=True)
         self.reason = _PlaceholderText(body, REASON_PLACEHOLDER, height=3, font=f["body"])
         self.reason.pack(fill="x")
         if seed_reason:
@@ -249,19 +261,19 @@ class ForecastEntryWindow:
                 command=lambda m=months: self.date_var.set(fc.suggest_check_date(m)),
             ).pack(side="left", padx=(6, 0))
 
-        # --- 傘 ---
-        _labeled(body, "傘 ── そのとき取る手（任意）", f["label"])
+        # --- 打ち手 ---
+        _labeled(body, f"{ICON_MOVE} 打ち手 ── そのとき取る手（任意）", f["label"])
         self.umbrella = _PlaceholderText(body, UMBRELLA_PLACEHOLDER, height=2,
                                           font=f["body"])
         self.umbrella.pack(fill="x")
         if seed_umbrella:
             self.umbrella.set_value(seed_umbrella)
 
-        # 傘は性質上タスクそのもの。雨の中だけに書くと実行されずに腐るため、
+        # 打ち手は性質上タスクそのもの。読みの中だけに書くと実行されずに腐るため、
         # 既存のタスク一覧に送り込めるようにする（LKPTのP欄と同じ仕組み）
         self.make_task_var = tk.BooleanVar(value=bool(seed_umbrella))
         tk.Checkbutton(
-            body, text="この傘をタスクにも追加する", variable=self.make_task_var,
+            body, text="この打ち手をタスクにも追加する", variable=self.make_task_var,
             bg=BG_COLOR, fg=DIM_TEXT, selectcolor=ENTRY_BG,
             activebackground=BG_COLOR, activeforeground=BODY_TEXT,
             font=f["small"], bd=0, highlightthickness=0, cursor="hand2",
@@ -303,25 +315,25 @@ class ForecastEntryWindow:
 
     def _rain_value(self) -> str:
         """
-        保存する雨の文字列。Entryは手入力では改行できないが、貼り付けでは
+        保存する読みの文字列。Entryは手入力では改行できないが、貼り付けでは
         改行が入り得るため、必ず1行に正規化してから保存する
         （複数行のまま保存できると、実質的に併記になってしまう）。
         """
         return " ".join(self._rain_raw().split()).strip()
 
     def _hedges_in(self, text: str) -> list:
-        """雨に含まれるヘッジ・併記の表現を拾う。"""
+        """読みに含まれるヘッジ・併記の表現を拾う。"""
         found = [p for p in HEDGE_PATTERNS if p in text]
         found += [p.strip() for p in MULTI_PATTERNS if p in text]
         if "\n" in text:
-            found.append("改行（複数の予測）")
+            found.append("改行（複数の読み）")
         return found
 
     def _save(self):
         sky, rain, reason = self.sky.value(), self._rain_value(), self.reason.value()
         date_str = self.date_var.get().strip()
 
-        missing = [n for n, v in (("空", sky), ("予測", rain), ("理由", reason)) if not v]
+        missing = [n for n, v in (("事実", sky), ("読み", rain), ("理由", reason)) if not v]
         if missing:
             self.msg.config(text=f"⚠️ {' / '.join(missing)} が未入力です")
             self._hedge_ack = False
@@ -338,7 +350,7 @@ class ForecastEntryWindow:
         hedges = self._hedges_in(self._rain_raw())
         if hedges and not self._hedge_ack:
             self.msg.config(
-                text=f"⚠️ 予測に「{'」「'.join(hedges[:3])}」が入っています。"
+                text=f"⚠️ 読みに「{'」「'.join(hedges[:3])}」が入っています。"
                      f"このままだと外れが確定しません。"
                      f"言い切るか、もう一度「保存」を押すとこのまま保存します。"
             )
@@ -357,13 +369,14 @@ class ForecastEntryWindow:
             return
 
         if make_task:
-            # 既存のActionsシートの「由来」列に雨のIDを入れておくと、
-            # 新しい列を足さずにタスク→予測の追跡ができる
+            # 既存のActionsシートの「由来」列に読みのIDを入れておくと、
+            # 新しい列を足さずにタスク→読みの追跡ができる。
+            # 追跡の実体はID(R-...)側なので、頭の呼び名が変わっても辿れる
             try:
                 from storage import add_action
-                add_action(umbrella, tag="", origin=f"予測:{item['id']}")
+                add_action(umbrella, tag="", origin=f"読み:{item['id']}")
             except Exception as e:
-                print(f"❌ 傘のタスク化に失敗しました: {e}")
+                print(f"❌ 打ち手のタスク化に失敗しました: {e}")
 
         if self.on_saved:
             self.on_saved(item)
@@ -372,7 +385,7 @@ class ForecastEntryWindow:
 
 class ForecastReviewWindow:
     """
-    確認期日の来た雨の答え合わせ。起動時に向こうから出てくる画面。
+    確認期日の来た読みの答え合わせ。起動時に向こうから出てくる画面。
     人は自分から見返さないので、この画面が出ることが仕組みの肝になる。
     """
 
@@ -385,7 +398,7 @@ class ForecastReviewWindow:
         self.f = _fonts()
 
         self.win = tk.Toplevel(root)
-        self.win.title("予測の答え合わせ")
+        self.win.title("読みの答え合わせ")
         self.win.configure(bg=BG_COLOR)
         self.win.geometry("520x720")
         self.win.attributes("-topmost", True)
@@ -405,7 +418,7 @@ class ForecastReviewWindow:
         item = self.items[self.index]
         w, f = self.container, self.f
 
-        tk.Label(w, text="🔮 今日が確認期日です", bg=BG_COLOR, fg=TEXT_COLOR,
+        tk.Label(w, text=f"{ICON_READ} 今日が確認期日です", bg=BG_COLOR, fg=TEXT_COLOR,
                  font=f["title"]).pack(pady=(14, 2))
         remain = f"{self.index + 1} / {len(self.items)} 件目"
         if self.total_due > len(self.items):
@@ -424,7 +437,8 @@ class ForecastReviewWindow:
         tk.Label(head, text=f"確信度: {item.get('confidence', '')}", bg=CARD_BG,
                  fg=DIM_TEXT, font=f["small"]).pack(side="right")
 
-        for label, key in (("空", "sky"), ("予測", "rain"), ("理由", "reason")):
+        for label, key in ((f"{ICON_FACT} 事実", "sky"), (f"{ICON_READ} 読み", "rain"),
+                           ("理由", "reason")):
             tk.Label(card, text=label, bg=CARD_BG, fg=DIM_TEXT,
                      font=f["label"]).pack(anchor="w", padx=12, pady=(6, 0))
             tk.Label(card, text=item.get(key, ""), bg=CARD_BG, fg=BODY_TEXT,
@@ -441,8 +455,8 @@ class ForecastReviewWindow:
         body = tk.Frame(w, bg=BG_COLOR)
         body.pack(fill="both", expand=True, padx=24)
 
-        # 予測の当否と理由の当否は必ず別々に採点する。
-        # 「予測は当たったが理由は違った」＝たまたま当たっただけ、が最も
+        # 読みの当否と理由の当否は必ず別々に採点する。
+        # 「読みは当たったが理由は違った」＝たまたま当たっただけ、が最も
         # 学びが大きく、1つにまとめると見えなくなる
         self.outcome_var = tk.StringVar(value="")
         self.reason_var = tk.StringVar(value="")
@@ -465,10 +479,10 @@ class ForecastReviewWindow:
                     bd=0, highlightthickness=0, cursor="hand2",
                 ).pack(side="left", padx=(0, 16))
 
-        score_row("① 予測は当たったか", self.outcome_var)
+        score_row("① 読みは当たったか", self.outcome_var)
         score_row("② 理由は合っていたか", self.reason_var,
                   "当たっていても理由が違えば、たまたま当たっただけです。"
-                  "読みは外れたままなので次に大きく外します")
+                  "読み筋は外れたままなので次に大きく外します")
 
         _labeled(body, "実際に何が起きたか", f["label"])
         self.actual = _PlaceholderText(body, "事実を短く", height=2, font=f["body"])
@@ -504,7 +518,7 @@ class ForecastReviewWindow:
     def _resolve(self):
         item = self.items[self.index]
         if not self.outcome_var.get():
-            self.msg.config(text="⚠️ ①予測は当たったか を選んでください")
+            self.msg.config(text="⚠️ ①読みは当たったか を選んでください")
             return
         if not self.reason_var.get():
             self.msg.config(text="⚠️ ②理由は合っていたか を選んでください")
@@ -540,13 +554,13 @@ class ForecastReviewWindow:
 
 
 class ForecastListWindow:
-    """雨の一覧。書いたものと、答え合わせ済みのものを並べて見る。"""
+    """読みの一覧。書いたものと、答え合わせ済みのものを並べて見る。"""
 
     def __init__(self, root):
         self.root = root
         self.f = _fonts()
         self.win = tk.Toplevel(root)
-        self.win.title("予測一覧")
+        self.win.title("読み一覧")
         self.win.configure(bg=BG_COLOR)
         self.win.geometry("640x720")
         self.win.bind("<Escape>", lambda e: self.win.destroy())
@@ -557,7 +571,7 @@ class ForecastListWindow:
         w, f = self.win, self.f
         head = tk.Frame(w, bg=BG_COLOR)
         head.pack(fill="x", padx=20, pady=(14, 6))
-        tk.Label(head, text="🔮 予測", bg=BG_COLOR, fg=TEXT_COLOR,
+        tk.Label(head, text=f"{ICON_READ} 読み", bg=BG_COLOR, fg=TEXT_COLOR,
                  font=f["title"]).pack(side="left")
         tk.Button(head, text="＋ 新しく書く", bg=PRIMARY_BTN_BG,
                   fg=BUTTON_TEXT_COLOR, relief="flat", font=f["label"],
@@ -600,7 +614,7 @@ class ForecastListWindow:
         lucky = sum(1 for i in resolved if fc.is_lucky_hit(i))
         text = f"全 {len(items)}件 ／ 答え合わせ済み {len(resolved)}件"
         if resolved:
-            text += f"（予測○ {hits}件）"
+            text += f"（読み○ {hits}件）"
         if lucky:
             text += f" ／ ⚠️ たまたま当たった {lucky}件"
         if due_total:
@@ -608,7 +622,7 @@ class ForecastListWindow:
         self.summary.config(text=text)
 
         if not items:
-            tk.Label(self.inner, text="まだ予測を書いていません。"
+            tk.Label(self.inner, text="まだ読みを書いていません。"
                                        "「＋ 新しく書く」から1本目を書いてみてください。",
                      bg=BG_COLOR, fg=DIM_TEXT, font=f["body"]).pack(anchor="w", pady=20)
             return
@@ -670,7 +684,7 @@ class ForecastListWindow:
                   font=f["small"], cursor="hand2", bd=0, highlightthickness=0,
                   activebackground=CARD_BG, activeforeground=ACCENT_COLOR,
                   command=lambda i=item: self._append_note(i)).pack(side="left")
-        tk.Label(foot, text="（空・予測・理由の本文は変更できません）",
+        tk.Label(foot, text="（事実・読み・理由の本文は変更できません）",
                  bg=CARD_BG, fg=LINE_COLOR, font=f["small"]).pack(side="left", padx=(8, 0))
 
     def _append_note(self, item):
@@ -691,7 +705,7 @@ class ForecastListWindow:
         tk.Label(dlg, text=item.get("rain", ""), bg=BG_COLOR, fg=BODY_TEXT,
                  font=f["body"], wraplength=410,
                  justify="left").pack(padx=24, pady=(0, 4))
-        tk.Label(dlg, text="元の空・予測・理由は変更できません。"
+        tk.Label(dlg, text="元の事実・読み・理由は変更できません。"
                             "思い直したことはここに積まれます。",
                  bg=BG_COLOR, fg=DIM_TEXT, font=f["small"], wraplength=410,
                  justify="left").pack(padx=24, pady=(0, 6))
@@ -729,7 +743,7 @@ class ForecastListWindow:
     def _review(self):
         due = fc.get_due_forecasts()
         if not due:
-            self.summary.config(text="確認期日が来ている予測はありません。")
+            self.summary.config(text="確認期日が来ている読みはありません。")
             return
         ForecastReviewWindow(self.root, due, on_done=self.refresh,
                              total_due=fc.count_due())
@@ -741,14 +755,14 @@ def open_forecast_list(root):
 
 
 def open_forecast_entry(root, seed_umbrella: str = "", seed_reason: str = ""):
-    """雨の入力フォームを開く（タスクからの流し込みにも使う）。"""
+    """読みの入力フォームを開く（タスクからの流し込みにも使う）。"""
     return ForecastEntryWindow(root, seed_umbrella=seed_umbrella,
                                 seed_reason=seed_reason)
 
 
 def prompt_due_forecasts_if_needed(root) -> bool:
     """
-    起動時に呼ぶ。確認期日の来た雨があり、今日まだ督促していなければ
+    起動時に呼ぶ。確認期日の来た読みがあり、今日まだ督促していなければ
     答え合わせ画面を出す。出したらTrueを返す。
 
     人は自分から見返さないので、向こうから出てくる必要がある。
@@ -763,9 +777,9 @@ def prompt_due_forecasts_if_needed(root) -> bool:
             return False
         fc.mark_prompted_today()
         ForecastReviewWindow(root, due, total_due=fc.count_due())
-        print(f"🔮 確認期日の来た予測を {len(due)}件 提示しました。")
+        print(f"{ICON_READ} 確認期日の来た読みを {len(due)}件 提示しました。")
         return True
     except Exception as e:
         # 督促で落ちて本体の起動を妨げないようにする
-        print(f"⚠️ 予測の督促に失敗しました: {e}")
+        print(f"⚠️ 読みの督促に失敗しました: {e}")
         return False
