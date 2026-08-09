@@ -2,7 +2,7 @@
 """
 dashboard.py
 LKPT Dashboard - 日次〜年次の集計ダッシュボード
-Version: 0.18.0
+Version: 0.19.0
 """
 
 import json
@@ -18,8 +18,8 @@ from datetime import datetime, timedelta
 from openpyxl import load_workbook
 
 from storage import (
-    EXCEL_PATH, ENTRIES_SHEET, TAGMASTER_SHEET, TIMELOG_SHEET,
-    ACTION_STATUS_DONE, ACTION_STATUS_PENDING, UNRECORDED_TAG,
+    EXCEL_PATH, ENTRIES_SHEET, TAGMASTER_SHEET, TIMELOG_SHEET, HIREBI_SHEET,
+    EMOTION_LABELS, ACTION_STATUS_DONE, ACTION_STATUS_PENDING, UNRECORDED_TAG,
     complete_action, get_actions,
 )
 
@@ -89,6 +89,7 @@ COACH_HEADING_ICONS = {
     "パターンと停滞ポイント": "🔍",
     "コーチングアドバイス": "💬",
     "次の一歩": "✅",
+    "羅針盤との照合": "🧭",
 }
 
 # 円グラフで扇の内側にパーセントを描く最小構成比（これ未満は外側に描く）
@@ -213,6 +214,56 @@ def load_time_log_entries(path: str = EXCEL_PATH) -> list:
     return entries
 
 
+def load_hirebi_entries(path: str = EXCEL_PATH) -> list:
+    """
+    Hirebiシートから「魂のひれぶり」記録を読み込み、日時付き辞書の
+    リストとして返す。人生の羅針盤が終端指標に置いた「喜怒哀楽の総量」を
+    実測するためのデータ。シートが無い既存ブックでも壊れないよう、
+    load_time_log_entries()と同じ形で空リストを返す。
+    """
+    wb = load_workbook(path, data_only=True)
+    if HIREBI_SHEET not in wb.sheetnames:
+        return []
+    ws = wb[HIREBI_SHEET]
+
+    entries = []
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        date_value, tag, emotion = row[0], row[1], row[2]
+        if not date_value or emotion not in EMOTION_LABELS:
+            continue
+        try:
+            dt = (
+                date_value if isinstance(date_value, datetime)
+                else datetime.strptime(str(date_value), "%Y-%m-%d %H:%M")
+            )
+        except ValueError:
+            print(f"⚠️ 日時の解析に失敗した行をスキップしました: {date_value}")
+            continue
+        entries.append({"datetime": dt, "tag": tag or "", "emotion": emotion})
+
+    print(f"🎭 ひれぶり記録を読み込みました（{len(entries)}件）")
+    return entries
+
+
+def aggregate_hirebi_totals(entries: list) -> dict:
+    """
+    ひれぶり記録を感情ラベルごとに集計する。表示順を固定するため、
+    件数0の感情もEMOTION_LABELSの順で必ずキーを持たせる。
+    """
+    totals = {label: 0 for label in EMOTION_LABELS}
+    for e in entries:
+        totals[e["emotion"]] = totals.get(e["emotion"], 0) + 1
+    return totals
+
+
+def format_hirebi_summary(totals: dict) -> str:
+    """集計結果を「🎭喜2 怒0 哀1 楽3」のような短い1行にする。"""
+    if not any(totals.values()):
+        return ""
+    parts = " ".join(f"{label}{totals.get(label, 0)}" for label in EMOTION_LABELS)
+    return f"🎭 {parts}"
+
+
 def _period_range(period: str, reference: datetime = None) -> tuple:
     """
     指定された期間種別（D/W/M/Q/Y）に対応する開始日時・終了日時
@@ -283,7 +334,8 @@ def filter_entries_by_period(entries: list, period: str,
     return [e for e in entries if start <= e["datetime"] < end]
 
 
-def build_coach_prompt(entries: list, period_label: str) -> str:
+def build_coach_prompt(entries: list, period_label: str,
+                        hirebi_summary: str = "") -> str:
     """
     COACHビュー用のプロンプトを組み立てる。期間内のLKPT記録を時系列で
     列挙したうえで、以下の方向でブラッシュアップしたプロンプトを渡す。
@@ -293,6 +345,17 @@ def build_coach_prompt(entries: list, period_label: str) -> str:
     - コーチングスタイルは「PDCA語彙で状況を診断しつつ、率直に踏み込む」
       （小さく早くPDCAを回して成長したいマネージャー向けに選定した組み合わせ）
     - 末尾に、今週着手できる具体的な次の一歩を必須にする
+    - 5つ目の見出しとして、越智さんが2025年末に作成した「人生の羅針盤」
+      （COMPASS.md参照）に照らした問いを追加する。羅針盤は「今ここを
+      生き生きと生きる」を最上位に置き、仕事では「触媒役」「傍を楽にする」
+      「結果ではなくプロセスを歩めたか」を、終端指標として「喜怒哀楽の
+      総量」を置いている。LKPTの記録だけでは分からない軸のため、
+      Hirebi（喜怒哀楽タップ）の集計もあれば渡す
+
+    Args:
+        entries: 期間内のLKPT記録
+        period_label: 期間の表示ラベル
+        hirebi_summary: format_hirebi_summary()の出力（空文字列可）
     """
     lines = []
     for e in entries:
@@ -307,6 +370,11 @@ def build_coach_prompt(entries: list, period_label: str) -> str:
             lines.append(f"[{stamp}] {e['tag']}".rstrip())
             lines.extend(body_lines)
     records_text = "\n".join(lines) if lines else "（この期間に記録された内容はありません）"
+    hirebi_text = (
+        f"この期間の「魂のひれぶり」タップ集計: {hirebi_summary}\n\n"
+        if hirebi_summary else
+        "この期間の「魂のひれぶり」タップ記録はありません。\n\n"
+    )
 
     return (
         "あなたはシニアエグゼクティブコーチングアドバイザーです。\n"
@@ -316,7 +384,8 @@ def build_coach_prompt(entries: list, period_label: str) -> str:
         f"以下は、ユーザーが{period_label}の期間に記録したLKPT"
         "（L=学び, K=継続すべきこと, P=課題, T=次に挑戦したいこと）の記録です。\n\n"
         f"{records_text}\n\n"
-        "次の4つの見出しで、日本語の文章を作成してください（見出しはそのまま使うこと）。\n\n"
+        f"{hirebi_text}"
+        "次の5つの見出しで、日本語の文章を作成してください（見出しはそのまま使うこと）。\n\n"
         "## 要約\n"
         "この期間の記録内容を事実ベースで簡潔にまとめる（箇条書き可）。\n\n"
         "## パターンと停滞ポイント\n"
@@ -332,7 +401,15 @@ def build_coach_prompt(entries: list, period_label: str) -> str:
         "今週中に着手できる、小さく具体的なアクションを1〜2個、箇条書きで挙げる。"
         "「頑張る」「意識する」のような曖昧な行動ではなく、今日〜明日に着手できる"
         "粒度にする。\n\n"
-        "全体で600字程度を目安にしてください。"
+        "## 羅針盤との照合\n"
+        "ユーザーは2025年末に「人生の羅針盤」を作成しており、最上位の基準は"
+        "「今ここを生き生きと生きる」、仕事の柱は「多様な意見を統合する触媒役として"
+        "傍を楽にする」「結果ではなくプロセスそのものを歩めたか」、終端指標は"
+        "「喜怒哀楽の総量」である。この期間の記録とひれぶり集計を、この基準に"
+        "照らして評価する。整理・仕組み化そのものが目的化していないか、"
+        "プロセスに嘘はなかったか、喜怒哀楽が記録されているかを具体的に指摘する。"
+        "一般論ではなく、この期間の記録内容に基づいて書くこと。\n\n"
+        "全体で700字程度を目安にしてください。"
     )
 
 
@@ -403,6 +480,7 @@ class DashboardWindow:
         self.chart_filter = None
         self.tag_colors = {}
         self.entries = []
+        self.hirebi_entries = []
         self.time_entries = []
         self.actions = []
         self._history_rows = []
@@ -751,6 +829,7 @@ class DashboardWindow:
             self.tag_colors = load_tag_colors()
             if self.current_mode == "LKPT":
                 all_entries = load_entries()
+                all_hirebi = load_hirebi_entries()
             elif self.current_mode == "TIME":
                 all_entries = load_time_log_entries()
             else:
@@ -784,9 +863,20 @@ class DashboardWindow:
                 row for row in all_rows
                 if not self.chart_filter or row[1] == self.chart_filter
             ]
-            self.summary_label.config(
-                text=f"{period_label} ／ {len(self.entries)} entries"
+            # 「魂のひれぶり」の期間集計。人生の羅針盤が終端指標に置いた
+            # 「喜怒哀楽の総量」を、他の集計と同じ期間フィルタで並べて出す
+            self.hirebi_entries = sorted(
+                filter_entries_by_period(
+                    all_hirebi, self.current_period, reference=self.reference_date,
+                ),
+                key=lambda e: e["datetime"],
             )
+            hirebi_totals = aggregate_hirebi_totals(self.hirebi_entries)
+            hirebi_summary = format_hirebi_summary(hirebi_totals)
+            summary_text = f"{period_label} ／ {len(self.entries)} entries"
+            if hirebi_summary:
+                summary_text += f" ／ {hirebi_summary}"
+            self.summary_label.config(text=summary_text)
             self.hist_count_label.config(text=f"{len(self._history_rows)} entries")
             self._draw_count_chart(field_counts)
             self._render_lkpt_history()
@@ -1267,6 +1357,9 @@ class DashboardWindow:
         request_id = self._coach_request_id
         key = self._coach_cache_key()
         entries = list(self.entries)
+        hirebi_summary = format_hirebi_summary(
+            aggregate_hirebi_totals(self.hirebi_entries)
+        )
         period_label = format_period_label(self.current_period, self.reference_date)
 
         self._coach_inflight_key = key
@@ -1278,7 +1371,7 @@ class DashboardWindow:
             # Tkinterのウィジェットにはメインスレッドからしか触れないため、
             # ここではrootに一切触らず、結果をキューに積むだけにする
             try:
-                prompt = build_coach_prompt(entries, period_label)
+                prompt = build_coach_prompt(entries, period_label, hirebi_summary)
                 text = call_gemini_summary(prompt)
             except Exception as e:
                 self._coach_result_queue.put(("error", request_id, key, e))

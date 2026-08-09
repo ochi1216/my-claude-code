@@ -2,7 +2,7 @@
 """
 storage.py
 学びジャーナル - Excel(SharePoint同期フォルダ)読み書きモジュール
-Version: 0.8.0
+Version: 0.9.0
 """
 
 import os
@@ -25,11 +25,17 @@ TAGMASTER_SHEET = "TagMaster"
 TIMELOG_SHEET = "TimeLog"
 SUBITEM_SHEET = "SubItemMaster"
 ACTIONS_SHEET = "Actions"
+HIREBI_SHEET = "Hirebi"
 
 ENTRIES_HEADER = ["日付", "タグ", "L", "K", "P", "T"]
 TAGMASTER_HEADER = ["タグ名", "色コード"]
 TIMELOG_HEADER = ["開始", "終了", "タグ", "中項目"]
 SUBITEM_HEADER = ["タグ名", "中項目名", "表示順"]
+# 「魂のひれぶり」信号。1タップ＝1件の記録とし、選ぶ・入力するを増やさない。
+# 同じ瞬間に複数の感情がある場合は、その分だけタップすれば複数行として残る
+# （1件に複数の感情フラグを持たせるより、後から集計しやすいため）
+HIREBI_HEADER = ["日時", "タグ", "感情"]
+EMOTION_LABELS = ["喜", "怒", "哀", "楽"]
 # 完了・未完了という状態を持つため、追記のみの他シートとは別に管理する。
 # 行番号自体を識別子として使う（削除・並べ替えを行わないため安定する）
 ACTIONS_HEADER = ["作成日時", "タグ", "内容", "由来", "ステータス", "完了日時", "優先"]
@@ -119,6 +125,9 @@ def ensure_workbook_exists(path: str = EXCEL_PATH) -> None:
     ws_actions = wb.create_sheet(ACTIONS_SHEET)
     ws_actions.append(ACTIONS_HEADER)
 
+    ws_hirebi = wb.create_sheet(HIREBI_SHEET)
+    ws_hirebi.append(HIREBI_HEADER)
+
     wb.save(path)
     print(f"✅ 新規ブックを作成しました: {path}")
 
@@ -181,6 +190,17 @@ def _ensure_actions_priority_column(wb) -> None:
     if len(header) < 7:
         ws.cell(row=1, column=7, value="優先")
         print(f"🔧 '{ACTIONS_SHEET}'シートに優先列を追加しました。")
+
+
+def _ensure_hirebi_sheet(wb) -> None:
+    """
+    Hirebiシートが無ければ作成する（既存のjournal_data.xlsxには
+    自動で追加されないため、書き込み前にこの関数で自己修復する）。
+    """
+    if HIREBI_SHEET not in wb.sheetnames:
+        ws = wb.create_sheet(HIREBI_SHEET)
+        ws.append(HIREBI_HEADER)
+        print(f"🔧 既存ブックに'{HIREBI_SHEET}'シートを追加しました。")
 
 
 def _ensure_entries_sheet(wb) -> None:
@@ -705,6 +725,46 @@ def append_lkpt_entry(tag: str, l: str, k: str, p: str, t: str,
 
     print(f"📝 LKPTを記録しました → [{now.strftime('%Y-%m-%d %H:%M')}] [{tag}] "
           f"L={l} K={k} P={p} T={t}")
+    return True, now
+
+
+def append_hirebi(tag: str, emotion: str, path: str = EXCEL_PATH,
+                   now: datetime = None) -> tuple:
+    """
+    「魂のひれぶり」を1件記録する（喜・怒・哀・楽のいずれか1タップ）。
+    人生の羅針盤（2025年末）が終端指標に置いた「墓場に持っていけるのは
+    人生の思い出。その思い出とは、喜怒哀楽の総量」を、日々のチェックインの
+    中で実測するための最小の計器。テキスト入力を要らないので、
+    LKPTを書かない日でもタップだけで残せる。
+
+    Args:
+        tag: 関連タグ（空文字列可）
+        emotion: EMOTION_LABELSのいずれか
+        path: Excelファイルパス
+        now: 記録時刻（省略時はdatetime.now()）
+
+    Returns:
+        tuple[bool, datetime | None]: (保存に成功したか, 記録した時刻)
+    """
+    if emotion not in EMOTION_LABELS:
+        print(f"❌ 未知の感情ラベルです: {emotion}")
+        return False, None
+
+    if now is None:
+        now = datetime.now()
+    now = now.replace(second=0, microsecond=0)
+
+    ensure_workbook_exists(path)
+    wb = _load_with_retry(path)
+    _ensure_hirebi_sheet(wb)
+    ws = wb[HIREBI_SHEET]
+    ws.append([now.strftime("%Y-%m-%d %H:%M"), tag, emotion])
+
+    success = _save_with_retry(wb, path)
+    if not success:
+        return False, None
+
+    print(f"🎭 ひれぶりを記録しました → [{now.strftime('%Y-%m-%d %H:%M')}] [{tag}] {emotion}")
     return True, now
 
 
