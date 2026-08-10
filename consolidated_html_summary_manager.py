@@ -29,6 +29,13 @@ class SummaryFolderManager:
     def __init__(self, target_folder):
         self.target_folder = target_folder
         self.output_file = os.path.join(target_folder, '_Consolidated_Manager.html')
+        # [20260809] summary_database.json / overview_cache_*.json は、以前は
+        # target_folder直下に平置きされていた。_Consolidated_Manager.html
+        # （出力されるダッシュボード）はデータを埋め込み済みの静的HTMLで、
+        # これらのJSONを実行時に読みには行かないことを確認済みのため、
+        # 読み書きしているのはこのスクリプト自身だけである。target_folder
+        # 直下を掃除するため、専用のjsonサブフォルダへ移す。
+        self.json_dir = os.path.join(target_folder, 'json')
 
 
     def parse_youtube_card(self, card):
@@ -162,20 +169,31 @@ class SummaryFolderManager:
         html_files = glob.glob(os.path.join(self.target_folder, 'summary_*.html'))
         
         # --- DB関連の設定 ---
-        db_path = os.path.join(self.target_folder, "summary_database.json")
+        db_path = os.path.join(self.json_dir, "summary_database.json")
         archive_dir = os.path.join(self.target_folder, "archive")
-        
+
         if not os.path.exists(archive_dir):
             try:
                 os.makedirs(archive_dir)
             except Exception as e:
                 print(f"[Warning] Failed to create archive directory: {e}")
 
-        # 既存DBのロード
-        db_data = {}
-        if os.path.exists(db_path):
+        if not os.path.exists(self.json_dir):
             try:
-                with open(db_path, 'r', encoding='utf-8') as f:
+                os.makedirs(self.json_dir)
+            except Exception as e:
+                print(f"[Warning] Failed to create json directory: {e}")
+
+        # 既存DBのロード。
+        # [20260809] 旧バージョンがtarget_folder直下に書いていたsummary_database.json
+        # が残っている場合はそちらを読み、以後はjsonサブフォルダ側へ保存し直す
+        # （移行のたびに越智さんに手でファイルを移してもらわずに済むようにするため）。
+        db_data = {}
+        legacy_db_path = os.path.join(self.target_folder, "summary_database.json")
+        load_path = db_path if os.path.exists(db_path) else legacy_db_path
+        if os.path.exists(load_path):
+            try:
+                with open(load_path, 'r', encoding='utf-8') as f:
                     db_data = json.load(f)
             except Exception as e:
                 print(f"[Warning] Failed to read database, starting fresh: {e}")
@@ -248,6 +266,14 @@ class SummaryFolderManager:
             with open(temp_db_path, 'w', encoding='utf-8') as f:
                 json.dump(db_data, f, ensure_ascii=False)
             os.replace(temp_db_path, db_path)
+            # [20260809] jsonサブフォルダへの新規保存に成功した後だけ、旧位置の
+            # ファイルを消す。新規保存が失敗した場合は旧ファイルを残し、
+            # データを失わないようにする。
+            if load_path == legacy_db_path and os.path.exists(legacy_db_path):
+                try:
+                    os.remove(legacy_db_path)
+                except Exception as e:
+                    print(f"[Warning] Failed to remove legacy database file: {e}")
         except Exception as e:
             print(f"[Error] Failed to save database atomically: {e}")
 
@@ -429,10 +455,21 @@ class SummaryFolderManager:
         state_str = f"schema{DASHBOARD_CACHE_SCHEMA_VERSION}:" + ",".join(sorted(fd.get('filename', '') for fd in window_files))
         current_hash = hashlib.md5(state_str.encode('utf-8')).hexdigest()
 
-        cache_file = os.path.join(self.target_folder, cache_filename)
-        if os.path.exists(cache_file):
+        if not os.path.exists(self.json_dir):
             try:
-                with open(cache_file, 'r', encoding='utf-8') as f:
+                os.makedirs(self.json_dir)
+            except Exception as e:
+                print(f"[Warning] Failed to create json directory: {e}")
+
+        cache_file = os.path.join(self.json_dir, cache_filename)
+        # [20260809] 旧バージョンはtarget_folder直下に書いていた。新しい場所に
+        # まだ無ければ、そちらを読む（無ければ単に「未キャッシュ」として
+        # 新規生成すればよいだけなので、DBほど厳密な移行は不要）。
+        legacy_cache_file = os.path.join(self.target_folder, cache_filename)
+        read_from = cache_file if os.path.exists(cache_file) else legacy_cache_file
+        if os.path.exists(read_from):
+            try:
+                with open(read_from, 'r', encoding='utf-8') as f:
                     cache_data = json.load(f)
                     if cache_data.get("hash") == current_hash:
                         print(f"[Info] Using cached overview ({cache_filename}, unchanged).")
@@ -474,6 +511,11 @@ class SummaryFolderManager:
         try:
             with open(cache_file, 'w', encoding='utf-8') as f:
                 json.dump({"hash": current_hash, "dashboard_entry": dashboard_entry}, f, ensure_ascii=False)
+            if read_from == legacy_cache_file and os.path.exists(legacy_cache_file):
+                try:
+                    os.remove(legacy_cache_file)
+                except Exception as e:
+                    print(f"[Warning] Failed to remove legacy overview cache file: {e}")
         except Exception as e:
             print(f"[Warning] Failed to write overview cache ({cache_filename}): {e}")
 

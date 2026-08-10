@@ -6661,7 +6661,16 @@ class OutputGenerator:
         if not results: return ""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"summary_{playlist_id}_{timestamp}.json" if playlist_id else f"summary_{timestamp}.json"
-        filepath = os.path.join(OUTPUT_DIR, filename)
+        # [20260809] HTMLと違いJSONはConsolidated Manager(RSS側)のarchive移動対象
+        # 外で、OUTPUT_DIR直下に際限なく溜まり続けていた。jsonサブフォルダへ出す。
+        # morning_brief.py側は既にos.walkで再帰的に走査しているため、
+        # このサブフォルダに置いても集計から漏れない。
+        json_dir = os.path.join(OUTPUT_DIR, "json")
+        try:
+            os.makedirs(json_dir, exist_ok=True)
+        except Exception:
+            json_dir = OUTPUT_DIR
+        filepath = os.path.join(json_dir, filename)
         data = {
             "processing_date": datetime.now().isoformat(),
             "results": [r.to_dict_full() for r in results]
