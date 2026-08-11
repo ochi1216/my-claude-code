@@ -1,9 +1,17 @@
 selenium>=4.15
 google-generativeai>=0.5
-google-genai>=1.0
 PyMuPDF>=1.23
 streamlit>=1.30
 pandas>=2.0
 plotly>=5.18
 yfinance>=0.2.40
 matplotlib>=3.8
+requests>=2.31
+
+# strategy_engine.py の Gemini API呼び出し（JSONモード・Google Search Grounding）は
+# google-generativeai / google-genai SDKではなく、../common/gemini_client.py
+# (submodule ochi1216/gemini-common-tools) の generate_advanced() 経由になった。
+# 事前に `git submodule update --init common` を実行しておくこと。
+# なお google-generativeai は rtocs_organizer_20260711_01.py（旧スクレイパー）が
+# 別途直接使用しているため、引き続き依存に残している。google-genai は
+# strategy_engine.py以外で使われていないため削除した。

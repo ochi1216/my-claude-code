@@ -2,6 +2,31 @@
 
 このフォルダ内の変更履歴。バージョンアップ時は旧ファイルを残したまま新ファイルを追加し、ここに変更点を追記する。
 
+## [Gemini呼び出し共通化] - 2026-08-11
+
+**背景:** 会社PC上でGemini APIへの直接アクセスが遮断される事象が発生（2026-08-10頃、原因未確定）。
+業務停止を避けるため、自宅PC経由のプロキシへ自動フォールバックする共通クライアント
+（`../common/gemini_client.py`、submodule `ochi1216/gemini-common-tools`）を導入し、本ツールの
+Gemini呼び出しをすべてこちらに置き換えた。詳細は`common/GEMINI_MIGRATION_HANDOVER.md`参照。
+
+**変更ファイル:** `ic_engine.py`, `requirements.txt`（`analog_ic_se_strategy_organizer_*.py`本体・
+`ic_prompts.py`・`ic_schema.py`・`ic_report.py`・`ic_index.py`は無変更）
+
+- `GeminiClient`の内部実装を、`google-generativeai`/`google-genai` SDKの直接呼び出しから
+  `../common/gemini_client.py`の`generate_advanced(payload, model=...)`経由に置き換え
+  （`sys.path`に`../common`を追加してimport）
+- JSONモード・Google Search Groundingのペイロード組み立て（`generationConfig.responseMimeType`、
+  `tools:[{"google_search":{}}]`）、コードフェンス除去＋`json.loads`によるレスポンス解析ロジックは
+  変更なし（SDKオブジェクトの代わりに生JSON dictを扱うよう`_add_cost`/テキスト抽出のみ調整）
+- ディープモード（`gemini-2.5-pro`）は`generate_advanced`に`model=self.model_name`を明示的に渡すことで
+  維持。当初`generate_advanced`にモデル指定機能が無く「ディープモードを選んでも常にflashが呼ばれる」
+  サイレントバグになる問題を発見・指摘し、共通クライアント側に`model`引数を追加してもらってから移行した
+- `requirements.txt`から`google-generativeai`/`google-genai`を削除（本ツールでは直接使用箇所が無くなったため）
+- **動作検証**: モックで`generate_advanced`をすり替え、`model`引数が正しく`gemini-2.5-pro`/`flash`を
+  伝播すること、JSONモード/grounding使い分けが維持されていることを確認。Streamlit 3タブもエラー無く
+  起動することを確認（実際のGemini API呼び出しは`GEMINI_API_KEY`/`GEMINI_PROXY_URL`が無いこの開発環境では
+  未検証。越智さんの環境での実機確認が必要）
+
 ## [20260718_02] - 2026-07-18
 
 **背景:** MECE改善の優先度3「ロードマップビュー」に着手。単一製品の分析だけでなく、カテゴリ単位で

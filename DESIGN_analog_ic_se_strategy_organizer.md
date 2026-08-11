@@ -442,3 +442,23 @@ TIの製品ロードマップという外部シグナルを扱う新しいデー
   技術の適合性、特許FTOリスク、必要投資額感等の定量・準定量情報に拡張する
 - **E: 運用・データガバナンス**: TIモニタリングの継続性（rtocs_organizerのニュース収集ステージに相当する
   仕組みが無い）、競合企業データ（`competitors_db.json`）の鮮度管理ルールの明文化
+
+---
+
+## 15. Gemini API呼び出しの共通化（2026-08-11）
+
+会社PC上でGemini APIへの直接アクセスが遮断される事象が発生したため（原因未確定）、`ic_engine.py`の
+`GeminiClient`は`google-generativeai`/`google-genai` SDKの直接呼び出しから、共通クライアント
+`../common/gemini_client.py`（submodule `ochi1216/gemini-common-tools`）の`generate_advanced(payload, model=...)`
+経由に置き換えた。直接アクセス失敗時は自宅PC経由プロキシへ自動フォールバックする。
+
+- JSONモード・Google Search Groundingのペイロード組み立て・レスポンス解析ロジック（コードフェンス除去＋
+  `json.loads`）は変更していない。SDKオブジェクトの代わりに生JSON dictを扱うよう、コスト集計
+  （`usageMetadata.promptTokenCount`等、REST APIのcamelCase）とテキスト抽出のみ調整した
+- 「通常モード(flash)／ディープモード(pro)」の切替は、`generate_advanced`に`model=self.model_name`を
+  明示的に渡すことで維持している。当初`generate_advanced`にモデル指定機能が無く、ディープモードを
+  選んでも常にflashが呼ばれるサイレントバグになる問題を実装前に発見・指摘し、共通クライアント側に
+  `model`引数を追加してもらってから移行した（同時期に`rtocs_organizer/strategy_engine.py`も同じ方式で移行）
+- 詳細な経緯・インターフェース仕様は`common/GEMINI_MIGRATION_HANDOVER.md`を参照
+- **未検証**: この開発環境には`GEMINI_API_KEY`/`GEMINI_PROXY_URL`が無いため、実際のGemini API呼び出し
+  （直接・プロキシ経由とも）は未検証。モックでのペイロード組み立て・model伝播・コスト計算確認に留まる

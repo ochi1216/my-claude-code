@@ -8,12 +8,25 @@ Streamlitには依存しない（ダッシュボードからもテストから�
 - 各ステージは失敗しても {"error": ...} を格納して続行する（部分レポート方針）
 - コストは既存organizerと同じ方式（トークン→USD→円換算）で集計
 - ディープモード: gemini-2.5-pro + 戦略批判・改訂パス追加
+
+Gemini API呼び出しは共通クライアント（../common/gemini_client.py、submodule
+ochi1216/gemini-common-tools）のgenerate_advanced()経由で行う。会社PCでの
+Gemini API直接アクセス遮断時、自宅PC経由プロキシへ自動フォールバックするため。
+Google Search Grounding・JSONモードのペイロード組み立て・レスポンス解析ロジックは
+従来のgoogle-genai/google-generativeai SDK使用時から変更していない
+（GEMINI_MIGRATION_HANDOVER.md参照）。
 """
 
 import os
+import sys
 import json
 import re
 from datetime import datetime
+
+_COMMON_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common")
+if _COMMON_DIR not in sys.path:
+    sys.path.insert(0, _COMMON_DIR)
+from gemini_client import generate_advanced
 
 import rtocs_index
 import strategy_prompts as P
@@ -48,29 +61,37 @@ def _strip_code_fence(text):
     return text.strip()
 
 
+def _extract_text(response):
+    """generate_advanced()が返す生レスポンスdictから本文テキストを取り出す"""
+    try:
+        return response["candidates"][0]["content"]["parts"][0]["text"]
+    except (KeyError, IndexError, TypeError):
+        return ""
+
+
 class GeminiClient:
-    """JSONモード呼び出し＋コスト集計のラッパー"""
+    """JSONモード呼び出し＋コスト集計のラッパー。
+
+    Gemini API呼び出しは共通クライアント(../common/gemini_client.py)の
+    generate_advanced(payload, model=...)経由で行う。直接アクセス失敗時は
+    自宅PC経由プロキシへ自動フォールバックする（呼び出し側はどちらの経路か
+    意識しなくてよい）。
+    """
 
     def __init__(self, api_key=None, model_name="gemini-2.5-flash"):
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         self.model_name = model_name
         self.total_cost_usd = 0.0
         self.stage_costs_jpy = {}
-        self._model = None
-        self._genai2_client = None
-        if self.api_key:
-            import google.generativeai as genai
-            genai.configure(api_key=self.api_key)
-            self._model = genai.GenerativeModel(model_name)
 
     @property
     def total_cost_jpy(self):
         return self.total_cost_usd * USD_JPY
 
     def _add_cost(self, stage, response):
-        usage = getattr(response, "usage_metadata", None)
-        t_in = getattr(usage, "prompt_token_count", 0) or 0
-        t_out = getattr(usage, "candidates_token_count", 0) or 0
+        usage = response.get("usageMetadata", {}) if isinstance(response, dict) else {}
+        t_in = usage.get("promptTokenCount", 0) or 0
+        t_out = usage.get("candidatesTokenCount", 0) or 0
         p_in, p_out = MODEL_PRICING.get(self.model_name, MODEL_PRICING["gemini-2.5-flash"])
         cost = (t_in / 1_000_000 * p_in) + (t_out / 1_000_000 * p_out)
         self.total_cost_usd += cost
@@ -78,59 +99,46 @@ class GeminiClient:
 
     def generate_json(self, prompt, stage="misc", retries=1):
         """JSONモードで呼び出しdictを返す。失敗時はValueError"""
-        if not self._model:
+        if not self.api_key:
             raise ValueError("GEMINI_API_KEY が設定されていません。")
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"responseMimeType": "application/json"},
+        }
         last_err = None
         for _ in range(retries + 1):
             try:
-                response = self._model.generate_content(
-                    prompt,
-                    generation_config={"response_mime_type": "application/json"},
-                )
+                response = generate_advanced(payload, model=self.model_name)
                 self._add_cost(stage, response)
-                if not response.text:
+                text = _extract_text(response)
+                if not text:
                     raise ValueError("空の応答")
-                return json.loads(_strip_code_fence(response.text))
+                return json.loads(_strip_code_fence(text))
             except Exception as e:
                 last_err = e
         raise ValueError(f"Gemini呼び出し失敗: {last_err}")
 
-    def _get_genai2_client(self):
-        """Google Search Grounding用の新SDK(google-genai)クライアントを遅延生成する。
-
-        レガシーの`google-generativeai`が公開するTool型は`google_search_retrieval`
-        （Gemini 1.5世代向けの旧グラウンディング方式）のみで、Gemini 2.x系が要求する
-        `google_search`ツールとはAPI形状が異なり使えない（実機で400エラーを確認済み）。
-        後継の統合SDK`google-genai`（別パッケージ、共存可能）のみがgoogle_searchツールを
-        公開しているため、ニュース収集ステージに限りこちらを使う。
-        """
-        if self._genai2_client is None:
-            from google import genai as genai2
-            self._genai2_client = genai2.Client(api_key=self.api_key)
-        return self._genai2_client
-
     def generate_grounded_json(self, prompt, stage="misc", retries=1):
-        """Google Search Groundingを有効にした呼び出し（google-genai SDK使用）。
+        """Google Search Groundingを有効にした呼び出し。
 
-        グラウンディングとJSONモード(response_mime_type)は併用できないため、
+        グラウンディングとJSONモード(responseMimeType)は併用できないため、
         プロンプト側にJSON形式での出力を指示し、コードフェンス除去＋json.loadsでパースする。
         """
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY が設定されていません。")
-        from google.genai import types as genai2_types
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "tools": [{"google_search": {}}],
+        }
         last_err = None
         for _ in range(retries + 1):
             try:
-                client = self._get_genai2_client()
-                config = genai2_types.GenerateContentConfig(
-                    tools=[genai2_types.Tool(google_search=genai2_types.GoogleSearch())]
-                )
-                response = client.models.generate_content(
-                    model=self.model_name, contents=prompt, config=config)
+                response = generate_advanced(payload, model=self.model_name)
                 self._add_cost(stage, response)
-                if not response.text:
+                text = _extract_text(response)
+                if not text:
                     raise ValueError("空の応答")
-                return json.loads(_strip_code_fence(response.text))
+                return json.loads(_strip_code_fence(text))
             except Exception as e:
                 last_err = e
         raise ValueError(f"Gemini(grounding)呼び出し失敗: {last_err}")

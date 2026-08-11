@@ -7,7 +7,7 @@
 [`/HANDOVER_analog_ic_scout.md`](../HANDOVER_analog_ic_scout.md) を参照。自社／ベンチマーク対象の設定は
 `config/own_company.json` を参照。
 
-**現状（2026-07-18時点）:** パイプライン本体・ダッシュボードの初版を実装済み。ただし**実際のGemini API呼び出しでの動作確認はまだ完了していない**（越智さんの環境で`GEMINI_API_KEY`を設定した上での実行確認が必要。詳細は「既知の制限」参照）。「Nexperia視点への転換」を軸としたMECE改善（`DESIGN_analog_ic_se_strategy_organizer.md` 14章）に順次着手中。優先度1（ホワイトスペース分析）・優先度2（自社を競合比較に必ず含める＋統合比較表）・優先度3（ロードマップビュー）まで実装済み。
+**現状（2026-08-11時点）:** パイプライン本体・ダッシュボードの初版を実装済み。ただし**実際のGemini API呼び出しでの動作確認はまだ完了していない**（越智さんの環境で`GEMINI_API_KEY`を設定した上での実行確認が必要。詳細は「既知の制限」参照）。「Nexperia視点への転換」を軸としたMECE改善（`DESIGN_analog_ic_se_strategy_organizer.md` 14章）に順次着手中。優先度1（ホワイトスペース分析）・優先度2（自社を競合比較に必ず含める＋統合比較表）・優先度3（ロードマップビュー）まで実装済み。Gemini API呼び出しは会社PCでの直接アクセス遮断対応として、`../common/gemini_client.py`（submodule）経由に移行済み（下記セットアップ手順4）。
 
 ## 必要要件
 
@@ -16,20 +16,30 @@
 
 ## セットアップ手順
 
-1. 依存パッケージをインストールする。
+1. リポジトリのクローン時、`common/` submoduleも取得する（未取得の場合）。
+
+   ```
+   git submodule update --init common
+   ```
+
+2. 依存パッケージをインストールする。
 
    ```
    pip install -r requirements.txt
    ```
 
-2. 環境変数 `GEMINI_API_KEY` にGemini APIキーを設定する。
+3. 環境変数を設定する。
 
    ```
-   export GEMINI_API_KEY="your-api-key-here"      # macOS/Linux
-   setx GEMINI_API_KEY "your-api-key-here"         # Windows（設定後は新しいターミナルを開く）
+   setx GEMINI_API_KEY "your-api-key-here"           # 直接呼び出し用（既存キーを流用）
+   setx GEMINI_PROXY_URL "https://xxxx.ngrok-free.dev"   # 自宅PC経由プロキシのURL（会社PCで直接アクセスが
+                                                          # 遮断された場合のフォールバック用。詳細は
+                                                          # common/GEMINI_MIGRATION_HANDOVER.md参照）
    ```
 
-3. ダッシュボードを起動する。
+   （設定後は新しいターミナルを開くこと。macOS/Linuxの場合は`export`を使う）
+
+4. ダッシュボードを起動する。
 
    **Windows**: `run_dashboard.bat` をダブルクリックする（推奨）。同じフォルダ内にある
    `analog_ic_se_strategy_organizer_YYYYMMDD_NN.py` のうち、ファイル名の日付・連番が
@@ -75,7 +85,8 @@ python3 ic_competitor_import.py
 
 ## 既知の制限・未検証事項
 
-- **実際のGemini API呼び出しは未検証**: この開発環境には`GEMINI_API_KEY`が無く、また`google-generativeai`パッケージの依存関係（`cryptography`のRustバインディング）が壊れていたため、実機でのAPI呼び出し確認ができなかった。パイプラインの制御ロジック（ステージ間のデータ受け渡し、失敗時のフォールバック、HTMLレポート生成）はモック応答で検証済みだが、grounded searchで実際にTIのデータシート数値をどこまで正確に拾えるかは未検証（`DESIGN_analog_ic_se_strategy_organizer.md` 11章参照）。越智さんの環境でAPIキーを設定し、実際のTI型番数件で試してほしい
+- **実際のGemini API呼び出しは未検証**: この開発環境には`GEMINI_API_KEY`/`GEMINI_PROXY_URL`が無く、実機でのAPI呼び出し確認ができなかった。パイプラインの制御ロジック（ステージ間のデータ受け渡し、失敗時のフォールバック、HTMLレポート生成、`generate_advanced`への`model`引数伝播）はモック応答で検証済みだが、grounded searchで実際にTIのデータシート数値をどこまで正確に拾えるかは未検証（`DESIGN_analog_ic_se_strategy_organizer.md` 11章参照）。越智さんの環境でAPIキーを設定し、実際のTI型番数件で試してほしい
+- **`common/gemini_client.py`経由のプロキシフォールバックも未検証**: 自宅PC側`home_pc_server_v2.py`の`/generate`エンドポイント（`_gemini_model`フィールド対応版）への実際の再デプロイ・疎通確認は本セッションでは行っていない
 - キーカスタマー推定は公開情報のみに基づく「推定」であり、TIとの契約関係を示すものではない
 - 競合他社のデータシート由来スペックを比較表として利用する際の著作権・利用規約上の扱いは法務未確認（レポート内に免責は記載済み）
 
