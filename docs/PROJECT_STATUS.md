@@ -6,9 +6,9 @@
 - **プロジェクトの目的**: YouTubeプレイリスト動画の自動要約・RSS記事要約を生成し、それらのHTMLサマリーを1つの管理画面（統合マネージャー）にまとめて、音声読み上げ（TTS）付きで効率的にレビューできるようにする一連のPythonツール群を開発・保守する。
 - **主な利用者**: 越智さん（プログラム初心者と自認・厳格な3フェーズ開発ワークフローを運用）
 - **実行環境**:
-  - OS: Windows（越智さんのローカル環境）
-  - Python 3.13（固定パス起動）
-  - Chrome（デバッグポート9222、専用プロファイル）+ Selenium
+  - OS: Windows（越智さんのローカル環境。S04より会社PC・自宅PCの2台体制）
+  - Python: 会社PCは3.13固定パス起動。自宅PCは`python`コマンドが3.14を指す（S04で判明。実害は未確認）
+  - Chrome（デバッグポート9222、専用プロファイル`ChromeDebugProfile_20260725`）+ Selenium
   - Tkinter GUI（ライトテーマ`#f0f0f0`固定、UI変更は明示的指示がない限り禁止）
   - ブラウザ側はSpeechSynthesis API（音声読み上げ）とlocalStorageを使用
   - 本リポジトリ（クラウド開発環境）にはSelenium/Chrome実行環境がないため、実際のブラウザ・GUI動作確認は越智さんのローカル環境で行う
@@ -152,6 +152,7 @@ handlePartEnd() → 読了後、skipModeに応じて次のcurrentPartを決定 o
 - **UI変更禁止**: 明示的指示なしにUI・カラー変更は行わない（ライトテーマ維持）
 - **3フェーズ開発ワークフロー**: Design Proposal（提案・Q&Aのみ）→ Architecture Audit（承認ゲート表・デビルズチェック・副作用リスクTop3・ロールバック条件・不足情報）→ Implementation Patch（明示的承認後のみコード生成）
 - **プレイリスト上の並び順（`playlist_order`）が唯一の順序制御**（youtube_summary_list、配信日時等によるソートは未実装）
+- **PC依存パスの解決順位（S04確定。youtube_summary_list）**: `OUTPUT_DIR`・`CONSOLIDATION_BATCH`は「環境変数（`YT_SUMMARY_OUTPUT_DIR`・`YT_CONSOLIDATION_BATCH`）→ config.jsonの`paths`セクション → 既定値（スクリプト自身の場所基準の`output`フォルダ。`CONSOLIDATION_BATCH`は未設定なら起動をスキップ）」の順で解決する。環境変数を最優先にしているのは、PC移管直後にconfig.jsonを編集せず切替できるようにするため
 - **changeSkipModeのsticky/ワンショット制御**（consolidated_html_summary_manager）:
   - `newMode===1`への切替時: 現在のskipModeが1でなければ`skipModeBeforeOneShot`に退避
   - `newMode`が1以外への手動切替時: `skipModeBeforeOneShot`を破棄（ワンショット待ちのキャンセル）
@@ -205,6 +206,13 @@ handlePartEnd() → 読了後、skipModeに応じて次のcurrentPartを決定 o
   - Summaryフォルダ直下に平置きされていたJSONを`json/`サブフォルダへ集約（旧位置からの自動移行つき）
   - Consolidated Manager: 「タイトルのみ読み上げ」の専用ボタン化、アコーディオン矢印の向き修正、モード変更時に読み上げが巻き戻る挙動の修正
 
+- **S04: 会社PC→自宅PC環境移管（youtube_summary_list.py単体、実機で成功確認）**
+  - ハードコードされていた会社PC依存の絶対パス2箇所（`OUTPUT_DIR`・RSS統合バッチ起動パス）を、環境変数→config.jsonの`paths`→既定値（スクリプト自身の場所基準）の順で解決する方式に変更
+  - Chromeプロファイル（`ChromeDebugProfile_20260725`、実測約812MB）・`config.json`・`learned_channels.json`・`rate_limit_state.json`を会社PCから自宅PCへ移設
+  - 作業フォルダをファイルコピー運用からGit管理のクローンに切り替え（`claude/glasp-batch-two-phase-q8r9ff`ブランチ）。以後の更新は自宅PC側で`git pull`のみで反映可能に
+  - 自宅PCで実機テストを実施：プレイリストV・動画1本の処理が最初から最後まで成功（Chrome自動起動→Selenium接続→Glasp起動→Gemini要約生成→HTML/JSON保存まで完走。成功1/1）
+  - 対象は`youtube_summary_list.py`単体。`consolidated_html_summary_manager.py`・`morning_brief.py`・`Youtube_List_Setup.py`の同種のパス対応は次タスク（詳細は下記Known Issues参照）
+
 ### 確認画面対応（S03の重要成果）
 
 - 20260808の夜間実行で、Geminiへの遷移が`https://www.google.com/sorry/index?continue=...`（GoogleのBOT判定による確認画面）へ差し替えられ、29本連続で失敗した
@@ -245,6 +253,15 @@ handlePartEnd() → 読了後、skipModeに応じて次のcurrentPartを決定 o
   6. **同じ動画が複数回失敗すると朝の1通で件数が水増しされる**: 朝の1通は複数実行のHTMLを合算するため、同じ動画の3回失敗が「3本の失敗」に見える。動画IDでの重複排除が未実装（残課題）
 - 上記のうちHANDOVER記載の「argparse choicesに'V'が未登録」「all_playlists_var初期値」の2件は、`youtube_summary_list_20260711_01.py`時点で修正済みであることを確認済み（詳細は`SESSION_HISTORY.md` S01参照）
 - ~~Gemini APIモデルの不整合~~: `_generate_overview_file`（Track 0全体概況生成、Python側、320行目付近）が`gemini-2.0-flash`のままだった問題は、VERSION 20260722_02で`gemini-2.5-flash`に修正済み
+- **【S04で判明】自宅PCの`python`コマンドは3.14を指す**: 会社PCはPython 3.13固定パス起動だったが、自宅PCでは`python`がPATH解決で`C:\Python314\python.exe`を実行していた。今回の実機テストは3.14上で最初から最後まで成功しており実害は確認されていないが、バージョン差として記録しておく
+- **【S04で判明】`google.generativeai`のFutureWarning抑制が効いていない**: `warnings.filterwarnings("ignore", category=FutureWarning, module="google.generativeai")`は存在するが、ライブラリ側が警告発生元を呼び出し元（`__main__`）に見せる実装のため、`module`指定のフィルタが一致せず抑制されていない。機能への影響はないが、`google.genai`への移行と合わせて対応候補
+- **【S04で判明】`return`文がfinally節内にある箇所が3箇所**（`youtube_summary_list.py`、Python 3.13以降でSyntaxWarning対象）: いずれも直前の`except`でログ済みの例外を踏まえて部分結果を返す意図的な設計。機能への影響はないが、Python側の一般的な作法としては注意喚起の対象
+- **【次タスク】他3ツールは会社PC依存パスが未対応のまま**: `consolidated_html_summary_manager.py`（`TARGET_DIR`）・`morning_brief.py`（`DEFAULT_OUTPUT_DIR`）・`Youtube_List_Setup.py`（`SUMMARY_OUTPUT_DIR`）にはまだ`nx023836`のハードコードパスが残存。S04は`youtube_summary_list.py`単体を対象範囲としたため、これらは自宅PCでは未検証・未移管
+- **落とし穴カタログ（S04で判明。PC移管固有）**:
+  1. **PowerShellとcmd.exeの構文は互換性がない**: `$env:VAR`（PowerShell）を`cmd.exe`で実行すると変数展開されず、無意味な文字列としてそのまま渡ってしまい、エラーも出さずに「何も起きない」ように見える。プロンプトが`PS C:\...>`か`C:\...>`かで今どちらのシェルにいるか判別できる
+  2. **Chromeのインストール先は`Program Files`と`Program Files (x86)`のどちらもありうる**: 管理者権限の有無や配布方法で変わる。ツール本体のコードは既に両方チェックする実装だが、手動確認時は両方試す必要がある
+  3. **Chromeプロファイルフォルダの大半はキャッシュ**: 見た目の容量（Explorerで「2GBほど」）と実測（`dir /s`で約812MB）に差が出ることがある。ログイン・拡張機能本体はごく一部で、Chrome標準の「キャッシュされた画像とファイル」クリア（Cookieは対象外にする）だけで安全に軽量化できる
+  4. **`python`コマンドの実体はPCごとに違う**: PATH解決の結果は環境によって異なるバージョン・インストール（`C:\Python314\python.exe`等）を指すことがある。固定パス起動が前提のドキュメントと食い違っていても、実際に動くかどうかは別途確認が必要
 - **落とし穴カタログ（consolidated_html_summary_manager、実際にハマった不具合の記録）**:
   1. `summary_database.json`キャッシュ: パーサーを修正しても、既にarchive済みのHTMLは再パースされない。「コードは正しいのに表示されない」時はまずDBキャッシュを疑う。対処: DBファイル削除、または対象HTMLをarchiveからSummaryフォルダに戻してbat再実行
   2. JSスコープエラーで全画面真っ白: `renderFileList`のfileループ内で`item`を参照（未定義）→JSエラーで描画全停止。「何も表示されない」時はまずF12コンソール確認
@@ -264,7 +281,7 @@ handlePartEnd() → 読了後、skipModeに応じて次のcurrentPartを決定 o
 
 ### 起動方法
 
-- **youtube_summary_list**: `python youtube_summary_list_YYYYMMDD_NN.py`（通常起動）または`--auto --playlists V S A B N M`等（Automode）。Windows・Python 3.13固定パス・Chrome debugポート9222が前提
+- **youtube_summary_list**: `python youtube_summary_list.py`（通常起動）または`--auto --playlists V S A B N M`等（Automode）。Chrome debugポート9222が前提。出力先`OUTPUT_DIR`は環境変数`YT_SUMMARY_OUTPUT_DIR`またはconfig.jsonの`paths.output_dir`で上書き可（S04）
 - **consolidated_html_summary_manager**: `python consolidated_html_summary_manager_YYYYMMDD_NN.py`を対象フォルダ（`summary_*.html`が置かれたフォルダ）で実行し、生成された`_Consolidated_Manager.html`をブラウザで開いて確認
 
 ### テスト方法（本リポジトリ内で実施可能な範囲）

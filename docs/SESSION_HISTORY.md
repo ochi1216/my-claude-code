@@ -7,6 +7,13 @@
 | S01 | 引継ぎ管理の初期設定 | 2026-07-16 | 完了 | youtube_summary_list_*.py, consolidated_html_summary_manager_*.py, CLAUDE.md, docs/* |
 | S02 | youtube_summary_list Glasp自動起動の信頼性改善 | 2026-08-01 | 一部完了・継続中 | youtube_summary_list_20260801_01/02/03.py, docs/* |
 | S03 | Glasp成功率改善・確認画面対応・運用基盤整備 | 2026-08-09 | 完了 | youtube_summary_list.py, consolidated_html_summary_manager.py, morning_brief.py, *.bat, docs/* |
+| S04 | 会社PC→自宅PC環境移管（youtube_summary_list.py） | 2026-08-11 | 完了 | youtube_summary_list.py, docs/* |
+
+---
+
+## S04 - 会社PC→自宅PC環境移管（youtube_summary_list.py）
+
+[2026-08-11] S04: youtube_summary_list.pyを会社PC専用のハードコードパスから、環境変数→config.json→既定値の順で解決する方式に外部化し、Chromeプロファイル・config.json等を自宅PCへ移設。自宅PCでの実機テスト（プレイリストV・動画1本）が最初から最後まで成功した。 / 重大判断1: パス解決は環境変数を最優先とし、config.jsonは次点、既定値はスクリプト自身の場所基準とした。PC移管直後にconfig.jsonを編集せず切替できることを優先した。 / 重大判断2: 今回は`youtube_summary_list.py`単体を対象範囲とし、`consolidated_html_summary_manager.py`・`morning_brief.py`・`Youtube_List_Setup.py`の同種対応は次タスクへ持ち越した。
 
 ---
 
