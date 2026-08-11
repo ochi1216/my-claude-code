@@ -2774,6 +2774,13 @@ URL: ${url}
                     if (!bestVoice) bestVoice = jaVoices.find(v => v.name.toLowerCase().includes('siri'));
                     if (!bestVoice) bestVoice = jaVoices.find(v => v.name.includes('Premium') || v.name.includes('Enhanced'));
                     if (!bestVoice) bestVoice = jaVoices.find(v => v.name.includes('Natural'));
+                    // [S05] 実機確認(Windows Chrome)で、Naturalボイス自体が入っていない環境では
+                    // 最後のフォールバックがGoogleのネットワーク音声(Google 日本語)になり、
+                    // 速度を上げると音質が崩れる問題を確認。Windowsのローカル音声(SAPI)は
+                    // ネットワーク遅延や速度依存の劣化が無いため、Google音声より優先する。
+                    // Harukaは定番の評判が良い音声のため個別に優先する
+                    if (!bestVoice) bestVoice = jaVoices.find(v => v.name.includes('Haruka'));
+                    if (!bestVoice) bestVoice = jaVoices.find(v => v.name.includes('Microsoft'));
                     ut.voice = bestVoice || jaVoices[jaVoices.length - 1];
                 } else {
                     let stdVoice = jaVoices.find(v => !v.name.toLowerCase().includes('siri') && !v.name.includes('Premium') && !v.name.includes('Enhanced'));
