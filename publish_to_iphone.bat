@@ -4,26 +4,30 @@ chcp 65001 > nul
 set PYTHONIOENCODING=utf-8
 
 rem ========================================
-rem Publish to iPhone (consolidate -> copy -> git push)
+rem Publish to iPhone - consolidate, copy, git push
 rem Version is tracked in Git, not in this file.
 rem
 rem What this does:
 rem   1. Runs consolidated_html_summary_manager.py to regenerate
 rem      _Consolidated_Manager.html from the current Summary folder.
-rem   2. Copies that file into ..\youtube-summary-viewer\index.html
-rem      (expected as a sibling folder to this one - same layout used
-rem      when that repo was first cloned).
+rem   2. Copies that file into ..\youtube-summary-viewer\index.html.
+rem      Expected as a sibling folder to this one - same layout used
+rem      when that repo was first cloned.
 rem   3. git add / commit / push in youtube-summary-viewer, so the
 rem      iPhone-facing GitHub Pages site picks up the update.
 rem
 rem Usage:
-rem   publish_to_iphone.bat        ... interactive (pauses at the end)
-rem   publish_to_iphone.bat auto   ... unattended (no pause)
+rem   publish_to_iphone.bat        ... interactive, pauses at the end
+rem   publish_to_iphone.bat auto   ... unattended, no pause
 rem
 rem This intentionally does NOT decide the output path itself; it reads
 rem the path back out of consolidated_html_summary_manager.py's own
 rem "generated at:" message, so it always matches whatever config.json /
 rem YT_SUMMARY_OUTPUT_DIR actually resolved to that run.
+rem
+rem NOTE: keep this file free of parentheses in rem/echo text, outside of
+rem actual if/for blocks. A Japanese comment containing parentheses was
+rem confirmed to break cmd.exe's parser on real hardware - see git log.
 rem ========================================
 
 cd /d "%~dp0"
@@ -38,7 +42,7 @@ if not defined PYTHON_EXE (
 set "VIEWER_DIR=%~dp0..\youtube-summary-viewer"
 if not exist "!VIEWER_DIR!" (
     echo ERROR: youtube-summary-viewer folder not found: !VIEWER_DIR!
-    echo         Expected as a sibling folder to this one ^(..\youtube-summary-viewer^).
+    echo         Expected as a sibling folder to this one: ..\youtube-summary-viewer
     goto :fail
 )
 
@@ -59,10 +63,10 @@ if not "!RC1!"=="0" (
 )
 
 rem 出力先パスをここで決め打ちせず、スクリプト自身の成功メッセージから読み取る。
-rem ("[Success] Consolidated HTML generated at: <path>" という1行を探す)
-rem パスにドライブ文字(C:)やバックスラッシュを含むため、batch単体の文字列
+rem "[Success] Consolidated HTML generated at: <path>" という1行を探す。
+rem パスにドライブ文字C:やバックスラッシュを含むため、batch単体の文字列
 rem 処理では確実に取り出せない。抽出はextract_consolidated_path.pyに任せ、
-rem その結果をファイル経由で受け取る(コマンドライン上でのネスト引用符を避ける)。
+rem その結果をファイル経由で受け取り、コマンドライン上のネスト引用符を避ける。
 set "TMP_PATH=%TEMP%\publish_to_iphone_path_%RANDOM%.txt"
 "%PYTHON_EXE%" "%~dp0extract_consolidated_path.py" "%TMP_OUT%" > "%TMP_PATH%"
 set "SRC_HTML="
@@ -142,8 +146,9 @@ echo.
 :done
 echo =========================================================
 echo 完了しました。
-echo iPhoneで https://ochi1216.github.io/youtube-summary-viewer/ を確認してください。
-echo ^(反映まで数十秒かかることがあります^)
+echo iPhoneで確認してください:
+echo https://ochi1216.github.io/youtube-summary-viewer/
+echo 反映まで数十秒かかることがあります
 echo =========================================================
 if /I not "%~1"=="auto" pause
 exit /b 0
