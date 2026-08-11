@@ -101,10 +101,80 @@ LOG_FILE = "youtube_summary.log"
 # [計測] youtube_summary.log は実行ごとに mode='w' で作り直されるため、
 # 夜間の複数回の実行を横断して集計するための追記専用ファイルを別に持つ。
 MEASURE_LOG_FILE = "glasp_measure.log"
-# OUTPUT_DIR = Path("output")
-OUTPUT_DIR = r"C:\Users\nx023836\Nexperia\My Private - Documents\Summary"
-# OUTPUT_DIR.mkdir(exist_ok=True)
 RATE_LIMIT_STATE_FILE = "rate_limit_state.json"
+
+# ============================================================================
+# [S04] PC依存パスの外部化
+#
+# 従来はここに会社PCのユーザー名を含む絶対パスを直接書いていたため、PCを移すと
+# このファイルを書き換えるまで一切動かなかった。解決順を次の3段とする。
+#   1. 環境変数            … PC移管直後の切り替え用。config.jsonを触らずに済む
+#   2. config.json の paths … 恒久的な設定。config.jsonが勝つ既存の流儀に揃える
+#   3. 既定値              … このファイルと同じ場所の output フォルダ
+#
+# ConfigManagerはこの時点ではまだ使えない（DEFAULT_CONFIGの定義が後段のため）。
+# OUTPUT_DIRはモジュール読み込み時の定数として複数箇所から参照されるので、
+# ここでconfig.jsonを1度だけ直接読んで解決する。
+# ============================================================================
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _load_path_settings():
+    """config.jsonの paths セクションだけを先読みする。
+
+    config.jsonが無い・壊れていても起動は止めない。設定読み込みの本体は
+    ConfigManagerが別途行うため、ここでは paths 以外に一切触れない。
+    """
+    try:
+        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+            loaded = json.load(f)
+        paths = loaded.get('paths')
+        return paths if isinstance(paths, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except Exception as e:
+        print(f"[Warning] config.jsonのpathsを読み込めませんでした: {e}")
+        return {}
+
+
+_PATH_SETTINGS = _load_path_settings()
+
+
+def _resolve_path(env_name, config_key, default_value):
+    """環境変数 → config.json → 既定値 の順に解決する。
+
+    空文字は「未設定」として扱う。空のままOUTPUT_DIRに入ると
+    os.path.joinがカレントディレクトリ基準になり、出力先が実行時の
+    カレント次第で変わってしまうため。
+    """
+    value = os.environ.get(env_name, '').strip()
+    if value:
+        return value
+    value = str(_PATH_SETTINGS.get(config_key, '') or '').strip()
+    if value:
+        return value
+    return default_value
+
+
+# 要約HTML・JSONの出力先。
+OUTPUT_DIR = _resolve_path(
+    'YT_SUMMARY_OUTPUT_DIR', 'output_dir', os.path.join(SCRIPT_DIR, 'output')
+)
+
+# 要約完了後に起動するRSS側のHTML統合バッチ。未設定なら起動をスキップする。
+CONSOLIDATION_BATCH = _resolve_path('YT_CONSOLIDATION_BATCH', 'consolidation_batch', '')
+
+# generate_html()はos.makedirsを行わずに直接書き込むため、出力先が存在しないと
+# 初回実行がFileNotFoundErrorで落ちる。移管直後は必ずこの状態になるので先に作る。
+try:
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+except Exception as e:
+    print(f"[Warning] 出力フォルダを作成できませんでした: {OUTPUT_DIR} ({e})")
+
+# 解決結果を必ず出す。環境変数とconfig.jsonの二段構えは
+# 「直したのに反映されない」を生みやすいため、どの値が効いたかを毎回残す。
+print(f"[Paths] OUTPUT_DIR = {OUTPUT_DIR}")
+print(f"[Paths] CONSOLIDATION_BATCH = {CONSOLIDATION_BATCH or '(未設定: 統合バッチの起動をスキップします)'}")
 
 # [20260808] Googleの確認画面（BOT判定）で待機に入ったことを、後続の定時実行へ
 # 伝えるためのロックファイル。待機中は02:00/05:00のチェーンを丸ごと空振りさせる
@@ -8505,11 +8575,19 @@ class IntegratedSummaryApp(tk.Tk):
         """
         import subprocess
         import os
-        
-        batch_path = r"C:\Users\nx023836\Documents\PythonScripts\RSS\start_consolidated_HTML_summary_manager.bat"
-        
+
+        # [S04] 固定パスをやめ、モジュール読み込み時に解決したCONSOLIDATION_BATCH
+        # （環境変数 YT_CONSOLIDATION_BATCH → config.jsonのpaths.consolidation_batch
+        # → 既定は未設定）を使う。未設定時は「見つからない」ではなく「未設定」と
+        # 明示し、起動をスキップする。
+        batch_path = CONSOLIDATION_BATCH
+
+        if not batch_path:
+            self.log_to_ui("ℹ️ 統合バッチの起動先が未設定のため、起動をスキップしました（config.jsonのpaths.consolidation_batchで設定可能）", "INFO")
+            return
+
         self.log_to_ui("🔄 HTML統合バッチの起動準備中...", "INFO")
-        
+
         if not os.path.exists(batch_path):
             self.log_to_ui(f"⚠️ 統合バッチが見つかりません。パスを確認してください: {batch_path}", "WARNING")
             return
