@@ -15,42 +15,60 @@
 
 ## 2. Repository Structure
 
-リポジトリはフラット構成（サブディレクトリなし、`docs/`のみ今回新設）。
+リポジトリはフラット構成（サブディレクトリなし、`docs/`のみ）。
+
+**S03でファイル名によるバージョン管理を廃止し、固定ファイル名＋Git管理へ移行した。** 日付入りの旧ファイル（`consolidated_html_summary_manager_20260*.py`が17個残存）は履歴として残っているのみで、BATからは参照されていない。
 
 ```
 my-claude-code/
-├── CLAUDE.md                                          セッション管理ルール
-├── README.md                                           未整備（タイトルのみ）
-├── HANDOVER_youtube_summary_list.md                    youtube_summary_list系の引継ぎ資料
-├── youtube_summary_list_20260703_01.py                 旧版
-├── youtube_summary_list_20260711_01.py                 旧版
-├── youtube_summary_list_20260725_01.py                 旧版
-├── youtube_summary_list_20260725_02.py                 旧版
-├── youtube_summary_list_20260801_01.py                 旧版（Glaspボタン検出をアイコンクラス名ベースに変更）
-├── youtube_summary_list_20260801_02.py                 旧版（Glaspリトライ回数2→5）
-├── youtube_summary_list_20260801_03.py                 最新版（未使用UI設定整理・Glasp起動方式に本物クリック(CDPマウス)追加）
-├── consolidated_html_summary_manager_20260708_01.py    旧版
-├── consolidated_html_summary_manager_20260711_02.py    旧版
-├── consolidated_html_summary_manager_20260716_01.py    旧版
-├── consolidated_html_summary_manager_20260722_01.py    旧版
-├── consolidated_html_summary_manager_20260722_02.py    最新版（Track 0のGeminiモデル修正）
-├── run_youtube_summary_auto.bat                        youtube_summary_list起動用（Chromeデバッグプロファイル起動込み）
-├── run_youtube_List_auto_setup.bat                     Youtube_List_Setup起動用
-├── run_youtube_channel_remove_auto.bat                 チャンネル解除ツール起動用
-├── run_youtube_all_tasks.bat                           旧・一括起動用（要用途確認）
+├── CLAUDE.md                                    セッション管理ルール
+├── README.md                                    未整備（タイトルのみ）
+├── HANDOVER_youtube_summary_list.md             youtube_summary_list系の引継ぎ資料
+│
+│  ── 現役のPythonツール（固定ファイル名。バージョンはGitで管理）──
+├── youtube_summary_list.py                      本体。YouTube要約（Selenium+Glasp+Gemini）
+├── consolidated_html_summary_manager.py         RSS側。summary_*.htmlの統合ビューア
+├── youtube_list_remove.py                       プレイリストからの動画削除（Playwright）
+├── Youtube_List_Setup.py                        プレイリストへの動画登録
+├── morning_brief.py                             実行結果をOutlookでメール送信（毎朝6:00）
+├── send_dev_report.py                           開発の途中経過をOutlookで送る（単発用）
+├── schedule_manager.py                          Windowsタスクスケジューラをコードから管理
+├── check_suspend_lock.py                        確認画面の待機中かを判定（BATから呼ばれる）
+├── analyze_glasp_measure.py                     glasp_measure.logの集計
+├── schedule.json                                スケジュール定義
+│
+│  ── BATファイル ──
+├── run_youtube_all_tasks.bat                    定時チェーン（Step1削除→Step2登録→Step3要約）
+├── run_youtube_summary_auto.bat                 Step3単体
+├── run_youtube_List_auto_setup.bat              Step2単体
+├── run_youtube_channel_remove_auto.bat          Step1単体
+├── run_morning_brief.bat                        朝の1通（定時6:00用、pauseなし）
+├── run_status_check.bat                         状態確認メール（手動1クリック用、pauseあり）
+├── start_consolidated_HTML_summary_manager.bat  Consolidated Manager起動
+├── test_suspend_flow.bat                        BATの制御フロー切り分け用（診断専用）
+│
+├── consolidated_html_summary_manager_20260*.py  旧版17個（履歴のみ。BATからは未参照）
 └── docs/
-    ├── PROJECT_STATUS.md                               本ファイル
-    ├── SESSION_HISTORY.md                               セッション履歴
-    ├── NEXT_TASK.md                                     次セッション用引継ぎ
-    └── decisions/                                       重要設計判断のADR
+    ├── PROJECT_STATUS.md                        本ファイル
+    ├── SESSION_HISTORY.md                       セッション履歴
+    ├── NEXT_TASK.md                             次セッション用引継ぎ
+    └── decisions/                               重要設計判断のADR
 ```
+
+### 実行時に生成されるファイル（.gitignoreで`*.log`を除外済み）
+
+- `youtube_summary.log` … 実行のたびに**上書き**（`mode='w'`）
+- `glasp_measure.log` … **追記専用**。実行を横断した集計用
+- `glasp_suspended.lock` … 確認画面の待機中のみ存在。期限切れ・破損時は自動削除
+- `logs/` … BATごとの実行ログ（`run_log_*`・`remove_log_*`・`list_setup_log_*`・`morning_brief_*`・`status_check_*`）
 
 ※越智さんのローカル作業フォルダには本リポジトリ対象外の関連ツール（`Youtube_List_Setup_*.py`・`Youtube_Playlist_management_*.py`等）や大量の旧版・ログ・バックアップファイルが存在する。S02にて整理対象の棚卸しを実施済み（詳細は本ファイル未記載・チャット上のみ、越智さんのローカル作業）。
 
 ### 各ファイルの役割
 
-- **`youtube_summary_list_*.py`**: Selenium+Chrome（デバッグポート接続）でYouTubeプレイリストを走査し、動画を要約してHTMLレポートを生成するツール本体。Tkinter GUI・Automode対応。
-- **`consolidated_html_summary_manager_*.py`**: `youtube_summary_list`等が出力した複数の`summary_*.html`（YouTube・RSS由来）を1つのHTML（`_Consolidated_Manager.html`）に統合し、既読管理・フィルタ・音声読み上げ（スキップモード0〜4）付きで閲覧するための管理ツール。
+- **`youtube_summary_list.py`**: Selenium+Chrome（デバッグポート接続）でYouTubeプレイリストを走査し、動画を要約してHTMLレポートを生成するツール本体。Tkinter GUI・Automode対応。
+- **`consolidated_html_summary_manager.py`**: `youtube_summary_list`等が出力した複数の`summary_*.html`（YouTube・RSS由来）を1つのHTML（`_Consolidated_Manager.html`）に統合し、既読管理・フィルタ・音声読み上げ（スキップモード0〜4）付きで閲覧するための管理ツール。
+- **`morning_brief.py` / `send_dev_report.py`**: Outlook COM（`win32com.client`）経由でメール送信。`resolve_self_address()`がExchange→POP/IMAP→その他の順に自分のアドレスを解決するため、宛先指定なしで自分宛に送れる。**Windows+Outlookデスクトップアプリ+pywin32があれば他PCでも同じ方法が使える**（会社アカウント固有の仕組みではない）。
 - **`HANDOVER_youtube_summary_list.md`**: `youtube_summary_list`系の開発経緯・既知の罠・3フェーズ開発ワークフローに関する引継ぎ資料（越智さん作成）。
 
 ## 3. Current Functions
@@ -171,34 +189,60 @@ handlePartEnd() → 読了後、skipModeに応じて次のcurrentPartを決定 o
   - 越智さんのローカルChromeプロファイル（`ChromeDebugProfile_20260725`）の拡張機能同期問題への対処案内（同期オフ＋手動整理、コード変更なし）
   - 越智さんのローカル作業フォルダの棚卸し（現役3ツール以外の旧版・重複ファイルの洗い出し、コード変更なし）
 
+- **S03: Glaspバッチ処理2フェーズ化の完遂、確認画面対応、運用基盤整備（実機で成功率94%を確認）**
+  - ファイル名によるバージョン管理を廃止し、固定ファイル名＋Git管理へ移行（`youtube_summary_list.py`・`consolidated_html_summary_manager.py`・`youtube_list_remove.py`・`Youtube_List_Setup.py`と対応BATファイル）
+  - `VERSION`定数をファイル更新日時から自動生成する方式に変更（実行中のファイルがログから判別できるように）
+  - 要約終了マーカーの検出漏れを修正（プロンプトは`■要約完了`を出力するが`■要約終了`しか見ていなかった。全動画で60秒のタイムアウト待ちが発生していた）
+  - Chrome起動方式を`subprocess.Popen`＋`debuggerAddress`アタッチ方式へ変更（`unable to discover open window in chrome`の解消）
+  - プレイリスト移行時に動画タブを全消去してChromeごと落としていた不具合を修正（保持枚数の上限`KEEP_VIDEO_TABS=3`を導入）
+  - 失敗理由が握り潰されていた不具合を修正（`error_msg`→`error_message`のフィールド名誤り）
+  - Googleの確認画面(reCAPTCHA)対応（詳細は下記「確認画面対応」）
+  - 1巡目の使い捨てGlaspクリックを廃止（`prepare_only`方式）。捨てるGeminiセッションが実測で51枚→8枚に減少
+  - 失敗理由を「要約対象外（字幕なし）」と「本当の失敗」に区別（`skip_kind`導入）
+  - 朝の1通（`morning_brief.py`）を新規作成。Outlook COM経由で毎朝6:00に実行結果をメール送信
+  - 手動オンデマンド版（`run_status_check.bat`）を追加。昼食後・20時作業後などに1クリックで状態確認
+  - Windowsタスクスケジューラをコードから管理する仕組みを追加（`schedule_manager.py`・`schedule.json`）
+  - Summaryフォルダ直下に平置きされていたJSONを`json/`サブフォルダへ集約（旧位置からの自動移行つき）
+  - Consolidated Manager: 「タイトルのみ読み上げ」の専用ボタン化、アコーディオン矢印の向き修正、モード変更時に読み上げが巻き戻る挙動の修正
+
+### 確認画面対応（S03の重要成果）
+
+- 20260808の夜間実行で、Geminiへの遷移が`https://www.google.com/sorry/index?continue=...`（GoogleのBOT判定による確認画面）へ差し替えられ、29本連続で失敗した
+- 当初はページ本文のキーワードで検知しようとしたが、実機の文言が想定と異なり素通り。**判定をURLベース（`/sorry/`・`/recaptcha/`を含むか）に変更**して確実化した
+- 検知時の挙動は「中止」ではなく「**待機**」。溜まったタブを片付け、確認画面のタブを1枚だけ残して人の解除を待つ。解除を検知したら中断した動画から自動再開する（実機で検知→待機→手動解除→61秒後に自動再開まで確認済み）
+- 待機中は`glasp_suspended.lock`を書き、`check_suspend_lock.py`経由で定時チェーンを丸ごと空振りさせる（Step1のプレイリスト削除が先に走ると未要約の動画が消えるため、要約だけでなくチェーン全体を止める必要がある）
+- 確認画面を突破する実装は一切含まない。検知して速やかに止めるのみ
+
 ### 作業中
 
-- Glasp自動起動の信頼性改善（S02から継続）。次の一手として「バッチ処理の2フェーズ化」（トリガーラウンド→検出/リトライラウンド）の設計に合意済みだが未実装。詳細は`docs/decisions/0001-glasp-batch-trigger-detect-redesign.md`と`NEXT_TASK.md`を参照
+- なし（S03の作業は一段落。次タスクは越智さんからの指示待ち）
 
 ### 未着手
 
 - youtube_summary_list側の`config/playlists.json`未参照問題の整理（HANDOVER記載、スコープ外合意済み）
 - `datetime.min`安全ガード（`upload_time`のNone処理、HANDOVER記載、別パッチ扱いで未着手）
-- 兄弟ツール（`Youtube_List_Setup`等）は本リポジトリの管理対象外（未確認）
-- youtube_summary_list_20260801_03.pyの「本物クリック（CDPマウス）」オプションの実地検証（越智さんのローカル環境での実行結果待ち）
+- `tool_launcher_20260803_01.py`の`TOOL_PATTERNS`が旧命名規則のまま（固定ファイル名への追従が必要）
+- `except: pass`（39箇所）・裸の`except:`（46箇所）へのログ追加
+- 未使用関数（53/223）と、Chromeをプレイリストごとに強制再起動する休眠中の重複`process_multiple_playlists`の削除
+- `morning_routine.bat`（01:40のタスク、`ignore_tasks`に登録済み）の内容が未確認
 
 ## 6. Known Issues
 
-- **【未解決・優先度高】youtube_summary_listのGlasp自動起動が低成功率（S02時点）**:
-  - 症状: きらきらボタンのクリック自体は成功する（`cdp_button=True`）が、Geminiタブが検出されない（`glasp_tab_detect=False`）失敗が多数発生。リトライ回数を2→5に増やしても改善せず（直近の実行結果は3/26本成功）
-  - 判明した事実:
-    - Glasp拡張機能は最新版（v2.3.0）に更新済み。更新前後で完全ノーヒットからは改善したが、依然として過半数が失敗
-    - 失敗した動画タブでも、後で手動できらきらボタンを1クリックすれば高い確率でGemini/ChatGPTが起動する
-    - Glaspのボタンをクリックすると、YouTube側に「文字起こし」パネル（AIによる文字起こし・チャプター生成、完了までスピナー表示）が開く。これはクリックの**結果**であり、クリック前に存在を確認できる条件ではない
-    - このパネルの完了を待たずに現在のコードは動いており、かつ検出失敗時は`driver.refresh()`でページを再読み込みするため、生成途中の状態がリセットされている可能性がある
-    - パネルの挙動には複数パターンがある（パネルが出ずに成功するケース、UIパターンが複数存在するケース、待っても永久にスピナーが終わらないケース）
-  - 現在の仮説: バックエンド側の文字起こし生成に相応の実時間がかかることがあり、同一動画に対して数秒間隔で即座に再クリックしても状況は変わらない。放置して他の処理をしている間に自然と完了することが多い
-  - 次の対策案（設計合意済み・未実装）: `docs/decisions/0001-glasp-batch-trigger-detect-redesign.md`参照。バッチ内の全動画に対して「まず1回ずつクリックする」トリガーラウンドを先に済ませ、その後まとめて検出・必要なら再クリックする2フェーズ方式に変更する
+- ~~**【未解決・優先度高】youtube_summary_listのGlasp自動起動が低成功率（S02時点）**~~: **S03で解決**。実機で成功率94%（74/79本）を確認。主因は複合的だった（要約終了マーカーの検出漏れ／動画タブの無制限蓄積によるChrome劣化／Googleの確認画面の検知漏れ）。1巡目の使い捨てクリックは「Glaspを温める助走」として意図的に入れていたが、実測で2巡目の成功率に寄与していない（1回目のクリックで84%成功）ことが判明し廃止した
+- **【残課題】Glasp起動の失敗が実機で1本残っている**: 20260809の実行で、字幕ありの動画1本が`Glasp起動失敗（Ctrl+X不発またはタイムアウト）`となった。原因未特定。発生率が低く再現条件が不明なため、継続観察中
+- **【要観察】1巡目クリック廃止の影響**: 「Glaspの反応は日によってまちまち」という越智さんの実地観察があり、助走なしで日によって2巡目の1回目が通らなくなる可能性は残る。`glasp_measure.log`の`r2_click`（2回目で成功した本数）が増えていないか数日分で確認が必要。`config.json`の`glasp.round1_click`を`true`にすれば従来動作へ戻せる
 - **RSS記事のconclusion/points未生成状態**: consolidated_html_summary_managerのRSSカードは、オンデマンド生成（「主なポイントを生成」ボタン）前は`conclusion`/`points`が空。mode2・mode4選択時、空の場合は読み上げをスキップして次のカードへ進む仕様（意図的な設計）
 - **クラウド環境での動作確認不可**: 本ツールはSelenium+Chrome debugポート+ローカルファイル前提のブラウザGUIのため、クラウド開発環境では実ブラウザでの動作確認ができない。構文チェック（`ast.parse`）とdiffレビューのみ実施し、実動作確認は越智さんのローカル環境に依存する
 - **youtube_summary_list側の既知の罠（HANDOVER記載、要再確認）**:
   - `config/playlists.json`は存在するがコードから未参照（プレイリストIDの実体は`get_playlist_config()`内のハードコード）
-  - BATファイルは`dir /b /o-n`の名前降順で最初の1件を実行するため、ファイル命名次第で意図しないバージョンが動く可能性がある
+  - ~~BATファイルは`dir /b /o-n`の名前降順で最初の1件を実行するため、ファイル命名次第で意図しないバージョンが動く可能性がある~~: S03で固定ファイル名の直接参照に変更し解消
+- **落とし穴カタログ（S03で実際にハマった不具合。いずれも特定に時間を要した）**:
+  1. **BATから`python`を`call`なしで裸で呼ぶと制御が戻らない**: `python check_suspend_lock.py`と書いた次の行以降が一切実行されず、エラーも出さずにプロンプトへ戻る。定時チェーンが1秒で終了し、要約が2日間走らなかった原因。**対話プロンプトで同じコマンドを直接打つと違いが分からない**（対話シェルは常に次のプロンプトへ戻るため）ので、切り分け用の最小BATで`[1]〜[4]`の到達確認が必要だった。本プロジェクトの他のBATは全て`python.exe`のフルパスで呼んでおり、その流儀に合わせるのが正解
+  2. **設定はconfig.jsonがコード既定値に勝つ**: `DEFAULT_GLASP_BATCH_SIZE`や`output_format`をコードで変更しても、`config.json`に保存済みの値があればそちらが優先される。「直したのに反映されない」時はまず`config.json`を疑う
+  3. **BATの`rem`行に日本語を書くと行が分割される**: `'ず、goto' is not recognized`のような断片的エラーになる。新規追加する`rem`行はASCIIのみにすること
+  4. **BATの`if (...)`ブロック内の括弧はブロック境界を壊す**: `(no kill, no relaunch)`のような括弧を含む文字列で`. was unexpected at this time.`となる。`goto :label`方式にすれば回避できる
+  5. **ログの`mode='w'`は実行のたびに上書きされる**: `youtube_summary.log`は次の実行で消えるため、複数回の実行を横断して調べたい情報は`glasp_measure.log`のような追記専用ファイルに別途残す必要がある
+  6. **同じ動画が複数回失敗すると朝の1通で件数が水増しされる**: 朝の1通は複数実行のHTMLを合算するため、同じ動画の3回失敗が「3本の失敗」に見える。動画IDでの重複排除が未実装（残課題）
 - 上記のうちHANDOVER記載の「argparse choicesに'V'が未登録」「all_playlists_var初期値」の2件は、`youtube_summary_list_20260711_01.py`時点で修正済みであることを確認済み（詳細は`SESSION_HISTORY.md` S01参照）
 - ~~Gemini APIモデルの不整合~~: `_generate_overview_file`（Track 0全体概況生成、Python側、320行目付近）が`gemini-2.0-flash`のままだった問題は、VERSION 20260722_02で`gemini-2.5-flash`に修正済み
 - **落とし穴カタログ（consolidated_html_summary_manager、実際にハマった不具合の記録）**:
