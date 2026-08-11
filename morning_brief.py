@@ -42,7 +42,24 @@ from datetime import datetime, timedelta
 # ============================================================================
 # 既定値（youtube_summary_list.py と揃えている）
 # ============================================================================
-DEFAULT_OUTPUT_DIR = r"C:\Users\nx023836\Nexperia\My Private - Documents\Summary"
+def _resolve_output_dir():
+    # youtube_summary_list.pyのOUTPUT_DIRと同じフォルダを指す必要があるため、同じ環境変数名・configキーを使う(S05)
+    # --output-dir引数で個別に上書きすることも可能(既存機能、変更なし)
+    env_value = os.environ.get('YT_SUMMARY_OUTPUT_DIR', '').strip()
+    if env_value:
+        return env_value
+    try:
+        with open('config.json', 'r', encoding='utf-8') as f:
+            loaded = json.load(f)
+        config_value = str(loaded.get('paths', {}).get('output_dir', '') or '').strip()
+        if config_value:
+            return config_value
+    except Exception:
+        pass
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'output')
+
+
+DEFAULT_OUTPUT_DIR = _resolve_output_dir()
 DEFAULT_CONFIG_FILE = "config.json"
 DEFAULT_LOG_FILE = "youtube_summary.log"
 

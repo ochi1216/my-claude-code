@@ -97,8 +97,25 @@ CONFIG_LOADED = False
 # 設定ディレクトリのパス
 CONFIG_DIR = Path("config")
 
+def _resolve_summary_output_dir():
+    # youtube_summary_list.pyのOUTPUT_DIRと同じフォルダを指す必要があるため、同じ環境変数名・configキーを使う(S05)
+    # config/system_config.json(このファイル独自の設定)とは別物
+    env_value = os.environ.get('YT_SUMMARY_OUTPUT_DIR', '').strip()
+    if env_value:
+        return env_value
+    try:
+        with open('config.json', 'r', encoding='utf-8') as f:
+            loaded = json.load(f)
+        config_value = str(loaded.get('paths', {}).get('output_dir', '') or '').strip()
+        if config_value:
+            return config_value
+    except Exception:
+        pass
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'output')
+
+
 # 🆕 ショート動画サマリーHTML出力先（20260707_02_01）
-SUMMARY_OUTPUT_DIR = r"C:\Users\nx023836\Nexperia\My Private - Documents\Summary"
+SUMMARY_OUTPUT_DIR = _resolve_summary_output_dir()
 
 # 🆕 ローカル重複管理システム
 registered_videos_manager = None

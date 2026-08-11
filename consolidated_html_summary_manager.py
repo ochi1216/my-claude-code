@@ -2964,9 +2964,25 @@ URL: ${url}
         print(f"[Success] Consolidated HTML generated at: {self.output_file}")
 
 
+def _resolve_target_dir():
+    # youtube_summary_list.pyのOUTPUT_DIRと同じフォルダを指す必要があるため、同じ環境変数名・configキーを使う(S05)
+    env_value = os.environ.get('YT_SUMMARY_OUTPUT_DIR', '').strip()
+    if env_value:
+        return env_value
+    try:
+        with open('config.json', 'r', encoding='utf-8') as f:
+            loaded = json.load(f)
+        config_value = str(loaded.get('paths', {}).get('output_dir', '') or '').strip()
+        if config_value:
+            return config_value
+    except Exception:
+        pass
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'output')
+
+
 if __name__ == "__main__":
-    TARGET_DIR = r"C:\Users\nx023836\Nexperia\My Private - Documents\Summary"
-    
+    TARGET_DIR = _resolve_target_dir()
+
     if not os.path.exists(TARGET_DIR):
         print(f"[Error] 指定されたフォルダが見つかりません: {TARGET_DIR}")
     else:
