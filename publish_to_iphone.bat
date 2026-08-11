@@ -60,9 +60,15 @@ if not "!RC1!"=="0" (
 
 rem 出力先パスをここで決め打ちせず、スクリプト自身の成功メッセージから読み取る。
 rem ("[Success] Consolidated HTML generated at: <path>" という1行を探す)
+rem パスにドライブ文字(C:)やバックスラッシュを含むため、batch単体の文字列
+rem 処理では確実に取り出せない。抽出はextract_consolidated_path.pyに任せ、
+rem その結果をファイル経由で受け取る(コマンドライン上でのネスト引用符を避ける)。
+set "TMP_PATH=%TEMP%\publish_to_iphone_path_%RANDOM%.txt"
+"%PYTHON_EXE%" "%~dp0extract_consolidated_path.py" "%TMP_OUT%" > "%TMP_PATH%"
 set "SRC_HTML="
-for /f "usebackq delims=" %%D in (`"%PYTHON_EXE%" -c "import sys; t=open(sys.argv[1],encoding='utf-8',errors='replace').read(); m='Consolidated HTML generated at: '; i=t.find(m); print(t[i+len(m):].splitlines()[0].strip() if i>=0 else '')" "%TMP_OUT%"`) do set "SRC_HTML=%%D"
+set /p SRC_HTML=<"%TMP_PATH%"
 del "%TMP_OUT%" >NUL 2>&1
+del "%TMP_PATH%" >NUL 2>&1
 
 if not defined SRC_HTML (
     echo [ERROR] 生成先パスをスクリプトの出力から特定できませんでした。
