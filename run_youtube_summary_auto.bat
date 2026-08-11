@@ -13,7 +13,7 @@ rem   - Avoid Documents sync/monitoring area
 rem   - Avoid killing normal Chrome as much as possible
 rem ========================================
 
-cd /d "C:\Users\nx023836\Documents\PythonScripts\Youtube"
+cd /d "%~dp0"
 
 rem ========================================
 rem Log setup
@@ -42,6 +42,21 @@ echo Chrome User Data: !CHROME_USER_DATA! >> "%LOG_FILE%" 2>&1
 echo Chrome Profile Name: !CHROME_PROFILE_NAME! >> "%LOG_FILE%" 2>&1
 echo Debug Port: !DEBUG_PORT! >> "%LOG_FILE%" 2>&1
 echo Initial URL: !INITIAL_URL! >> "%LOG_FILE%" 2>&1
+
+rem ========================================
+rem Resolve Python interpreter (dynamic, works across PCs)
+rem ========================================
+rem [S05] The previous fixed path (company-PC-specific Python313 install)
+rem does not exist on other PCs. Resolve via "where" once and always call
+rem Python through the resulting full path - calling bare "python" breaks
+rem BAT control flow (see pitfall catalog in PROJECT_STATUS.md).
+set "PYTHON_EXE="
+for /f "delims=" %%P in ('where python 2^>nul') do if not defined PYTHON_EXE set "PYTHON_EXE=%%P"
+if not defined PYTHON_EXE (
+    echo ERROR: python.exe not found on PATH! >> "%LOG_FILE%" 2>&1
+    exit /b 1
+)
+echo Python EXE: !PYTHON_EXE! >> "%LOG_FILE%" 2>&1
 
 rem ========================================
 rem Step 1: Check if a debug-mode Chrome is already reachable (reuse it if so)
@@ -200,15 +215,15 @@ rem ========================================
 echo. >> "%LOG_FILE%" 2>&1
 echo [7/7] Executing Python script... >> "%LOG_FILE%" 2>&1
 echo [DIAG] Python fixed path check:
-echo "C:\Users\nx023836\AppData\Local\Programs\Python\Python313\python.exe" "!LATEST_SCRIPT!" --auto --batch-size 10 --playlists V S A B N M >> "%LOG_FILE%" 2>&1
+echo "!PYTHON_EXE!" "!LATEST_SCRIPT!" --auto --batch-size 10 --playlists V S A B N M >> "%LOG_FILE%" 2>&1
 echo ========================================= >> "%LOG_FILE%" 2>&1
 
 echo [DIAG] Python fixed path check:
-"C:\Users\nx023836\AppData\Local\Programs\Python\Python313\python.exe" --version
-"C:\Users\nx023836\AppData\Local\Programs\Python\Python313\python.exe" -c "import sys; print(sys.executable)"
-"C:\Users\nx023836\AppData\Local\Programs\Python\Python313\python.exe" -c "import psutil; print('psutil OK', psutil.__version__)"
+"!PYTHON_EXE!" --version
+"!PYTHON_EXE!" -c "import sys; print(sys.executable)"
+"!PYTHON_EXE!" -c "import psutil; print('psutil OK', psutil.__version__)"
 
-"C:\Users\nx023836\AppData\Local\Programs\Python\Python313\python.exe" "!LATEST_SCRIPT!" --auto --batch-size 10 --playlists V S A B N M
+"!PYTHON_EXE!" "!LATEST_SCRIPT!" --auto --batch-size 10 --playlists V S A B N M
 
 set "EXIT_CODE=!ERRORLEVEL!"
 

@@ -14,7 +14,7 @@ rem   - Avoid Documents sync/monitoring area for Chrome profile
 rem   - Avoid killing normal Chrome as much as possible
 rem ========================================
 
-cd /d "C:\Users\nx023836\Documents\PythonScripts\Youtube"
+cd /d "%~dp0"
 
 rem ========================================
 rem Log setup
@@ -38,7 +38,17 @@ set "DEBUG_PORT=9222"
 set "CHROME_PROFILE_NAME=ChromeDebugProfile_20260725"
 set "CHROME_USER_DATA=%LOCALAPPDATA%\%CHROME_PROFILE_NAME%"
 set "INITIAL_URL=https://www.youtube.com/feed/subscriptions"
-set "PYTHON_EXE=C:\Users\nx023836\AppData\Local\Programs\Python\Python313\python.exe"
+
+rem [S05] The previous fixed path (company-PC-specific Python313 install)
+rem does not exist on other PCs. Resolve via "where" once and always call
+rem Python through the resulting full path - calling bare "python" breaks
+rem BAT control flow (see pitfall catalog in PROJECT_STATUS.md).
+set "PYTHON_EXE="
+for /f "delims=" %%P in ('where python 2^>nul') do if not defined PYTHON_EXE set "PYTHON_EXE=%%P"
+if not defined PYTHON_EXE (
+    echo ERROR: python.exe not found on PATH! >> "%LOG_FILE%" 2>&1
+    exit /b 1
+)
 
 echo Chrome User Data: !CHROME_USER_DATA! >> "%LOG_FILE%" 2>&1
 echo Chrome Profile Name: !CHROME_PROFILE_NAME! >> "%LOG_FILE%" 2>&1

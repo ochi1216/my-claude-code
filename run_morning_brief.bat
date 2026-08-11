@@ -16,9 +16,13 @@ rem   file, so a failure looked exactly like "nothing happened" on screen.
 rem   Output now goes to the console AND the log.
 rem ========================================
 
-cd /d "C:\Users\nx023836\Documents\PythonScripts\Youtube"
+cd /d "%~dp0"
 
-set "PYTHON_EXE=C:\Users\nx023836\AppData\Local\Programs\Python\Python313\python.exe"
+rem [S05] The previous fixed path (company-PC-specific Python313 install)
+rem does not exist on other PCs. Resolve via "where" - the not-found case
+rem is handled by the Python check step below.
+set "PYTHON_EXE="
+for /f "delims=" %%P in ('where python 2^>nul') do if not defined PYTHON_EXE set "PYTHON_EXE=%%P"
 
 set "LOG_DIR=logs"
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"

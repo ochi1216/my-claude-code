@@ -41,8 +41,18 @@ rem under a second: it never got past this line. The other scripts in
 rem this project already avoid bare "python" for exactly this kind of
 rem reason and call the interpreter by its full path; this one line had
 rem not been brought in line with that.
+rem
+rem [S05] The old fixed path (company-PC-specific Python313 install) does
+rem not exist on other PCs. Resolve via "where" once and always call
+rem Python through the resulting full path, keeping the full-path
+rem discipline above.
 rem ========================================
-set "PYTHON_EXE=C:\Users\nx023836\AppData\Local\Programs\Python\Python313\python.exe"
+set "PYTHON_EXE="
+for /f "delims=" %%P in ('where python 2^>nul') do if not defined PYTHON_EXE set "PYTHON_EXE=%%P"
+if not defined PYTHON_EXE (
+    echo ERROR: python.exe not found on PATH!
+    exit /b 1
+)
 "%PYTHON_EXE%" check_suspend_lock.py
 set "LOCKRC=!ERRORLEVEL!"
 if "!LOCKRC!"=="1" goto :suspended
