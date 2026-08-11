@@ -22,7 +22,7 @@
     "Youtubemorning起動"
   ],
   "task_prefix": "YouTubeSummary",
-  "working_dir": "C:\\Users\\nx023836\\Documents\\PythonScripts\\Youtube",
+  "working_dir": "C:\\Users\\ochi1\\OneDrive\\ドキュメント\\PythonScripts\\Youtube",
   "interactive": true,
   "tasks": [
     {
