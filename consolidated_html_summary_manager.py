@@ -2767,9 +2767,13 @@ URL: ${url}
             const jaVoices = availableVoices.filter(v => v.lang.includes('ja'));
             if (jaVoices.length > 0) {
                 if (state.useHighQualityVoice) {
+                    // siri/Premium/EnhancedはmacOS/Safariの音声名。Windows(Edge/Chrome共通)の
+                    // 高品質音声は「Natural」を含む名前(例: Microsoft Nanami Online (Natural))
+                    // のため、この判定が無いとWindowsでは常に最後のフォールバックに落ちていた(S05)
                     let bestVoice = jaVoices.find(v => v.name.toLowerCase().includes('siri') && v.name.includes('2'));
                     if (!bestVoice) bestVoice = jaVoices.find(v => v.name.toLowerCase().includes('siri'));
                     if (!bestVoice) bestVoice = jaVoices.find(v => v.name.includes('Premium') || v.name.includes('Enhanced'));
+                    if (!bestVoice) bestVoice = jaVoices.find(v => v.name.includes('Natural'));
                     ut.voice = bestVoice || jaVoices[jaVoices.length - 1];
                 } else {
                     let stdVoice = jaVoices.find(v => !v.name.toLowerCase().includes('siri') && !v.name.includes('Premium') && !v.name.includes('Enhanced'));
