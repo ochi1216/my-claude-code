@@ -628,9 +628,14 @@ class YouTubePlaylistManager:
                 logger.info("既存のデバッグ用Chromeが見つかりません。設定を読み込んで自動起動します...")
 
             # --- フェーズ2: 指定設定でChromeを自動起動 ---
-            # 固定パスを使用
-            chrome_path = r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
-            
+            # [S05] インストール先はPC・権限次第でProgram FilesとProgram Files (x86)の
+            # どちらもありうる(youtube_summary_list.pyのresolve_chrome_pathと同じ考え方)
+            chrome_candidates = [
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+            ]
+            chrome_path = next((p for p in chrome_candidates if os.path.exists(p)), chrome_candidates[0])
+
             if not os.path.exists(chrome_path):
                 logger.error(f"❌ 指定されたパスにChromeが見つかりません: {chrome_path}")
                 return False

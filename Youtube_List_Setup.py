@@ -2464,7 +2464,13 @@ def start_chrome_debug_mode():
         # ため、Chromeが未起動の状態でこのツールを単体起動すると、要約コード側とは別の
         # プロファイル（別ログイン状態・別ブックマーク）でChromeが立ち上がっていた。
         if platform.system() == "Windows":
-            default_chrome_path = r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
+            # [S05] インストール先はPC・権限次第でProgram FilesとProgram Files (x86)の
+            # どちらもありうる(youtube_summary_list.pyのresolve_chrome_pathと同じ考え方)
+            _chrome_candidates = [
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+            ]
+            default_chrome_path = next((p for p in _chrome_candidates if os.path.exists(p)), _chrome_candidates[0])
             default_user_data_dir = os.path.join(
                 os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
                 "ChromeDebugProfile_20260725"
