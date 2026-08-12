@@ -1,5 +1,9 @@
 # my-claude-code
 
+## Outlook Total Organizer
+
+Outlookメール解析・アクションダッシュボードツール。詳細は [`outlook_total_organizer/CHANGELOG.md`](outlook_total_organizer/CHANGELOG.md) を参照（README.md は未整備）。
+
 ## OneNote Report Generator
 
 セットアップ手順は [`onenote_report_generator/README.md`](onenote_report_generator/README.md) を参照。
