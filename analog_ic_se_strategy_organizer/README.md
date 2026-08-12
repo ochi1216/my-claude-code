@@ -7,7 +7,7 @@
 [`/HANDOVER_analog_ic_scout.md`](../HANDOVER_analog_ic_scout.md) を参照。自社／ベンチマーク対象の設定は
 `config/own_company.json` を参照。
 
-**現状（2026-08-11時点）:** パイプライン本体・ダッシュボードの初版を実装済み。ただし**実際のGemini API呼び出しでの動作確認はまだ完了していない**（越智さんの環境で`GEMINI_API_KEY`を設定した上での実行確認が必要。詳細は「既知の制限」参照）。「Nexperia視点への転換」を軸としたMECE改善（`DESIGN_analog_ic_se_strategy_organizer.md` 14章）に順次着手中。優先度1（ホワイトスペース分析）・優先度2（自社を競合比較に必ず含める＋統合比較表）・優先度3（ロードマップビュー）まで実装済み。Gemini API呼び出しは会社PCでの直接アクセス遮断対応として、`../common/gemini_client.py`（submodule）経由に移行済み（下記セットアップ手順4）。
+**現状（2026-08-12時点）:** パイプライン本体・ダッシュボードの初版を実装済み。「Nexperia視点への転換」を軸としたMECE改善（`DESIGN_analog_ic_se_strategy_organizer.md` 14章）に順次着手中。優先度1（ホワイトスペース分析）・優先度2（自社を競合比較に必ず含める＋統合比較表）・優先度3（ロードマップビュー）まで実装済み。Gemini API呼び出しは会社PCでの直接アクセス遮断対応として、`../common/gemini_client.py`（submodule）経由に移行済み（下記セットアップ手順4）。**ステージ0（製品登録）で、会社PC直接呼び出し失敗→自宅PCプロキシ経由フォールバック→実際のGemini API呼び出しの一連の流れを実機で確認済み**（2026-08-12）。製品ディープダイブ（5ステージ全体）の実機確認は未実施（詳細は「既知の制限」参照）。
 
 ## 必要要件
 
@@ -93,8 +93,8 @@ python3 ic_competitor_import.py
 
 ## 既知の制限・未検証事項
 
-- **実際のGemini API呼び出しは未検証**: この開発環境には`GEMINI_API_KEY`/`GEMINI_PROXY_URL`が無く、実機でのAPI呼び出し確認ができなかった。パイプラインの制御ロジック（ステージ間のデータ受け渡し、失敗時のフォールバック、HTMLレポート生成、`generate_advanced`への`model`引数伝播）はモック応答で検証済みだが、grounded searchで実際にTIのデータシート数値をどこまで正確に拾えるかは未検証（`DESIGN_analog_ic_se_strategy_organizer.md` 11章参照）。越智さんの環境でAPIキーを設定し、実際のTI型番数件で試してほしい
-- **`common/gemini_client.py`経由のプロキシフォールバックも未検証**: 自宅PC側`home_pc_server_v2.py`の`/generate`エンドポイント（`_gemini_model`フィールド対応版）への実際の再デプロイ・疎通確認は本セッションでは行っていない
+- **ステージ0の実機検証は完了**: 会社PC直接呼び出し失敗→自宅PCプロキシ（`home_pc_server_v2.py`の`/generate`エンドポイント）経由フォールバック→実際のGemini API呼び出し→ステージ0正常完了、の一連の流れを2026-08-12に実機確認済み（詳細は`CHANGELOG.md`参照）
+- **製品ディープダイブ（5ステージ全体）は未検証**: ステージ0以外の各ステージ（市場分析・キーカスタマー推定・競合IC比較・次世代スペック提案）、JSONモード（`responseSchema`指定）、ディープモード（`gemini-2.5-pro`）は実機確認できていない。grounded searchで実際にTIのデータシート数値をどこまで正確に拾えるかも未検証（`DESIGN_analog_ic_se_strategy_organizer.md` 11章参照）。越智さんの環境で実際のTI型番数件を「製品ディープダイブ」タブで試してほしい
 - キーカスタマー推定は公開情報のみに基づく「推定」であり、TIとの契約関係を示すものではない
 - 競合他社のデータシート由来スペックを比較表として利用する際の著作権・利用規約上の扱いは法務未確認（レポート内に免責は記載済み）
 
