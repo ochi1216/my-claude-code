@@ -12,48 +12,62 @@
 をアップロードして作業を依頼する。この資料は `my-claude-code` リポジトリのルートにも置いてあるため、
 セッションからはリポジトリを読むだけでも参照できる。
 
+**本資料の §0 / §5 は、対象ファイル（407行・CRLF）を実際に読み、AST比較を実行して書いている。
+行番号は `word_translation_20260306_01.py` 時点の実測値。**
+
 ---
 
-## 0. 【最重要】この資料を書いた時点で、対象ファイルは読めていない
+## 0. 結論から: 「PPTの移行差分をほぼ流用できる。ただしWord版は"祖先"なので機能が少ない」
 
-本資料は `word_translation_20260306_01.py` の**現物を持たない状態で**書いている。
-先行5ツールの実作業から得た手順・ハマりどころ・シムの実物は確実な情報だが、
-**word_translation 固有の内容（§5 の移行対象、§6 の付随ファイルの有無）は推測を含む。**
+### 0-1. 系譜（実測で確定した事実）
 
-先行ツールでは、事前の設計提案書が「`from google.genai import types` が L21 にある」と書いていたが、
-実物は旧SDK `google.generativeai` でそんな行は存在しなかった、という事故が起きている（§9-(5)）。
-**着手時は必ず現物を読み、grep で実数を数えてから作業すること。本資料の記述と食い違ったら、
-現物が正しい。**
+本セッションで `word_translation_20260306_01.py` と `ppt_translation_20260309_03.py` の
+AST比較を実行した結果:
 
-そのうえで、先行ツールから確実に言えることは次のとおり。
+| 関数・クラス | word と ppt(旧版) の比較 |
+|---|---|
+| **`init_gemini`** | **完全一致（39行）** ← 最重要 |
+| `WordProgressWindow`（`__init__` / `update_progress` / `_update_gui` / `close`） | **完全一致（58行）** |
+| `is_translatable` | **完全一致（15行）** |
+| `check_dependencies` | 18行中4行だけ違う（`HAS_DOCX`/`python-docx` か `HAS_PPTX`/`python-pptx` か） |
+| `select_file` | 53行中8行だけ違う（ダイアログの文言・拡張子） |
+| `translate_batch_gemini` | **word 59行 / ppt 69行。大きく違う（§0-2）** |
+| `translate_super_fast_parallel` | **word 31行 / ppt 56行。大きく違う（§0-2）** |
+| `get_logger` | **wordには存在しない** |
+
+**`ppt_translation` の進捗クラスが `WordProgressWindow` という名前のままなのは、
+このWord版からコードごと持っていったから**である（完全一致で裏が取れた）。
+日付も `word 2026-03-06` → `ppt 2026-03-09` の3日差。**Word版がこの系統の祖先で確定。**
+
+### 0-2. 【重要】祖先ゆえに、PPT版にある機能がWord版には無い
+
+`ppt_translation_20260309_03.py` は「VERSION 2026.0309.03」で**リトライ・ロギング等をまとめて
+追加した版**だった。Word版はその手前なので、次が**すべて存在しない**（grepで実数確認済み）。
+
+| PPT版にあってWord版に無いもの | grep結果 |
+|---|---|
+| ロギング（`get_logger` / `translation_debug.log`） | `logging` 0件 / `logger` 0件 |
+| 3回リトライ・3秒待機 | `for attempt in range(1, 4)` 無し（例外時は `print` して原文を返すだけ） |
+| フェイルファスト（3バッチ連続エラーで強制中断） | `abort_event` 0件 |
+| 進捗コールバック（バッチごとのプログレスバー更新） | `progress_callback` 0件 |
+| **`request_options={"timeout": 40}`** | **0件（＝そもそも存在しない）** |
+| ファイルロックの事前検知（WinError 32対策） | 読み込み元・出力先の事前チェック無し |
+| `traceback` によるエラー詳細出力 | `traceback` 0件 |
+| 先頭のバージョン記載 docstring | 無し（1行目がいきなり `import tkinter`） |
+
+**これらを移行のついでに足さないこと（スコープ外）。** 足すなら別作業としてユーザーに提案し、
+依頼を受けてから行う（§12）。移行と機能追加を混ぜると、実機で不具合が出たときに
+「移行のせいか、追加機能のせいか」が切り分けられなくなる。
+
+### 0-3. 外さないでほしい点
 
 | # | 箇所 | 何が起きるか |
 |---|---|---|
-| 1 | `genai.list_models()` による自動モデル検出 | **起動時にネットワークを叩くため、遮断下では初期化に失敗して `sys.exit(1)`。ツールが立ち上がらない**（`pdf_translator` / `ppt_translation` の両方で実際にこうなっていた） |
-| 2 | `response.parts` の参照 | シムが `.parts` を持たないと `AttributeError` → 全バッチが3回リトライ後に失敗 |
-| 3 | `safety_settings` | payloadへ載せないと `BLOCK_NONE` 指定が消え、内容によっては応答が空になる |
-| 4 | `request_options={"timeout": N}` | 共通モジュールに同等機能なし。削除して挙動差を記録する |
-| 5 | 付随ファイル | あるか無いかで作業量が変わる。**着手前にユーザーへ確認**（§6・§11） |
-
-### 系譜について（知っておくと理解が早い）
-
-`ppt_translation` の進捗表示クラスは、**PowerPointのツールなのに `WordProgressWindow` という
-名前のまま**である（`ppt_translation_20260309_03.py` / `_20260812_01.py` の両方で確認済み）。
-また日付を並べると次のようになる。
-
-```
-word_translation_20260306_01.py   ← 2026-03-06
-ppt_translation_20260309_03.py    ← 2026-03-09（3日後）
-pdf_translator_20260722_08.py     ← 2026-07-22（docstringに「ppt_translation の設計を踏襲」と明記）
-```
-
-つまり **word_translation がこの系統の祖先で、PPT → PDF と派生していった**可能性が高い。
-`ppt_translation` と `pdf_translator` は Gemini 呼び出し部分がAST比較で**完全一致**していたので、
-**word_translation も同じコードである可能性が高い**（＝移行差分をほぼそのまま当てられる）。
-
-**ただしこれは推測。** 祖先である以上、逆に「後から入った改善が入っていない」可能性もある
-（例: リトライ機構・フェイルファスト・ロギングが無い、進捗コールバックが無い等）。
-着手時に必ず現物で確かめること。**無い機能を移行のついでに足さないこと**（スコープ外）。
+| 1 | `genai.list_models()`（**L61**） | **起動時にネットワークを叩くため、遮断下では初期化に失敗して `sys.exit(1)`（L380-381）。ツールが立ち上がらない。** `init_gemini` はPPT版と完全一致なので、PPT版と全く同じ症状になる（実機で確認済みの事象） |
+| 2 | `response.parts`（**L137**） | シムが `.parts` を持たないと `AttributeError` → **例外に落ちて原文が返る（＝翻訳されない）**。PPT版と挙動が違う点に注意（§5-2） |
+| 3 | `safety_settings`（**L122-127**） | payloadへ載せないと `BLOCK_NONE` 指定が消え、内容によっては応答が空になる |
+| 4 | 付随ファイル | **`word_translator` という専用フォルダが既にある**ため、起動batや `requirements.txt` が既存の可能性がある。**着手前に必ず確認**（§6・§11） |
+| 5 | 元ファイルの体裁 | **CRLF改行**、かつ**72行に行末空白**がある。置換時の扱いを誤ると全関数のハッシュが変わり「触っていない」証明ができなくなる（§7・改行コードの節） |
 
 ---
 
@@ -80,8 +94,8 @@ pdf_translator_20260722_08.py     ← 2026-07-22（docstringに「ppt_translatio
 
 - **最優先**: `my-claude-code` の `ppt_translator/ppt_translation_20260812_01.py`
   … 移行後の完成形。**シムは L69〜L263。ここから丸ごとコピーしてよい。**
-  Wordツールとは「run単位で書式を保持する」という設計思想が同じなので、5ツールの中で
-  **いちばん近い前例**。
+  Wordツールとは「run単位で書式を保持する」設計思想が同じで、しかも**同じコードの子孫**なので、
+  5ツールの中で**いちばん近い前例**。
 - `my-claude-code` の `ppt_translator/ppt_translation_20260309_03.py` … 移行前。差分の取り方の参考。
 - `my-claude-code` の `ppt_translator/tests/test_ppt_translation_20260812_01.py`
   … 95項目のテスト。**新規に書き起こさずコピーして差分を当てるのが速い**（§8）。
@@ -103,7 +117,7 @@ pdf_translator_20260722_08.py     ← 2026-07-22（docstringに「ppt_translatio
 持つ薄い互換シムを1つ作り、**クライアント生成箇所だけ**を差し替える。
 
 これにより、レスポンスを読む側（`response.text` を正規表現で解析して番号付きリストへ戻す処理）や、
-リトライ・フェイルファスト・進捗表示のロジックは**一切変更しないで済む**。
+並列処理・進捗表示のロジックは**一切変更しないで済む**。
 
 **6ツールすべてでシムの形を揃えること。** 呼び出しの形は
 `client.models.generate_content(model=..., contents=..., config=...)` に統一する。
@@ -147,51 +161,61 @@ git add word_translator && git commit -m "Add word_translation as-is (baseline b
 
 ---
 
-## 5. 着手時に現物で確認すること（word_translation の移行対象マップ）
+## 5. word_translation の移行対象マップ（実測。行番号は `_20260306_01` 時点）
 
-**行番号は書かない。現物が手元に無いため。** 代わりに、確認すべき箇所と「見つけ方」を書く。
 `ppt_translation` で実際に変更が必要だったのは **`check_dependencies` / `init_gemini` /
 `translate_batch_gemini` の3関数だけ**だった（`pdf_translator` でも同じ3つ）。
-おそらく word_translation でも同じになる。
+**word_translation でも同じ3つになる見込み。**
 
-まず次を実行して実数を数える。
+| 行 | 内容 | 対応 |
+|---|---|---|
+| L13 | `import google.generativeai as genai` | 削除 |
+| L12-16 | `HAS_GEMINI` | 共通モジュールを読めたかどうかへ意味を変更 |
+| L27-28 | `check_dependencies()` の `google-generativeai` | 共通モジュールのチェックへ差し替え（`HAS_DOCX` はそのまま残す） |
+| L44 | `gemini_model = None`（グローバル） | シムのクライアントを入れる（名前は `gemini_client`。他5ツールと揃える） |
+| L49-54 | `GEMINI_API_KEY` 必須ガード | `gemini_credentials_available()` へ（§9-(1)） |
+| L57 | `genai.configure(api_key=api_key)` | 削除 |
+| **L59-80** | **`genai.list_models()` による自動モデル検出** | **削除。固定モデル名へ（最重要・§5-1）** |
+| L104 | `if not gemini_model` | `if not gemini_client` へ |
+| L122-127 | `safety_settings`（BLOCK_NONE ×4） | **payload の `safetySettings` へ載せる（§5-3）** |
+| L129-133 | `gemini_model.generate_content(...)` | シム経由へ置換（§5-4） |
+| L131 | `genai.types.GenerationConfig(temperature=0.1)` | ローカルの config クラス（`_GeminiGenerateConfig`）へ |
+| **L137-138** | **`if not response.parts: return texts`** | **シムに `.parts` を持たせる（§5-2）** |
+| L140 | `response.text.strip()` | 変更不要（シム対応済み） |
 
-```bash
-grep -n "genai\|GEMINI_API_KEY\|list_models\|safety_settings\|request_options\|response.parts\|generate_content\|import docx\|from docx" word_translation_20260306_01.py
-```
+- **`request_options` は存在しない**（grep 0件）。PPT/PDF版では削除対象だったが、**今回は削除する
+  ものが無い**。ただし挙動としては「SDK既定のタイムアウト」から「`gemini_client.py` 側の固定値
+  （直接15秒 / プロキシ60秒）」へ変わるので、CHANGELOGには挙動差として書く（§5-5）。
+- Grounding（`google_search` / `tools=`）は**未使用**、`response_schema` も**未使用**、
+  `system_instruction` も**未使用**（プロンプト本文に指示を書き込む方式）。
+- `import os`（L3）/ `import sys`（L4）は既にあるため、**シムのために追加するimportは無い。**
+- **`translate_batch_gemini` のシグネチャはPPT版と違う。** word は
+  `translate_batch_gemini(texts, target_language="Japanese")` で、**戻り値はリスト単体**
+  （PPT版は `(texts, batch_idx, logger)` を取り `(results, is_error)` のタプルを返す）。
+  **PPT版の関数をそのまま貼り付けないこと。** word のシグネチャ・戻り値を維持する。
 
-| 確認箇所 | 対応 |
-|---|---|
-| `import google.generativeai as genai` | 削除 |
-| `HAS_GEMINI` | 共通モジュールを読めたかどうかへ意味を変更 |
-| `check_dependencies()` の `google-generativeai` | 共通モジュールのチェックへ差し替え（`python-docx` のチェックはそのまま残す） |
-| `gemini_model = None`（グローバル） | シムのクライアントを入れる（名前は `gemini_client`。他5ツールと揃える） |
-| `GEMINI_API_KEY` 必須ガード | `gemini_credentials_available()` へ（§9-(1)） |
-| `genai.configure(api_key=api_key)` | 削除 |
-| **`genai.list_models()` による自動モデル検出** | **削除。固定モデル名へ（最重要・§5-1）** |
-| `if not gemini_model` | `if not gemini_client` へ |
-| `safety_settings`（BLOCK_NONE ×4） | **payload の `safetySettings` へ載せる（§5-3）** |
-| `gemini_model.generate_content(...)` | シム経由へ置換（§5-5） |
-| `genai.types.GenerationConfig(temperature=...)` | ローカルの config クラス（`_GeminiGenerateConfig`）へ |
-| `request_options={"timeout": N}` | **削除（同等機能なし・§5-4）** |
-| **`if not response.parts:`** | **シムに `.parts` を持たせる（§5-2）** |
-| `response.text.strip()` | 変更不要（シム対応済み） |
-
-`import os` / `import sys` が既にあるかも確認する（シムが使う。無ければ追加）。
-
-**Grounding（`google_search` / `tools=`）・`response_schema`・`system_instruction` は、先行5ツールでは
-すべて未使用だった。** word_translation でも使っていない見込みだが、grep で確かめること。
-使っていた場合もシムは対応済み（`_GeminiGenerateConfig` に口がある）。
-
-**Word処理側（段落・run の走査、表・ヘッダー/フッターの処理、進捗ウィンドウ、ファイル選択）は
-一切触らないこと。**
+**Word処理側（`translate_word_document_thread` の `doc.paragraphs` / `doc.tables` 走査、
+run単位の書き戻し、`WordProgressWindow`、`select_file`）は一切触らないこと。**
 
 ### 5-1. 【最重要】`genai.list_models()` で起動できなくなる
 
-先行2ツール（`pdf_translator` / `ppt_translation`）はどちらも `init_gemini()` の中で
-`genai.list_models()` を呼んで使用可能モデルを自動検出していた。これはネットワークアクセスを
-伴うため、**遮断下では必ず例外 → 「API初期化エラー」ダイアログ → `sys.exit(1)`** となり、
-**移行しない限り起動すらできない**状態だった。実機でもそのとおりだった。
+```python
+# L56-80（現状）
+genai.configure(api_key=api_key)
+available_models = []
+for m in genai.list_models():                    # ← ネットワークアクセス
+    if 'generateContent' in m.supported_generation_methods:
+        available_models.append(m.name)
+...
+gemini_model = genai.GenerativeModel(target_model_name)
+```
+
+`init_gemini()` は `__main__` から呼ばれ、`False` を返すと `sys.exit(1)`（L380-381）。
+**遮断下では `list_models()` が例外を投げ、`except`（L82）に落ちて「API初期化エラー」ダイアログ →
+即終了する。** つまりこのツールは移行しない限り起動すらできない。
+
+**この `init_gemini` は `ppt_translation_20260309_03.py` の同名関数と1文字も違わない（39行・完全一致）。**
+PPT版は実機で「移行前は起動できず、移行後は起動できる」ことが確認済みなので、Word版も同じになる。
 
 共通モジュールに `list_models` 相当は無く、プロキシにも該当エンドポイントは無い。
 **自動モデル検出は諦めて固定モデル名にする**のが正解。
@@ -227,47 +251,59 @@ def init_gemini(root_window):
 **副作用の申し送り**: 自動検出を外すため、指定モデルが使えない環境では 404 が出るようになる。
 ただし `gemini-2.5-flash` は他5ツールで実績があり、実害はまず無い。CHANGELOGに明記すること。
 
-### 5-2. 【要注意】`response.parts` を見ているはず
+### 5-2. 【PPT版と挙動が違う】`response.parts` が空のとき「原文を返す」
 
 ```python
+# L137-138（現状）
 if not response.parts:
-    if logger: logger.warning(...)
-    raise ValueError("Empty response from API")
+    return texts
 ```
 
-シムに `.parts` を持たせて解決する。空応答のとき `[]` を返せば、**元の
-「空ならValueErrorでリトライ」という挙動がそのまま保たれる**（ここが大事）。
-`ppt_translation_20260812_01.py` の `_CommonGeminiResponse` は既にこの対応が入っている。
+PPT版は `raise ValueError("Empty response from API")` してリトライへ回していたが、
+**Word版はリトライ機構が無いので、その場で原文を返して終わる**（＝そのバッチは翻訳されない）。
+
+シムに `.parts` を持たせれば、空応答のとき `[]` が返るので、**この「空なら原文を返す」という
+既存の挙動がそのまま保たれる**。`ppt_translation_20260812_01.py` の `_CommonGeminiResponse` は
+既にこの対応が入っている。
+
+**ここでPPT版のリトライ挙動に「揃えたく」なるが、やらないこと（§0-2・スコープ外）。**
 
 ### 5-3. `safety_settings` を payload へ載せる
 
-`safety_settings` は既にREST形式の dict のリスト（`category` / `threshold`）のはずなので、
+L122-127 の `safety_settings` は既にREST形式の dict のリスト（`category` / `threshold`）なので、
 **そのまま `payload["safetySettings"]` に入れればよい**。載せ忘れると `BLOCK_NONE` 指定が消え、
-資料の内容によっては応答が空になり「一部バッチだけ翻訳されない」という切り分けにくい症状になる。
+資料の内容によっては応答が空になる。Word版は空応答時に原文を返すだけなので、
+**「一部の段落だけ翻訳されていない」という、さらに気づきにくい症状**になる。
 
-### 5-4. `request_options={"timeout": N}` は等価な置き換えができない
+### 5-4. 呼び出し側（L129-133）の置換後
 
-共通モジュールのタイムアウトは `gemini_client.py` 側の固定値（**直接15秒 / プロキシ60秒**）で、
-呼び出し側から指定する口が無い。**引数は削除し、CHANGELOGに挙動差として明記する。**
+```python
+        # 旧: gemini_model.generate_content(prompt,
+        #         generation_config=genai.types.GenerationConfig(temperature=0.1),
+        #         safety_settings=safety_settings)
+        # 新: 共通モジュール(gemini_client.py)経由の互換シムで同じ内容を送る。
+        response = gemini_client.models.generate_content(
+            model=GEMINI_MODEL_NAME,
+            contents=prompt,
+            config=_GeminiGenerateConfig(temperature=0.1, safety_settings=safety_settings),
+        )
+```
 
-実害は小さい。理由: このツールも3回リトライを自前で持っている見込みで、
-`gemini_client` 側も「直接失敗 → 即プロキシへフォールバック」するため。
-ただし**初回のバッチだけは直接呼び出しの15秒タイムアウトを待つぶん遅くなる**。
+### 5-5. タイムアウトの挙動差
+
+Word版は元々タイムアウトを指定していない（`request_options` 無し）ので、旧SDKの既定に従っていた。
+移行後は `gemini_client.py` 側の固定値（**直接15秒 / プロキシ60秒**）になる。
+呼び出し側から指定する口は無い。**CHANGELOGに挙動差として明記する。**
+
+遮断下では**初回のバッチだけは直接呼び出しの15秒タイムアウトを待つぶん遅くなる**。
 一度失敗すると `.gemini_direct_disabled_until` に記録され、以降は直接呼び出しをスキップして
 プロキシ直行になる。**これは仕様どおりの挙動で、バグではない。**
 実機で「最初だけ遅い」と報告されても慌てないこと。
 
-### 5-5. 呼び出し側の置換後
-
-```python
-            # request_options={"timeout": N} は共通モジュールに同等機能が無いため削除。
-            # タイムアウトは gemini_client.py 側の固定値(直接15秒 / プロキシ60秒)になる。
-            response = gemini_client.models.generate_content(
-                model=GEMINI_MODEL_NAME,
-                contents=prompt,
-                config=_GeminiGenerateConfig(temperature=0.1, safety_settings=safety_settings),
-            )
-```
+**ただしWord版には注意点がある。** リトライ機構が無いため、初回バッチが15秒で失敗した場合、
+**そのバッチは即座に原文のまま返る**（PPT版なら3回リトライして拾えていた）。
+これは移行で新たに生じるリスクではなく元からの構造だが、実機で「最初の10項目だけ英語のまま」
+という症状が出たらこれを疑う。**気になるならリトライ追加を別作業として提案する**（§12）。
 
 ---
 
@@ -331,12 +367,15 @@ goto :warn_no_credentials
 - `gemini_client.py` の置き場所（上位の `common` を自動探索。`GEMINI_COMMON_DIR` で明示指定可）
 - モデルが固定になったこと、`GEMINI_MODEL` で上書きできること
 - 「最初のバッチだけ遅い」のは仕様であること
+- **既知の制限**（§9-(6) の一覧。特に「ヘッダー/フッター・脚注・テキストボックスは翻訳対象外」は
+  ユーザーが実機で気づきやすいので必ず書く）
 
 ### (4) `CHANGELOG.md`
 
 `ppt_translator/CHANGELOG.md` の書式（`## [YYYYMMDD_NN] - YYYY-MM-DD` + 追加ファイル/更新ファイル）に
-合わせる。新規作成になる場合は、`[20260306_01]` までの履歴を元ファイルの docstring から起こして
-1エントリにまとめておくと親切（先行ツールでは冒頭に変更内容が箇条書きで残っていた）。
+合わせる。新規作成になる場合、**元ファイルには履歴 docstring が無い**ので、`[20260306_01]` の
+エントリは「移行前の最終版」として、コードから読み取れる仕様（run単位の書式保持翻訳、
+段落＋表を対象、10件バッチ×最大3並列、出力は `_gemini_japanese.docx`）を簡潔に書けばよい。
 
 ---
 
@@ -374,17 +413,26 @@ PythonScripts\
 **1つ上（`word\common`）では見つからない。** 上位を順に探す方式（1つ上・2つ上・3つ上）に
 なっているので、コピーしたままで正しく解決する。`ppt_translation` と全く同じ階層構造。
 
-### 改行コードに注意
+### 【必読】改行コードと行末空白（実測値）
 
-先行ツールの元ファイルは **CRLF** だった。`ppt_translation` の移行では、置換を素朴に行うと
-`\r` の扱いでマッチしない・改行が混在するという事故になりかけた。
-**元ファイルの改行コードを `file` コマンド等で確認し、それを維持して書き出すこと。**
-（Pythonで処理するなら `open(..., newline="")` で読み、`newline="\r\n"` で書く。）
+`word_translation_20260306_01.py` は次のとおり。**そのまま維持して書き出すこと。**
 
-また、元ファイルには**行末に空白だけが残っている行**があった。置換のマッチに失敗する原因に
-なるので、行末空白を許容する形で照合するか、現物をよく見て文字列を作ること。
-**行末空白を一括除去してはいけない**（未変更のはずの関数までハッシュが変わり、
-「触っていない」ことの証明ができなくなる）。
+- **CRLF改行**（406行すべて `\r\n`）
+- **行末に空白が残っている行が72行ある**（L31, L38, L51, L55, L58, L64, L74, L78, L90, … など）
+
+`ppt_translation` の移行では、この2点で実際につまずいた。教訓:
+
+1. Pythonで置換するなら `open(..., encoding="utf-8", newline="")` で読み、
+   `open(..., encoding="utf-8", newline="\r\n")` で書く。
+2. 置換対象の文字列を素朴に書くと、**行末空白のせいでマッチしない**。
+   行末の空白・タブを許容する正規表現に組み立ててから照合するとよい:
+
+   ```python
+   pattern = re.compile("[ \t]*\n".join(re.escape(l.rstrip()) for l in old.split("\n")))
+   ```
+
+3. **行末空白を一括除去してはいけない。** 未変更のはずの関数までハッシュが変わり、
+   §8 のAST比較で「触っていない」ことを証明できなくなる。
 
 ---
 
@@ -395,54 +443,68 @@ PythonScripts\
 新規に書き起こさずコピーして差分を当てるのが速い。**
 
 `ppt_translation` と `word_translation` は「**run 単位で書式を保持して翻訳する**」という
-設計思想が同じなので、5ツールの中で**いちばん流用が効く**。
+設計が同じ（しかも同じコードの子孫）なので、5ツールの中で**いちばん流用が効く**。
 
-### 検証環境について
+### 検証環境について（本セッションで実測済み）
 
 | ライブラリ | Linuxコンテナ | 対応 |
 |---|---|---|
-| `python-docx` | **`pip install python-docx` で入る見込み**（`python-pptx` は 1.0.2 で動作確認済み。同じ lxml ベース） | 本物を使う |
+| `python-docx` | **`pip install python-docx` で入る。動作確認済み（1.2.0）** | 本物を使える |
 | `requests` | 導入済み | そのまま |
 | `tkinter` | **入らない**（apt必須） | `sys.modules` へスタブを注入する |
 
-`python-docx` が本物で動けば、**合成DOCXを実際に生成して、翻訳文の書き戻しまで
+`python-docx` が本物で動くのは大きい。**合成DOCXを実際に生成して、翻訳文の書き戻しまで
 エンドツーエンドで検証できる**（AI呼び出しだけ偽物に差し替える）。
+
+### 雛形を流用するときに直す必要がある箇所
+
+PPT版のテストをコピーしたあと、**word版のシグネチャ差に合わせて必ず直すこと**（§5）。
+
+- `translate_batch_gemini(texts, target_language)` … **引数は2つ。戻り値はリスト単体**
+  （PPT版の `out, is_error = ...` というタプル受けはそのままでは動かない）
+- `translate_super_fast_parallel(all_texts, target_language, max_workers)` …
+  **`progress_callback` / `logger` 引数は無い**
+- **リトライ・フェイルファストのテストは丸ごと削除する**（word版に機能が無いため）。
+  代わりに「**空応答・通信失敗のとき、リトライせず1回で原文を返す**」ことをテストする
+  （＝既存挙動が保たれている証明になる）
+- `translate_ppt_document_thread` → `translate_word_document_thread`
+- 出力ファイル名 `_gemini_japanese.pptx` → `_gemini_japanese.docx`
 
 ### 検証すべき項目
 
-- payload形状 / `model` が明示的に渡るか / `temperature` が `generationConfig` に camelCase で載るか
+- payload形状 / `model` が明示的に渡るか / `temperature: 0.1` が `generationConfig` に camelCase で載るか
 - **`safetySettings` が4カテゴリ分そのまま載るか**
-- **`response.parts` が読めるか（空応答時に `[]` になり、`ValueError` → リトライになるか）**
+- **`response.parts` が読めるか（空応答時に `[]` になり、原文がそのまま返るか）**
 - `response.text` が読めるか / payload が `json.dumps` 可能か
 - 空・壊れたレスポンスで例外を投げないか
-- リトライ・連続エラーのフェイルファストが従来どおり動くか（**元コードにある場合のみ**）
 - 認証情報判定の4パターン（**プロキシURLのみ = 通る** が特に重要）
 - 共通モジュール未配置時に「探索したパス」を含むエラーが出るか
 - **`init_gemini()` がネットワークアクセスなしで完了するか**（`list_models` を消せている証拠）
   - `socket.socket` を差し替えて「ソケット生成したら失敗」にしてから `init_gemini()` を呼び、
     成功することで証明する。**先行2ツールで使った手がそのまま使える。**
 - 共通モジュール探索が「2つ上が common」のレイアウトで正しく解決するか
-  （移行元の「1つ上」レイアウトでも解決することも併せて確認するとよい）
 
 ### Word固有のエンドツーエンド検証（ここが今回の肝）
 
-合成DOCX（見出し＋本文＋**表**＋**ヘッダー/フッター**、runごとにフォントサイズ・太字・色を設定）を
-生成し、翻訳を適用したあとで次を確認する:
+合成DOCX（見出し＋本文（同一段落に書式違いの複数run）＋**表**、runごとにフォントサイズ・太字・色を
+設定）を生成し、翻訳を適用したあとで次を確認する:
 
 - 翻訳文が run に書き戻されていること
-- **run単位の書式（`font.size` / `font.bold` / `font.color.rgb` / 段落のスタイル・配置）が
+- **run単位の書式（`font.size` / `font.bold` / `font.color.rgb` / 段落の `alignment`・`style`）が
   翻訳前後で不変**であること
-- 表のセルも翻訳対象として拾えていること
-- 元コードがヘッダー/フッター・脚注を対象にしているなら、それも拾えていること
+- **表のセルも翻訳対象として拾えていること**（`doc.tables` 経路）
+- 日本語指定時に `run.font.name` が `游ゴシック` になること（既存仕様）
+- `is_translatable` で除外されるもの（2文字以下・記号・数字のみ）が原文のまま残ること
 
-**Word固有の注意（着手時に現物で確認すること）:**
+**Word固有の注意（実測で確認済み。仕様として維持すること）:**
 
-- **テキストボックス内の文字（`w:txbxContent`）は `python-docx` の標準API（`document.paragraphs` /
-  `document.tables`）では辿れない。** 元コードがXMLを直接触って拾っているのか、そもそも対象外なのかを
-  確認し、**現状の挙動をそのまま維持する**こと（移行のついでに対応範囲を広げない）。
-- **日本語フォントの指定は、Wordでは `run.font.name` だけでは日本語文字に効かない**
-  （`w:eastAsia` の設定が別途必要）。元コードがどう書いているかを確認し、**触らないこと**。
-  仮に日本語フォントが効いていない既存不具合があっても、それは移行スコープ外（§9-(6)）。
+- **ヘッダー/フッター・脚注・テキストボックス内の文字は翻訳対象外。**
+  `translate_word_document_thread` は `doc.paragraphs` と `doc.tables` しか見ていない
+  （`sections` / `header` / `footer` はgrep 0件）。**対応範囲を移行のついでに広げないこと。**
+  READMEの「既知の制限」に明記して、実機で気づかれたときに即答できるようにする。
+- **Wordの日本語フォント指定は `run.font.name` だけでは日本語文字に効かない**
+  （`w:eastAsia` の設定が別途必要）。元コードは `run.font.name = '游ゴシック'` のみ（L294）。
+  **これは既存の挙動なので触らないこと。** 実機で「フォントが変わらない」と言われても移行のせいではない。
 
 **注意（先行ツールで実際に踏んだ失敗）**: 「出力ファイルが完全一致するはず」と決め打ちで
 アサーションを書くと外れる。PDFでは墨消しの塗り矩形が増えるため座標の集合が一致せず、テストが
@@ -468,9 +530,12 @@ print("新規  :", sorted(k for k in b if k not in a))
 EOF
 ```
 
-**Word処理側の関数がすべて「未変更」に並ぶことを確認する。**
-変更されてよいのは **`check_dependencies` / `init_gemini` / `translate_batch_gemini` の3つだけ**
-（`pdf_translator` / `ppt_translation` でも全く同じ3つだった）。
+**次の11個が「未変更」に並ぶことを確認する**（word版の全定義から、変更してよい3つを除いたもの）:
+`WordProgressWindow` / `__init__` / `_update_gui` / `close` / `update_progress` /
+`is_translatable` / `translate_super_fast_parallel` / `translate_chunk` /
+`translate_word_document_thread` / `select_file` / `start_translation`
+
+変更されてよいのは **`check_dependencies` / `init_gemini` / `translate_batch_gemini` の3つだけ**。
 
 さらに強い証拠として、**旧版と新版に同じ翻訳文を与えて出力を比較し、完全一致を確認する**。
 `ppt_translation` ではこれができた（旧版に偽の `gemini_model` を差し込んで同じ訳文を返させ、
@@ -493,7 +558,8 @@ def gemini_credentials_available():
 ```
 
 **作業手順**: `grep -n "GEMINI_API_KEY"` を必ず実行し、ヒットした全箇所を確認する。
-新規に作る／既存の bat・README にも同じ配慮が要る。
+`word_translation` では **L49-54（ガード本体）が対象**。新規に作る／既存の bat・README にも
+同じ配慮が要る。
 
 ### (2) 【今回いちばん時間を無駄にしやすい】付随ファイルは着手前に全部そろえてもらう
 
@@ -510,7 +576,7 @@ def gemini_credentials_available():
 `try/except` で受けて、実際にAI呼び出しが行われた時点で「探索したパス」「元のエラー」
 「`GEMINI_COMMON_DIR` で指定できること」を含むエラーを出す。
 
-ただし `word_translation` は**全機能がAI翻訳**のはずなので、`check_dependencies()` / `init_gemini()` の
+ただし `word_translation` は**全機能がAI翻訳**なので、`check_dependencies()` / `init_gemini()` の
 時点で分かりやすく案内して終了させてよい（`excel_translation` / `pdf_translator` /
 `ppt_translation` でも同じ判断をした）。「起動だけはできるが何もできない」より親切。
 
@@ -524,8 +590,8 @@ UI表示と実際のモデルが食い違う silent failure の原因になる�
 `excel_translation` では、事前の設計提案書が「`from google.genai import types` が L21 にある」と
 書いていたが、**実物は旧SDK `google.generativeai` で、そんな行は存在しなかった**。
 
-**必ず対象ファイルを自分で読み、grepで実数を数えてから着手すること。**
-**本資料の §5 は現物を見ずに書いているので、特に注意する（§0）。**
+本資料の §5 の行番号は `_20260306_01` の**実測値**だが、それでも
+**着手時に必ず現物を開いて確認すること。**
 
 ### (6) 移行と無関係な既存不具合を「移行のせい」と誤診しない
 
@@ -534,17 +600,28 @@ UI表示と実際のモデルが食い違う silent failure の原因になる�
 1. **AIが翻訳文を返しているか**を見る。返っていれば通信・レスポンス解析は成功しており、移行のコアは動いている。
 2. 疑わしい関数が移行前後で同一かをハッシュで確認する（§8 の AST 比較スクリプト）。
 
-先行ツールで実際にあった「移行スコープ外なので触らないもの」の例:
+`word_translation` に元からある挙動で、**移行スコープ外なので触らないもの**（実測で確認済み）:
 
-- チャンクが例外で失われたとき `[""] * batch_size` で埋めるため、最終チャンクだと件数が合わなくなりうる
-- 進捗ウィンドウのクラス名が実態と合っていない（`ppt_translation` の `WordProgressWindow`）
-- 出力ファイル名の付き方が他ツールと不揃い
-  （**既存の出力名が変わるとユーザーの運用に影響するので、依頼が無い限り変えない**）
-- 素の `except:`
+- **リトライが無い**（L157-160）… 例外時は `print` して原文を返すだけ。1回失敗したらそのバッチは終わり。
+- **ロギングが無い**… `translation_debug.log` は出ない。エラーはコンソールへ `print` されるだけで、
+  batから起動していると窓が閉じて見えないことがある。
+- **進捗バーがほぼ動かない**（L282-296）… 翻訳中の更新が無く、`0 → 完了` の2段階だけ。
+  長い文書では「固まったように見える」。**PPT版で解消済みの欠陥が、Word版には残っている。**
+- **フェイルファストが無い**… API障害時も全バッチにリクエストを投げ続ける。
+- `translate_super_fast_parallel()`（L189-190）… チャンクが例外で失われたとき `[""] * batch_size` で
+  埋めるため、最終チャンクだと翻訳結果の件数が合わなくなりうる。
+- **ファイルロックの事前検知が無い**… 出力先が開いていると、数分の翻訳が終わった後の保存時に
+  初めてエラーになる（L298-303 で保存時のみ捕捉）。読み込み元のチェックも無い。
+- `select_file`（L321）… `filetypes` に `*.doc` が含まれているが、**`python-docx` は旧形式 `.doc` を
+  開けない**ため、選ぶとエラーになる。
+- 出力ファイル名（L257-258）… `target_language.split()[0].lower()` を使うため
+  `_gemini_japanese.docx` になる（`pdf_translator` の `_ja.pdf` のような2文字コードではない）。
+  **統一したくなるが、既存の出力名が変わるとユーザーの運用に影響するので、依頼が無い限り変えない。**
+- ヘッダー/フッター・脚注・テキストボックスが翻訳対象外（§8）。
+- 素の `except:`（L205 / L244 / L248）。
 
-**word_translation でも同種のものが見つかるはずだが、移行のついでに直さないこと。**
-見つけたら CHANGELOG か納品メッセージに「既知の挙動・移行スコープ外」として記録しておく。
-実機で報告されたときに「移行のせいではない」と即答できる。
+これらは**実機で報告されたときに「移行のせいではない」と即答できるよう**記録している。
+**直したくなるが、移行と混ぜないこと。** 提案するなら §12 を参照。
 
 ---
 
@@ -559,11 +636,12 @@ UI表示と実際のモデルが食い違う silent failure の原因になる�
 - 実機で確認してほしい項目を箇条書きで残す。`word_translation` なら最低限:
   1. `PythonScripts\word\word_translator\` にファイルを配置
   2. `GEMINI_API_KEY` / `GEMINI_PROXY_URL` 設定後、**コマンドプロンプトを開き直してから**起動
-  3. **起動できること**（移行前は初期化で落ちていた見込みの点）
-  4. 実際にDOCXを翻訳し、ログと画面に `[gemini_client]` のログが出たうえで翻訳結果が返ること
-  5. フォント・色・配置・表・ヘッダー/フッターの書式が従来どおり保持されていること
-     （Word処理側は未変更なので影響しない想定）
-  6. 初回バッチだけ遅くなる場合があるが仕様であること（§5-4）
+  3. **起動できること**（移行前は初期化で落ちていた点。ここが今回いちばん重要）
+  4. 実際にDOCXを翻訳し、画面に `[gemini_client]` のログが出たうえで翻訳結果が返ること
+     （**Word版はログファイルを作らない**ので、確認はコンソール表示のみ）
+  5. フォント・色・配置・表の書式が従来どおり保持されていること（Word処理側は未変更なので影響しない想定）
+  6. 初回バッチだけ遅くなる場合があるが仕様であること（§5-5）
+  7. **進捗バーが途中で動かないのは元からの挙動**であること（§9-(6)）
 
 ---
 
@@ -575,13 +653,21 @@ UI表示と実際のモデルが食い違う silent failure の原因になる�
    無ければ新規に作る（§6）。
 2. **起動用バッチを新規に作ってよいか**（無い場合）。`ppt_translator` と同じ「初回のみvenv作成＋
    `pip install`、最新ファイルを自動起動」方式でよいか。不要なら作らない。
-3. **フォルダ名・ファイル名の接頭辞を今のまま（`word_translator` / `word_translation`）で
-   維持してよいか。** 統一したくなるが、**起動用batや運用に影響するので勝手に変えない。**
+3. **今回は「Geminiプロキシ対応だけ」に絞ってよいか。** Word版にはPPT版で追加済みの
+   リトライ・ロギング・進捗表示・フェイルファストが無い（§0-2）。**同時にやると切り分けが
+   できなくなるので、まず移行だけを完了させ、機能追加は別作業にすることを勧める。**
+   ただしユーザーが「ついでに揃えてほしい」と言うなら、それは判断として尊重する。
 
 ---
 
 ## 12. 未確定・要判断
 
+- **【今回の目玉】Word版へPPT版の改善を逆輸入するか。**
+  Word版は祖先なので、PPT版が持つ「3回リトライ・ロギング・進捗コールバック・フェイルファスト・
+  ファイルロック事前検知」が無い（§0-2・§9-(6)）。移行後の次の一手として**別バージョン
+  （`word_translation_YYYYMMDD_02.py` など）で揃える**のが自然。
+  **移行と同時にやらないこと**（実機で問題が出たとき原因の切り分けができなくなる）。
+  移行完了時に「こういう差分があります。揃えますか？」と提案するとよい。
 - **「直接接続の復活お知らせ」機能を入れるか。**
   TYPE A（`outlook_total_organizer`）にのみ実装済み。複数ツールに入れると同じ日に何度も
   ポップアップが出るため、集約方針が未決のまま `excel_translation` / `pdf_translator` /
