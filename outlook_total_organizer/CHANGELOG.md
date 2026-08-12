@@ -1,5 +1,42 @@
 # CHANGELOG — outlook_total_organizer
 
+## VERSION 20260812_01
+
+### 追加・修正
+	**Gemini APIへの直接アクセス遮断に伴い、共通クライアント(`gemini_client.py`)の自宅PCプロキシ自動フォールバック機構経由へ移行**。会社PCからGemini APIへの直接アクセスが遮断される事象(2026-08-10頃)を受け、先行して移行済みの`rtocs_organizer`・`analog_ic_se_strategy_organizer`と同じ方式に揃えた。全体設計は`gemini-common-tools`リポジトリの`GEMINI_MIGRATION_HANDOVER.md`を参照。
+	本ツールは`google.genai`SDKの呼び出しがファイル内の6箇所に分散していた(`MailSummarizer.__init__`に1箇所、`OutlookRequestHandler.do_POST`内の翻訳・一括翻訳・質問生成・単文要約・詳細要約の各ハンドラに5箇所)ため、6箇所すべてを個別に書き換えるのではなく、`genai.Client`と同じインターフェースだけを持つ薄い互換シム(`_CommonGeminiClient`)を1つ用意し、`genai.Client(api_key=...)`の生成箇所のみを差し替える方式を採った。これにより、レスポンスを読む側のコード(`response.text`／`response.usage_metadata.prompt_token_count`等)や`types.GenerateContentConfig(...)`によるconfig構築は**一切変更していない**(トークン計測・コスト表示も従来どおり動作する)。Google Search Groundingは元々使用していないため対応不要。
+
+	**移行に伴う挙動の変更(要確認)**: GUI設定画面のGemini APIキー入力欄(`json/mail_manager_config.json`の`gemini_api_key`)は使用されなくなり、認証情報は環境変数から読まれるようになった(他2ツールと統一)。会社PCで必要な環境変数は`GEMINI_API_KEY`(直接呼び出し用)と`GEMINI_PROXY_URL`(自宅PCプロキシ。直接呼び出し失敗時のフォールバック先)。`gemini_client.py`の置き場所を明示したい場合のみ`GEMINI_COMMON_DIR`も設定する(未設定時は本スクリプトの1つ上の階層の`common`フォルダを探す)。環境変数は`setx`で設定しただけでは現在のコマンドプロンプトに反映されないため、**設定後にコマンドプロンプトを開き直してから起動する**必要がある(ハンドオーバー文書の「よくあるハマりどころ」参照)。
+
+	**指示内容から踏み込んで対応した点(3件)**: いずれも、指示どおりに6箇所を差し替えるだけでは移行後にツールが動かなくなる、または起動不能になることが分かったため対応した。
+	(1) 5つのAPIハンドラの先頭にあった`if not api_key: raise Exception("APIキーが設定されていません")`というガードは、GUI設定のAPIキーが空であることを理由に例外を投げる実装だった。移行後はGUI設定欄が空になるのが正常な状態のため、このままでは翻訳・要約等のAI機能が**すべて動かなくなる**。認証情報の有無を環境変数(`GEMINI_API_KEY`／`GEMINI_PROXY_URL`)も含めて判定する`gemini_credentials_available()`を新設し、5箇所のガードをこれに置き換えた。直接呼び出しが遮断されていてもプロキシ経由なら成功しうるため、どちらか一方でも設定されていれば通す(プロキシ専用構成を誤って弾かない)。旧来のGUI設定しか無い環境でも止めないよう、そちらも見る後方互換を持たせてある。
+	(2) 起動時の`if not self.config['gemini_api_key']: messagebox.showwarning("!", "APIキー設定が必要です")`も同様に、正常な状態で毎回警告が出てしまうため、同じ`gemini_credentials_available()`による判定に変更し、文言も環境変数の設定を案内する内容に改めた。
+	(3) `gemini_client`のimportをモジュール先頭で無条件に行うと、共通モジュールが未配置・パス誤りの場合に**ツール自体が起動できなくなり**、メール検索・仕分けなどAIを使わない機能まで巻き添えで停止する。importは`try/except`で行い、失敗しても起動は継続させ、実際にAI呼び出しが行われた時点で「探索したパス」「元のエラー」「`GEMINI_COMMON_DIR`で指定できること」を含む`RuntimeError`を出すようにした。
+
+### 変更関数
+	モジュール先頭のimport（`from google import genai`を削除。`from google.genai import types`は`types.GenerateContentConfig(...)`の構築に引き続き使うため残置。`import sys`を追加）
+	`MailSummarizer.__init__`（`from google import genai`のローカルimportを削除し、`self.client`を`_CommonGeminiClient`に変更。docstringを実態に合わせて更新。`api_key`引数は呼び出し元との互換のため残しているが未使用）
+	`OutlookRequestHandler.do_POST`の`/translate`・`/translate_array`・`/generate_questions`・`/summarize_single`・`/summarize_detail`（`genai.Client(api_key=api_key)`→`_CommonGeminiClient(api_key=api_key)`。APIキー未設定ガードを`gemini_credentials_available()`ベースへ変更）
+	`MailManagerGUI.__init__`（起動時のAPIキー未設定警告を`gemini_credentials_available()`ベースへ変更し、環境変数の設定を案内する文言に更新）
+	`MailManagerGUI._set_api`（入力欄が現在は未使用であることと、必要な環境変数をダイアログ上に明記。値の保存自体は従来どおり行う(旧バージョンへ戻した場合に設定が残るように)）
+
+### 新規追加：
+	定数 `_COMMON_DIR`（`GEMINI_COMMON_DIR`、未設定時は`../common`）
+	クラス `_CommonGeminiClient` / `_CommonGeminiModels` / `_CommonGeminiResponse` / `_CommonUsageMetadata`（`genai.Client`互換シム）
+	関数 `_schema_to_jsonable`（`response_schema`がSDKバージョンによってpydanticモデルへ自動変換された場合でもREST payloadへ載せられるようdict化する保険。本ツールは元々素のdictを渡しているため通常は素通し）
+	関数 `gemini_credentials_available`（環境変数＋旧GUI設定を見た認証情報の事前チェック）
+
+### 削除：
+	`from google import genai`（モジュール先頭とMailSummarizer.__init__内のローカルimportの2箇所。`genai`の用途は`genai.Client(`の6箇所のみだったことをgrepで確認済み）
+
+変更ファイル：
+	`outlook_total_organizer_20260812_01.py`（`_20260806_01`からのコピー＋今回の変更。`_20260806_01`はそのまま残置）
+
+動作確認時の注意：
+	本ツールはWindows専用（win32com依存）のため、本セッションの実行環境（Linuxコンテナ）ではOutlook実機での動作検証ができていない。加えて、`gemini_client.py`本体・自宅PCプロキシ・実際のGemini APIへは本セッションから到達できないため、**実際にプロキシ経由でGeminiの応答が返るところまでは未確認**。以下を実施済み: `ast.parse`構文チェック、`_20260806_01`との`diff`で変更範囲が今回の移行箇所のみであることを確認、`genai.Client(`の残存が0件であることを確認。
+	偽の`gemini_client`モジュールを注入して`generate_advanced()`へ渡されるpayloadを捕捉するスタンドアロン`python3`ハーネスで、(a)config無しの呼び出しで`contents`が`{"contents":[{"parts":[{"text":...}]}]}`の形状になること、(b)`model`引数が明示的に渡ること(共通モジュール側の既定モデルへ暗黙にフォールバックしないこと。ハンドオーバー文書が「silent failure」として警告している点)、(c)`response.text`・`usage_metadata.prompt_token_count`・`candidates_token_count`が従来どおり読めること、(d)`types.GenerateContentConfig(response_mime_type=...)`が`responseMimeType`へcamelCaseで載ること、(e)スキーマ＋temperature指定時に`responseSchema`/`temperature`が載り、payload全体が`json.dumps`可能でスキーマの中身も保持されること、(f)pydanticモデル(`types.Schema`)で来た場合も`_schema_to_jsonable`でdict化できること、(g)空レスポンス・`candidates`が空のレスポンスでも例外を投げず`text`が空文字になること、(h)共通モジュール未配置時にAI呼び出し時点で原因の分かる`RuntimeError`が出ること、(i)`gemini_credentials_available()`が環境変数のみ／プロキシURLのみ／旧GUI設定のみ／すべて空、の4パターンで正しく判定すること、(j)`MailSummarizer._call_ai`・`_run_genai_call_with_schema`がシム経由で動作しトークン計測が加算されること、`override_model`がそのまま`model`として渡ること、の計28項目を検証し全て合格した。あわせて`gemini_client`を一切用意しない状態でも対象ファイルがimportできる(=ツールが起動できる)ことを別途確認した。既存の回帰テスト(振り返りタブのスタッフ拡張・議事録抽出・HTML分割・reformat対象者・アクションダッシュボードのカテゴリ削除／表示期間プルダウン等の7スイート)も再実行し、全て合格を維持していることを確認した。
+	実機（Windows＋Outlook）でのご確認が必須: (1)環境変数`GEMINI_API_KEY`・`GEMINI_PROXY_URL`を設定し、**コマンドプロンプトを開き直してから**起動すること(`setx`は現在のシェルには反映されない)。(2)起動時にAPIキー警告が出ないこと。(3)`gemini_client.py`が`../common`に無い場合は`GEMINI_COMMON_DIR`を設定すること(未設定でツールは起動するが、AI機能実行時にエラーになる)。(4)実際にAI機能(アクション一覧生成・翻訳・要約・振り返り生成など)を実行し、プロキシ経由で応答が返ること。特に**JSONスキーマを使う機能(アクション抽出・振り返り・統括コックピット)**は`responseSchema`がプロキシ経由で正しく効くかを重点的にご確認いただきたい。(5)HTMLレポート下部のAPIコスト概算表示が0円のままになっていないこと(トークン計測が`usageMetadata`から取れているかの確認になる)。(6)直接呼び出しが失敗しプロキシへフォールバックする際の待ち時間が、体感として許容範囲かどうか。
+
 ## VERSION 20260806_01
 
 ### 追加・修正
