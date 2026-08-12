@@ -1,5 +1,34 @@
 # CHANGELOG — outlook_total_organizer
 
+## VERSION 20260812_02
+
+### 追加・修正
+	**Gemini APIへの直接呼び出しが「復活」した際に、その日の初回1回だけポップアップでお知らせする機能を追加**。会社側の遮断が解除されたときに気づけるようにするため。ユーザーからのご依頼で、あわせて`GEMINI_RETRY_DIRECT_AFTER_SECONDS`を1日(86400秒)へ延ばす運用に変更する(こちらは環境変数の設定のみで、コード変更は不要)。
+	実装にあたり`gemini-common-tools`リポジトリの`gemini_client.py`本体を実際に取得して精読し、外部から「直接呼び出しが使われたか」を判定できることを確認した。`generate_advanced()`の実装は「無効化中でなければ直接呼び出しを試み、成功すればそのまま返す。失敗したら`_disable_direct()`を呼んでフラグを立ててからプロキシへフォールバックする」という構造のため、**呼び出しが成功した直後に`_is_direct_disabled()`がFalseなら直接呼び出しが使われた**と確実に判定できる。
+	**単に「直接呼び出しが成功した」だけでは通知しない**設計にした。遮断が起きていない通常運用では毎回成功するため、そのまま通知すると毎日ポップアップが出てしまう。「一度でも遮断を観測した後に成功した」場合のみ"復活"とみなす。状態(`direct_was_blocked` / `last_notified_date`)は`json/gemini_direct_notice.json`へ永続化しているので、ツールを再起動しても同じ日に再通知されない。
+	ポップアップは**非モーダル**(`grab_set()`を呼ばない`Toplevel`)。OKで閉じられるが、押さなくても取得・要約などの操作をそのまま続けられる(ご要望どおり)。他ウィンドウの背後に隠れないよう`-topmost`で最前面に出している。AI呼び出しはワーカースレッドから行われるため、コールバックは`root.after(0, ...)`でメインスレッドへ戻してからウィンドウを生成する。通知処理が失敗しても本来のAI呼び出しを巻き添えにしないよう、例外は握りつぶす。
+
+### 変更関数
+	`_CommonGeminiModels.generate_content`（呼び出し成功後に`_observe_gemini_direct_state()`を呼び、直接呼び出しの復活を観測する。ここでの例外はAI呼び出しへ波及させない）
+	`MailManagerGUI.__init__`（`set_gemini_direct_restored_callback`で、復活時に`root.after`経由でポップアップを出すコールバックを登録）
+
+### 新規追加：
+	定数 `GEMINI_DIRECT_NOTICE_FILE`（`json/gemini_direct_notice.json`。通知状態の永続化先）
+	関数 `set_gemini_direct_restored_callback` / `_gemini_direct_is_disabled` / `_load_gemini_notice` / `_save_gemini_notice` / `_observe_gemini_direct_state`
+	メソッド `MailManagerGUI._show_gemini_direct_restored_popup`（非モーダルのお知らせウィンドウ）
+
+### 削除：
+	なし
+
+変更ファイル：
+	`outlook_total_organizer_20260812_02.py`（`_20260812_01`からのコピー＋今回の変更。`_20260812_01`はそのまま残置）
+
+動作確認時の注意：
+	本ツールはWindows専用（win32com依存）のため、本セッションの実行環境（Linuxコンテナ）ではOutlook実機での動作検証ができていない。また、**実際にGemini APIの遮断が解除された状況を再現できないため、本物の"復活"でポップアップが出るところは未確認**(偽の`gemini_client`で状態遷移を再現しての検証に留まる)。以下を実施済み: `ast.parse`構文チェック、`_20260812_01`との`diff`で変更範囲が今回の追加分のみであることを確認。
+	偽の`gemini_client`の`_is_direct_disabled`を差し替えて状態遷移を再現するスタンドアロン`python3`ハーネスで、(a)遮断を一度も観測していない通常運用では通知されないこと(毎日ポップアップが出る誤動作の防止)、(b)遮断中(プロキシ経由)は通知されず、遮断を観測したことが状態ファイルに記録されること、(c)遮断から復活したとき通知されること、(d)同じ日の2回目以降は通知されないこと(1日1回)、(e)ツール再起動(モジュール再ロード)後も同じ日には再通知されないこと、(f)日付が変われば再び通知されうること、(g)`gemini_client`側に`_is_direct_disabled`が無い場合は誤検知せず通知しないこと、(h)通知コールバックが例外を投げてもAI呼び出しの結果は正常に返ること、(i)8スレッド同時呼び出しでも通知が1回だけであること(ロックによる競合防止)、(j)ポップアップが`grab_set()`を呼ばない非モーダルであり、OKボタンを持ち、コールバックが`root.after`でメインスレッドへ戻していること、の計15項目を検証し全て合格した。既存の回帰テスト9スイートも再実行し、全て合格を維持していることを確認した。
+	実機（Windows＋Outlook）でのご確認が必須: (1)`setx GEMINI_RETRY_DIRECT_AFTER_SECONDS 86400`を設定し、**コマンドプロンプトを開き直してから**起動すること。この設定は`gemini_client.py`が読むため、`rtocs_organizer`・`analog_ic_se_strategy_organizer`にも同時に効く点にご留意いただきたい。(2)遮断が続いている間は、これまでどおりポップアップが出ないこと。(3)遮断が解除された日に、最初のAI機能実行時にポップアップが1回だけ出ること。(4)ポップアップのOKを押さなくても、他の操作(取得・要約など)が続けられること。(5)同じ日に再度AI機能を使ってもポップアップが再表示されないこと。
+	動作を試したい場合の手順: `json/gemini_direct_notice.json`を`{"direct_was_blocked": true, "last_notified_date": "2000-01-01"}`に手で書き換えたうえで、直接呼び出しが成功する状況(遮断が無い環境、または`gemini-common-tools`側の`.gemini_direct_disabled_until`を削除した状態)でAI機能を実行すると、ポップアップの表示を確認できる。
+
 ## VERSION 20260812_01
 
 ### 追加・修正
