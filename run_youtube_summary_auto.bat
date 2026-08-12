@@ -21,8 +21,16 @@ rem ========================================
 set "LOG_DIR=logs"
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 
-for /f "tokens=2 delims==" %%I in ('wmic os get localdatetime /value') do set datetime=%%I
-set "TIMESTAMP=%datetime:~0,8%_%datetime:~8,6%"
+rem [S04] wmic is removed on current Windows builds. When it is missing,
+rem the datetime variable stays empty and TIMESTAMP expands to a literal
+rem string containing a colon, which is not a legal Windows filename.
+rem The log redirect then fails, the target script never runs at all, and
+rem the batch still reports success. Resolve the timestamp with PowerShell,
+rem which is locale independent, and fall back to a fixed safe name so a
+rem failure here can never produce an unusable filename again.
+set "TIMESTAMP="
+for /f "delims=" %%I in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss" 2^>nul') do set "TIMESTAMP=%%I"
+if not defined TIMESTAMP set "TIMESTAMP=notimestamp"
 set "LOG_FILE=%LOG_DIR%\run_log_%TIMESTAMP%.log"
 
 echo ========================================= >> "%LOG_FILE%" 2>&1

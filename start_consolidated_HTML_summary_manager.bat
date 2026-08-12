@@ -28,8 +28,16 @@ cd /d "%~dp0"
 set "LOG_DIR=logs"
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 
-for /f "tokens=2 delims==" %%I in ('wmic os get localdatetime /value') do set datetime=%%I
-set "TIMESTAMP=%datetime:~0,8%_%datetime:~8,6%"
+rem [S04] wmic is removed on current Windows builds. When it is missing,
+rem the datetime variable stays empty and TIMESTAMP expands to a literal
+rem string containing a colon, which is not a legal Windows filename.
+rem The log redirect then fails, the target script never runs at all, and
+rem the batch still reports success. Resolve the timestamp with PowerShell,
+rem which is locale independent, and fall back to a fixed safe name so a
+rem failure here can never produce an unusable filename again.
+set "TIMESTAMP="
+for /f "delims=" %%I in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss" 2^>nul') do set "TIMESTAMP=%%I"
+if not defined TIMESTAMP set "TIMESTAMP=notimestamp"
 set "LOG_FILE=%LOG_DIR%\auto_summary_manager_log_%TIMESTAMP%.log"
 set "TMP_OUT=%LOG_DIR%\auto_summary_manager_%TIMESTAMP%.tmp"
 
@@ -65,10 +73,23 @@ echo.
 python "!TARGET_SCRIPT!" > "%TMP_OUT%" 2>&1
 set "EXIT_CODE=!ERRORLEVEL!"
 
+rem [S04] If the redirect target could not be created, the script above never
+rem ran at all. That happened for real: a broken timestamp produced a filename
+rem containing a colon, the redirect failed, nothing executed, and this batch
+rem still printed "Completed successfully" four times a day. Treat a missing
+rem output file as a failure so that case can never look like success again.
+if not exist "%TMP_OUT%" (
+    echo ERROR: could not create "%TMP_OUT%" - the script did not run.
+    set "EXIT_CODE=1"
+    goto :report
+)
+
 rem Show on screen, then keep a copy in the log.
 type "%TMP_OUT%"
 type "%TMP_OUT%" >> "%LOG_FILE%"
 del "%TMP_OUT%" >NUL 2>&1
+
+:report
 
 echo.
 echo =========================================
