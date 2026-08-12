@@ -44,7 +44,14 @@ echo Checking dependencies...
 pip install -q -r requirements.txt
 if errorlevel 1 goto :pip_failed
 
-if "%GEMINI_API_KEY%"=="" goto :warn_no_api_key
+rem Since 20260812_01 the Gemini call goes through the shared module
+rem gemini_client.py, which falls back to the home-PC proxy when the direct
+rem call fails. A proxy-only setup (GEMINI_API_KEY empty but GEMINI_PROXY_URL
+rem set) is perfectly valid, so warn only when BOTH are missing. Checking
+rem GEMINI_API_KEY alone would stop with a warning + pause on every start.
+if not "%GEMINI_API_KEY%"=="" goto :run_tool
+if not "%GEMINI_PROXY_URL%"=="" goto :run_tool
+goto :warn_no_credentials
 
 :run_tool
 echo Starting PDF Gemini Translator...
@@ -74,11 +81,13 @@ echo [ERROR] Failed to install dependencies.
 pause
 exit /b 1
 
-:warn_no_api_key
+:warn_no_credentials
 echo.
-echo [WARNING] The GEMINI_API_KEY environment variable is not set.
+echo [WARNING] Neither GEMINI_API_KEY nor GEMINI_PROXY_URL is set.
 echo The tool will show an error immediately after it starts.
-echo Example: setx GEMINI_API_KEY "your-api-key"
+echo Set at least one of them:
+echo   setx GEMINI_API_KEY "your-api-key"
+echo   setx GEMINI_PROXY_URL "https://xxxx.ngrok-free.dev"
 echo (After running setx, you must open a NEW Command Prompt window.)
 echo.
 pause
