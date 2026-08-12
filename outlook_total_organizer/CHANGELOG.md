@@ -13,8 +13,14 @@
 	(2) 起動時の`if not self.config['gemini_api_key']: messagebox.showwarning("!", "APIキー設定が必要です")`も同様に、正常な状態で毎回警告が出てしまうため、同じ`gemini_credentials_available()`による判定に変更し、文言も環境変数の設定を案内する内容に改めた。
 	(3) `gemini_client`のimportをモジュール先頭で無条件に行うと、共通モジュールが未配置・パス誤りの場合に**ツール自体が起動できなくなり**、メール検索・仕分けなどAIを使わない機能まで巻き添えで停止する。importは`try/except`で行い、失敗しても起動は継続させ、実際にAI呼び出しが行われた時点で「探索したパス」「元のエラー」「`GEMINI_COMMON_DIR`で指定できること」を含む`RuntimeError`を出すようにした。
 
+	**メール一覧タブの要約で「提供されたメールには本文がありませんでした」となる既存不具合を修正(B案: 要約直前に本文を補完)**。Gemini移行後の実機確認で、メール1本の要約がこの結果になるとのご報告を受けて調査した。AIが日本語で応答を返していること自体が移行成功の証拠であり、本件は移行とは無関係の既存不具合であることを、本文取得に関わる5つの関数(`_gen`／`summarize_thread`／`search_mails_fast`／`_item_to_dict`／`_add_single_item`)が移行前後でハッシュ一致することを確認して切り分けた。
+	原因は`search_mails_fast`の軽量モード(`search_light_mode = (本文KWが空) and (force_full_bodyが未指定)`)。「本文で絞り込む必要がないなら本文を読み込まない」という高速化だが、後から追加された要約機能は「本文で絞り込まないが本文は必要」というケースに該当し、`body`が空文字のままAIへ渡っていた。アクションダッシュボード等は`force_full_body=True`を明示して回避済みだったが、メール一覧タブの検索(`_run_search`)には対応が入っていなかった。
+	修正方針は、検索を一律`force_full_body=True`にする案(検索が遅くなる)ではなく、**実際に要約する直前に、選択されたスレッドの本文だけを補完する**案をユーザーが選択。`enrich_bodies_for_threads`を新設し、`body`が空のメールについてのみEntryID経由でOutlookから本文を取得する。既に本文があるメールには一切アクセスしないため、本文KW付きで検索した場合や2回目以降の要約では追加コストが発生しない。個別メールの取得失敗(削除済み・アクセス不可等)は握りつぶして続行し、他のメールの要約は成立させる。
+	あわせて`_gen`の処理順序を組み替えた。長文警告(1万文字超)の判定は`body`の文字数で行っているため、**本文補完より先に判定すると常に0文字となり、警告が出ないまま巨大なスレッドをそのままAIへ送ってしまう**。「本文補完 → 長文判定 → (必要なら)モーダルダイアログ → 要約」の順に修正した。COM呼び出しでGUIが固まらないよう本文補完はワーカースレッドで実行し、モーダルダイアログの表示だけ`root.after`でメインスレッドに戻している(tk変数`v_past_limit`の読み取りはスレッド起動前に済ませる)。
+
 ### 変更関数
 	モジュール先頭のimport（`from google import genai`を削除。`from google.genai import types`は`types.GenerateContentConfig(...)`の構築に引き続き使うため残置。`import sys`を追加）
+	`MailManagerGUI._gen`（「本文補完 → 長文判定 → モーダル → 要約」の順に再構成。本文補完と長文判定をワーカースレッドへ移し、モーダルダイアログのみ`root.after`でメインスレッドに戻す）
 	`MailSummarizer.__init__`（`from google import genai`のローカルimportを削除し、`self.client`を`_CommonGeminiClient`に変更。docstringを実態に合わせて更新。`api_key`引数は呼び出し元との互換のため残しているが未使用）
 	`OutlookRequestHandler.do_POST`の`/translate`・`/translate_array`・`/generate_questions`・`/summarize_single`・`/summarize_detail`（`genai.Client(api_key=api_key)`→`_CommonGeminiClient(api_key=api_key)`。APIキー未設定ガードを`gemini_credentials_available()`ベースへ変更）
 	`MailManagerGUI.__init__`（起動時のAPIキー未設定警告を`gemini_credentials_available()`ベースへ変更し、環境変数の設定を案内する文言に更新）
@@ -25,6 +31,7 @@
 	クラス `_CommonGeminiClient` / `_CommonGeminiModels` / `_CommonGeminiResponse` / `_CommonUsageMetadata`（`genai.Client`互換シム）
 	関数 `_schema_to_jsonable`（`response_schema`がSDKバージョンによってpydanticモデルへ自動変換された場合でもREST payloadへ載せられるようdict化する保険。本ツールは元々素のdictを渡しているため通常は素通し）
 	関数 `gemini_credentials_available`（環境変数＋旧GUI設定を見た認証情報の事前チェック）
+	メソッド `OutlookMailManager.enrich_bodies_for_threads`（指定スレッド群のうち`body`が空のメールだけをEntryID経由で本文取得して補完する。補完件数を返す）
 
 ### 削除：
 	`from google import genai`（モジュール先頭とMailSummarizer.__init__内のローカルimportの2箇所。`genai`の用途は`genai.Client(`の6箇所のみだったことをgrepで確認済み）
@@ -35,7 +42,8 @@
 動作確認時の注意：
 	本ツールはWindows専用（win32com依存）のため、本セッションの実行環境（Linuxコンテナ）ではOutlook実機での動作検証ができていない。加えて、`gemini_client.py`本体・自宅PCプロキシ・実際のGemini APIへは本セッションから到達できないため、**実際にプロキシ経由でGeminiの応答が返るところまでは未確認**。以下を実施済み: `ast.parse`構文チェック、`_20260806_01`との`diff`で変更範囲が今回の移行箇所のみであることを確認、`genai.Client(`の残存が0件であることを確認。
 	偽の`gemini_client`モジュールを注入して`generate_advanced()`へ渡されるpayloadを捕捉するスタンドアロン`python3`ハーネスで、(a)config無しの呼び出しで`contents`が`{"contents":[{"parts":[{"text":...}]}]}`の形状になること、(b)`model`引数が明示的に渡ること(共通モジュール側の既定モデルへ暗黙にフォールバックしないこと。ハンドオーバー文書が「silent failure」として警告している点)、(c)`response.text`・`usage_metadata.prompt_token_count`・`candidates_token_count`が従来どおり読めること、(d)`types.GenerateContentConfig(response_mime_type=...)`が`responseMimeType`へcamelCaseで載ること、(e)スキーマ＋temperature指定時に`responseSchema`/`temperature`が載り、payload全体が`json.dumps`可能でスキーマの中身も保持されること、(f)pydanticモデル(`types.Schema`)で来た場合も`_schema_to_jsonable`でdict化できること、(g)空レスポンス・`candidates`が空のレスポンスでも例外を投げず`text`が空文字になること、(h)共通モジュール未配置時にAI呼び出し時点で原因の分かる`RuntimeError`が出ること、(i)`gemini_credentials_available()`が環境変数のみ／プロキシURLのみ／旧GUI設定のみ／すべて空、の4パターンで正しく判定すること、(j)`MailSummarizer._call_ai`・`_run_genai_call_with_schema`がシム経由で動作しトークン計測が加算されること、`override_model`がそのまま`model`として渡ること、の計28項目を検証し全て合格した。あわせて`gemini_client`を一切用意しない状態でも対象ファイルがimportできる(=ツールが起動できる)ことを別途確認した。既存の回帰テスト(振り返りタブのスタッフ拡張・議事録抽出・HTML分割・reformat対象者・アクションダッシュボードのカテゴリ削除／表示期間プルダウン等の7スイート)も再実行し、全て合格を維持していることを確認した。
-	実機（Windows＋Outlook）でのご確認が必須: (1)環境変数`GEMINI_API_KEY`・`GEMINI_PROXY_URL`を設定し、**コマンドプロンプトを開き直してから**起動すること(`setx`は現在のシェルには反映されない)。(2)起動時にAPIキー警告が出ないこと。(3)`gemini_client.py`が`../common`に無い場合は`GEMINI_COMMON_DIR`を設定すること(未設定でツールは起動するが、AI機能実行時にエラーになる)。(4)実際にAI機能(アクション一覧生成・翻訳・要約・振り返り生成など)を実行し、プロキシ経由で応答が返ること。特に**JSONスキーマを使う機能(アクション抽出・振り返り・統括コックピット)**は`responseSchema`がプロキシ経由で正しく効くかを重点的にご確認いただきたい。(5)HTMLレポート下部のAPIコスト概算表示が0円のままになっていないこと(トークン計測が`usageMetadata`から取れているかの確認になる)。(6)直接呼び出しが失敗しプロキシへフォールバックする際の待ち時間が、体感として許容範囲かどうか。
+	本文補完(B案)については、Outlookの`GetItemFromID`を偽装したスタンドアロン`python3`ハーネスで、(a)`body`が空・空白のみのメールだけが補完され、既に本文があるメールは上書きもOutlookアクセスもされないこと、(b)全て本文済みなら補完0件でOutlookアクセスが一切発生しないこと、(c)個別メールの取得失敗(削除済み等)でも例外にならず他のメールは補完されること、(d)`entry_id`が無いメールはスキップされること、(e)進捗コールバックが件数分呼ばれること、(f)`_gen`のソース上で「本文補完 → 長文判定 → ダイアログ」の順序が守られており、モーダルは`root.after`でメインスレッド、本文補完はワーカースレッドで実行され、tk変数の読み取りがスレッド起動前に行われていること、の計17項目を検証し全て合格した。
+	実機（Windows＋Outlook）でのご確認が必須: (1)環境変数`GEMINI_API_KEY`・`GEMINI_PROXY_URL`を設定し、**コマンドプロンプトを開き直してから**起動すること(`setx`は現在のシェルには反映されない)。(2)起動時にAPIキー警告が出ないこと。(3)`gemini_client.py`が`../common`に無い場合は`GEMINI_COMMON_DIR`を設定すること(未設定でツールは起動するが、AI機能実行時にエラーになる)。(4)実際にAI機能(アクション一覧生成・翻訳・要約・振り返り生成など)を実行し、プロキシ経由で応答が返ること。特に**JSONスキーマを使う機能(アクション抽出・振り返り・統括コックピット)**は`responseSchema`がプロキシ経由で正しく効くかを重点的にご確認いただきたい。(5)HTMLレポート下部のAPIコスト概算表示が0円のままになっていないこと(トークン計測が`usageMetadata`から取れているかの確認になる)。(6)直接呼び出しが失敗しプロキシへフォールバックする際の待ち時間が、体感として許容範囲かどうか。(7)**本文KWを空にしてメール一覧を検索し、スレッドを選んで要約**し、「本文がありませんでした」ではなく実際の内容の要約が出ること。(8)本文補完中に「📄 本文を取得中... (n/m)」の進捗が出て、GUIが固まらないこと。(9)1万文字を超えるスレッドを選んだ際に、長文警告ダイアログが従来どおり出ること(本文補完後の実際の文字数で判定されるようになったため、これまで警告が出ていなかったケースでも出るようになる)。
 
 ## VERSION 20260806_01
 

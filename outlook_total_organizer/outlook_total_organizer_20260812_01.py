@@ -1877,6 +1877,53 @@ class OutlookMailManager:
         self._enrich_r19_tag_from_full_history(all_mails)
         return all_mails
 
+    def enrich_bodies_for_threads(self, threads: dict, progress_callback=None) -> int:
+        """指定されたスレッド群のうち、本文(body)が空のメールについてだけ、
+        OutlookからEntryID経由で本文を取得して補完する。補完した件数を返す。
+
+        背景: search_mails_fastは「本文キーワードでの絞り込みが不要なら本文を読まない」
+        という高速化(light_mode)を行っており、本文KWを空にして検索した場合、
+        取得済みメールのbodyは空文字のままになる。この状態のままAI要約を行うと
+        「提供されたメールには本文がありませんでした」という結果になってしまう。
+        検索自体は高速なまま維持したいので、実際に要約する直前に、選択された
+        スレッドの本文だけをここで補完する(検索時に一律force_full_body=Trueに
+        するのではなく、必要になった時点で必要な分だけ取りに行く方式)。
+
+        既に本文があるメールには一切触れないため、本文KW付きで検索した場合や、
+        force_full_body=Trueで取得済みの場合はOutlookへのアクセスが発生しない。"""
+        targets = []
+        for t in threads.values():
+            for m in t.get('mails', []):
+                if not (m.get('body') or '').strip() and m.get('entry_id'):
+                    targets.append(m)
+        if not targets:
+            return 0
+
+        filled = 0
+        try:
+            pythoncom.CoInitialize()
+            outlook = win32com.client.Dispatch("Outlook.Application")
+            namespace = outlook.GetNamespace("MAPI")
+            for i, m in enumerate(targets, 1):
+                if progress_callback:
+                    progress_callback(i, len(targets), f"📄 本文を取得中... ({i}/{len(targets)})")
+                try:
+                    item = namespace.GetItemFromID(m['entry_id'])
+                    body = self._clean_body_text(getattr(item, 'Body', '') or '')[:300000]
+                    if body:
+                        m['body'] = body
+                        filled += 1
+                except Exception:
+                    # 個別メールの取得失敗(削除済み・アクセス不可等)は無視して続行する。
+                    # そのメールの本文は空のままだが、他のメールの要約は成立させる。
+                    continue
+        except Exception as e:
+            print(f"本文補完エラー: {e}")
+        finally:
+            try: pythoncom.CoUninitialize()
+            except: pass
+        return filled
+
     def _enrich_r19_tag_from_full_history(self, all_mails: list):
         """get_relevant_mails_for_period専用の補完処理。
         期間内フェッチでは、選択期間より前にR19Projカテゴリタグが付与されたスレッドの
@@ -11544,38 +11591,68 @@ class MailManagerGUI:
                 
         self._set_status("📝 生成中...")
         sel = {c: self.threads[c] for c in self.selected}
-        
-        large_threads = []
-        max_len = 0
-        for cid, t in sel.items():
-            if t['mails']:
-                t_len = sum(len(str(m['body'])) for m in t['mails'])
-                if t_len > 10000:
-                    large_threads.append(t['topic'])
-                    if t_len > max_len:
-                        max_len = t_len
-        
-        self.long_text_session_choice = getattr(self, 'long_text_session_choice', None)
-        choice = 1
-        
-        if large_threads:
-            if self.long_text_session_choice is None:
-                c, apply_all = self._ask_long_text_action(max_len)
-                choice = c
-                if apply_all:
-                    self.long_text_session_choice = c
-            else:
-                choice = self.long_text_session_choice
-                    
+
+        # tk変数の読み取りはメインスレッドで行う(以降はワーカースレッドへ渡す)
         pl_str = self.v_past_limit.get()
         past_limit = 300000 if "無制限" in pl_str else int(re.search(r'\d+', pl_str).group()) if re.search(r'\d+', pl_str) else 800
 
-        def task():
-            res = self.summarizer.summarize_multiple_threads(sel, past_limit=past_limit, long_text_choice=choice)
-            path = self.reporter.generate_report(sel, res, {})
-            webbrowser.open(path)
-            self._set_status("✅ 完了")
-        threading.Thread(target=task, daemon=True).start()
+        def summarize_and_report(choice):
+            def task():
+                res = self.summarizer.summarize_multiple_threads(sel, past_limit=past_limit, long_text_choice=choice)
+                path = self.reporter.generate_report(sel, res, {})
+                webbrowser.open(path)
+                self._set_status("✅ 完了")
+            threading.Thread(target=task, daemon=True).start()
+
+        def prepare():
+            # 本文KWを空にして検索した場合、高速化のため本文が読み込まれておらず
+            # bodyが空のままになっている(search_mails_fastのlight_mode)。そのまま
+            # 要約すると「本文がありませんでした」という結果になるため、実際に要約する
+            # 直前に、選択されたスレッドの本文だけをここで補完する。
+            # 既に本文があるメールには触れないので、本文KW付きで検索した場合や
+            # 2回目以降の要約ではOutlookへのアクセスは発生しない。
+            # COM呼び出しでGUIが固まらないよう、この処理はワーカースレッドで行う。
+            try:
+                self.outlook.enrich_bodies_for_threads(
+                    sel,
+                    progress_callback=lambda c, t, msg: self.root.after(
+                        0, lambda: self._set_status(msg, current=c, total=t))
+                )
+            except Exception as e:
+                # 本文補完に失敗しても、取得済みの範囲で要約は続行する
+                print(f"本文補完に失敗しました(要約は継続します): {e}")
+
+            # 長文判定は、本文を補完した"後"の実際の文字数で行う必要がある
+            # (補完前は常に0文字となり、長文警告が出ないまま巨大なスレッドを
+            # そのままAIへ送ってしまうため)。
+            large_threads = []
+            max_len = 0
+            for cid, t in sel.items():
+                if t['mails']:
+                    t_len = sum(len(str(m['body'])) for m in t['mails'])
+                    if t_len > 10000:
+                        large_threads.append(t['topic'])
+                        if t_len > max_len:
+                            max_len = t_len
+
+            def ask_and_go():
+                # モーダルダイアログの表示はメインスレッドで行う
+                self.long_text_session_choice = getattr(self, 'long_text_session_choice', None)
+                choice = 1
+                if large_threads:
+                    if self.long_text_session_choice is None:
+                        c, apply_all = self._ask_long_text_action(max_len)
+                        choice = c
+                        if apply_all:
+                            self.long_text_session_choice = c
+                    else:
+                        choice = self.long_text_session_choice
+                self._set_status("📝 生成中...")
+                summarize_and_report(choice)
+
+            self.root.after(0, ask_and_go)
+
+        threading.Thread(target=prepare, daemon=True).start()
 
     def _recalc_thread_status(self, cids):
         for cid in cids:
