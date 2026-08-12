@@ -1182,10 +1182,20 @@ URL: ${url}
 
 
         function loadState() {
+            // [S04] 保存済み状態の復元と、その後の初期化を別のtryに分ける。
+            // 以前は全体が1つのtryに入っていて、catchが握り潰していたため、
+            // 復元に失敗しても後続の初期化に失敗しても、画面上は等しく
+            // 「すべて未読」になり、何が起きたのか分からなかった。
+            // 特にJSON.parseが失敗した場合は既読が丸ごと捨てられるが、
+            // その事実がどこにも出ないため、原因の切り分けができない。
             try {
                 const saved = localStorage.getItem('summaryManagerState');
                 if (saved) state = { ...state, ...JSON.parse(saved) };
-                
+            } catch (e) {
+                showStorageWarning('保存されていた既読状態を読み込めませんでした。今回はすべて未読として表示されます。: ' + e);
+            }
+
+            try {
                 if (!state.readHistory) state.readHistory = {};
                 if (!state.checkedFiles) state.checkedFiles = {};
                 if (!state.manualCheckedFiles) state.manualCheckedFiles = {};
@@ -1198,24 +1208,27 @@ URL: ${url}
             } catch (e) {}
         }
 
-        // [S04] 既読状態が保存できなかったことを画面に出す。
-        // iOSではプライベートブラウズや容量超過でsetItemが例外を投げるが、
-        // 従来はloadState側のcatchが握り潰すか、既読記録側では未捕捉のまま
-        // 後続処理ごと停止しており、利用者からは「既読にしたのに戻る」と
-        // しか見えなかった。iPhoneはWindows PCからコンソールを開けないため、
-        // 画面に出さないと原因を切り分けられない。
+        // [S04] 既読状態の保存・復元に失敗したことを画面に出す。
+        // iOSではプライベートブラウズや容量超過でlocalStorageが例外を投げるが、
+        // 従来は握り潰されるか未捕捉のまま後続処理ごと停止しており、
+        // 利用者からは「既読にしたのに戻る」としか見えなかった。
+        // iPhoneはWindows PCからコンソールを開けないため、画面に出さないと
+        // 原因の切り分けができない。最初の1回だけ表示する。
         let storageWarned = false;
+        function showStorageWarning(message) {
+            if (storageWarned) return;
+            storageWarned = true;
+            const bar = document.createElement('div');
+            bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:2000;background:#c53030;color:#fff;padding:10px 14px;font-size:0.85rem;line-height:1.5;';
+            bar.textContent = message;
+            document.body.appendChild(bar);
+        }
+
         function saveState() {
             try {
                 localStorage.setItem('summaryManagerState', JSON.stringify(state));
             } catch (e) {
-                if (!storageWarned) {
-                    storageWarned = true;
-                    const bar = document.createElement('div');
-                    bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:2000;background:#c53030;color:#fff;padding:10px 14px;font-size:0.85rem;line-height:1.5;';
-                    bar.textContent = '既読状態を保存できません。この端末のブラウザ設定でデータ保存が制限されている可能性があります（プライベートブラウズ、または保存容量の上限）。閉じると既読は失われます。: ' + e;
-                    document.body.appendChild(bar);
-                }
+                showStorageWarning('既読状態を保存できません。この端末のブラウザ設定でデータ保存が制限されている可能性があります（プライベートブラウズ、または保存容量の上限）。閉じると既読は失われます。: ' + e);
             }
         }
 
