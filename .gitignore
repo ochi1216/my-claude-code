@@ -7,3 +7,12 @@ venv/
 po_database_organizer/config.json
 po_database_organizer/token_cache.json
 po_database_organizer/cache/
+
+# OneNote Report Generator のローカル設定・認証キャッシュ・生成物
+# bookmarks.jsonには実際のプロジェクト名・会議名・サイトIDが記録されるため、
+# 社内情報保護の観点からリポジトリには含めない（config.example.jsonのみコミット）。
+onenote_report_generator/config.json
+onenote_report_generator/token_cache.bin
+onenote_report_generator/bookmarks.json
+onenote_report_generator/bookmarks.json.bak
+onenote_report_generator/reports/*.html
