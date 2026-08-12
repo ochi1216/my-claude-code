@@ -4,6 +4,10 @@
 
 Outlookメール解析・アクションダッシュボードツール。詳細は [`outlook_total_organizer/CHANGELOG.md`](outlook_total_organizer/CHANGELOG.md) を参照（README.md は未整備）。
 
+## OneNote Report Generator
+
+セットアップ手順は [`onenote_report_generator/README.md`](onenote_report_generator/README.md) を参照。
+
 ## BBT RTOCS Organizer
 
 セットアップ手順は [`rtocs_organizer/README.md`](rtocs_organizer/README.md) を参照。
@@ -11,6 +15,22 @@ Outlookメール解析・アクションダッシュボードツール。詳細�
 ## Shareflex Document Dashboard
 
 セットアップ手順は [`shareflex_dashboard/README.md`](shareflex_dashboard/README.md) を参照。
+
+## Excel翻訳ツール
+
+セットアップ手順は [`excel_translation/README.md`](excel_translation/README.md) を参照。
+
+## PDF翻訳ツール
+
+セットアップ手順は [`pdf_translator/README.md`](pdf_translator/README.md) を参照。
+
+## PowerPoint翻訳ツール
+
+セットアップ手順は [`ppt_translator/README.md`](ppt_translator/README.md) を参照。
+
+## Word翻訳ツール
+
+セットアップ手順は [`word_translator/README.md`](word_translator/README.md) を参照。
 
 ## 開発ルール（バージョン管理）
 
