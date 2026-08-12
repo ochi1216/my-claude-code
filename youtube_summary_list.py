@@ -8594,7 +8594,11 @@ class IntegratedSummaryApp(tk.Tk):
             
         try:
             # subprocess.Popenで非同期起動。startコマンドを使うことで独立したウィンドウで実行
-            subprocess.Popen(f'start "" "{batch_path}"', shell=True)
+            # [S04] 引数 auto を必ず渡す。ここからの起動は常に無人実行であり、
+            # 末尾にpauseを持つバッチ（publish_to_iphone.bat等）を起動先に指定すると、
+            # 誰も応答できないままウィンドウが残り続けるため。引数を解釈しない
+            # バッチ（start_consolidated_HTML_summary_manager.bat）では無視される。
+            subprocess.Popen(f'start "" "{batch_path}" auto', shell=True)
             self.log_to_ui("✅ HTML統合バッチをバックグラウンドで起動しました", "SUCCESS")
         except Exception as e:
             self.log_to_ui(f"🚨 バッチ起動エラー: {e}", "ERROR")

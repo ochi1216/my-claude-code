@@ -1198,7 +1198,26 @@ URL: ${url}
             } catch (e) {}
         }
 
-        function saveState() { localStorage.setItem('summaryManagerState', JSON.stringify(state)); }
+        // [S04] 既読状態が保存できなかったことを画面に出す。
+        // iOSではプライベートブラウズや容量超過でsetItemが例外を投げるが、
+        // 従来はloadState側のcatchが握り潰すか、既読記録側では未捕捉のまま
+        // 後続処理ごと停止しており、利用者からは「既読にしたのに戻る」と
+        // しか見えなかった。iPhoneはWindows PCからコンソールを開けないため、
+        // 画面に出さないと原因を切り分けられない。
+        let storageWarned = false;
+        function saveState() {
+            try {
+                localStorage.setItem('summaryManagerState', JSON.stringify(state));
+            } catch (e) {
+                if (!storageWarned) {
+                    storageWarned = true;
+                    const bar = document.createElement('div');
+                    bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:2000;background:#c53030;color:#fff;padding:10px 14px;font-size:0.85rem;line-height:1.5;';
+                    bar.textContent = '既読状態を保存できません。この端末のブラウザ設定でデータ保存が制限されている可能性があります（プライベートブラウズ、または保存容量の上限）。閉じると既読は失われます。: ' + e;
+                    document.body.appendChild(bar);
+                }
+            }
+        }
 
         function isFileAllRead(file) {
             if (!file || !file.items || file.items.length === 0) return false;
