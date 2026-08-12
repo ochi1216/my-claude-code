@@ -2,6 +2,23 @@
 
 このフォルダ内の変更履歴。バージョンアップ時は旧ファイルを残したまま新ファイルを追加し、ここに変更点を追記する。
 
+## [GEMINI_COMMON_DIR対応] - 2026-08-11（同日追加修正）
+
+**背景:** 越智さんの実際のローカル環境では、`rtocs_organizer`（`bbt\RTOCS_organizer`で管理）と
+`analog_ic_se_strategy_organizer`（`SE_Strategy\analog_ic_se_strategy_organizer`で管理）の
+管理フォルダがバラバラで、gitリポジトリのような「commonフォルダが1つ上の階層にある」構成に
+なっていないことが判明。相対パス（`../common`）だけに頼ると`ModuleNotFoundError`になるため、
+環境変数で明示的に指定できるようにした。
+
+**変更ファイル:** `ic_engine.py`
+
+- `common/gemini_client.py`の探索先を、環境変数`GEMINI_COMMON_DIR`があればそちらを優先、
+  無ければ従来通り「1つ上の階層のcommonフォルダ」にフォールバックするよう変更
+- 越智さんはローカルの`gemini_client.py`配置場所を1箇所に決め、`GEMINI_COMMON_DIR`で
+  全ツールから同じ場所を指すよう設定すればよい
+- **動作検証**: `GEMINI_COMMON_DIR`未設定時は従来通り相対パスでimportできること、設定時は
+  そちらが優先されて別ディレクトリの`gemini_client.py`を読み込むことの両方を確認
+
 ## [Gemini呼び出し共通化] - 2026-08-11
 
 **背景:** 会社PC上でGemini APIへの直接アクセスが遮断される事象が発生（2026-08-10頃、原因未確定）。

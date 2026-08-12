@@ -22,6 +22,11 @@
    git submodule update --init common
    ```
 
+   **本ツールをgitリポジトリと違うローカルフォルダ構成で管理している場合**（例:
+   `analog_ic_se_strategy_organizer`だけを単独フォルダにコピーして使っている等、
+   `common`フォルダが1つ上の階層に無い場合）は、`common/gemini_client.py`をどこか1箇所に
+   配置し、環境変数`GEMINI_COMMON_DIR`でその場所を指定すること（下記手順3参照）。
+
 2. 依存パッケージをインストールする。
 
    ```
@@ -35,6 +40,9 @@
    setx GEMINI_PROXY_URL "https://xxxx.ngrok-free.dev"   # 自宅PC経由プロキシのURL（会社PCで直接アクセスが
                                                           # 遮断された場合のフォールバック用。詳細は
                                                           # common/GEMINI_MIGRATION_HANDOVER.md参照）
+   setx GEMINI_COMMON_DIR "C:\path\to\common"            # gemini_client.pyの配置場所を明示したい場合のみ。
+                                                          # 省略時は「本ツールの1つ上の階層のcommonフォルダ」
+                                                          # を自動的に探しに行く
    ```
 
    （設定後は新しいターミナルを開くこと。macOS/Linuxの場合は`export`を使う）

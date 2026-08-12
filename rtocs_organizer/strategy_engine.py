@@ -23,7 +23,14 @@ import json
 import re
 from datetime import datetime
 
-_COMMON_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common")
+# common/gemini_client.py の場所は環境変数 GEMINI_COMMON_DIR で明示的に指定できる。
+# 未設定時は「1つ上の階層のcommonフォルダ」（gitリポジトリでrtocs_organizer/
+# analog_ic_se_strategy_organizer/commonが兄弟フォルダになっている構成）にフォールバックする。
+# ローカル環境でツールごとに管理フォルダが分かれている場合（例: 越智さんの
+# bbt\RTOCS_organizer と SE_Strategy\analog_ic_se_strategy_organizer）は、
+# GEMINI_COMMON_DIRを設定して共通のgemini_client.py配置場所を1箇所に揃えること。
+_COMMON_DIR = os.environ.get("GEMINI_COMMON_DIR") or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "common")
 if _COMMON_DIR not in sys.path:
     sys.path.insert(0, _COMMON_DIR)
 from gemini_client import generate_advanced

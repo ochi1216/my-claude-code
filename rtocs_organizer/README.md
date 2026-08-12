@@ -65,8 +65,13 @@ pip install -r requirements.txt
 streamlit run rtocs_dashboard_20260715_04.py
 ```
 
+**本ツールをgitリポジトリと違うローカルフォルダ構成で管理している場合**（例: `rtocs_organizer`を
+`bbt\RTOCS_organizer`のような独立フォルダで管理していて、1つ上の階層に`common`フォルダが無い場合）は、
+`common/gemini_client.py`をどこか1箇所に配置し、環境変数`GEMINI_COMMON_DIR`でその場所を指定すること。
+
 環境変数は`GEMINI_API_KEY`に加えて、会社PCでの直接アクセス遮断時のフォールバック用に
-`GEMINI_PROXY_URL`（自宅PC経由プロキシのURL）も設定できる。詳細は
+`GEMINI_PROXY_URL`（自宅PC経由プロキシのURL）、`gemini_client.py`の配置場所を明示したい場合は
+`GEMINI_COMMON_DIR`（省略時は1つ上の階層の`common`フォルダを自動的に探す）も設定できる。詳細は
 [`/common/GEMINI_MIGRATION_HANDOVER.md`](../common/GEMINI_MIGRATION_HANDOVER.md) を参照。
 
 ブラウザが自動で開き、以下の3タブが表示される。
