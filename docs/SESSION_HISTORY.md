@@ -7,13 +7,13 @@
 | S01 | 引継ぎ管理の初期設定 | 2026-07-16 | 完了 | youtube_summary_list_*.py, consolidated_html_summary_manager_*.py, CLAUDE.md, docs/* |
 | S02 | youtube_summary_list Glasp自動起動の信頼性改善 | 2026-08-01 | 一部完了・継続中 | youtube_summary_list_20260801_01/02/03.py, docs/* |
 | S03 | Glasp成功率改善・確認画面対応・運用基盤整備 | 2026-08-09 | 完了 | youtube_summary_list.py, consolidated_html_summary_manager.py, morning_brief.py, *.bat, docs/* |
-| S04 | 会社PC→自宅PC環境移管（youtube_summary_list.py） | 2026-08-11 | 完了 | youtube_summary_list.py, docs/* |
+| S04 | 会社PC→自宅PC環境移管（全ツール）＋iPhone公開システム構築 | 2026-08-11 | 完了 | youtube_summary_list.py, consolidated_html_summary_manager.py, morning_brief.py, Youtube_List_Setup.py, youtube_list_remove.py, schedule.json, *.bat, 兄弟ツール3本, publish_to_iphone.bat, docs/* |
 
 ---
 
-## S04 - 会社PC→自宅PC環境移管（youtube_summary_list.py）
+## S04 - 会社PC→自宅PC環境移管（全ツール）＋iPhone公開システム構築
 
-[2026-08-11] S04: youtube_summary_list.pyを会社PC専用のハードコードパスから、環境変数→config.json→既定値の順で解決する方式に外部化し、Chromeプロファイル・config.json等を自宅PCへ移設。自宅PCでの実機テスト（プレイリストV・動画1本）が最初から最後まで成功した。 / 重大判断1: パス解決は環境変数を最優先とし、config.jsonは次点、既定値はスクリプト自身の場所基準とした。PC移管直後にconfig.jsonを編集せず切替できることを優先した。 / 重大判断2: 今回は`youtube_summary_list.py`単体を対象範囲とし、`consolidated_html_summary_manager.py`・`morning_brief.py`・`Youtube_List_Setup.py`の同種対応は次タスクへ持ち越した。
+[2026-08-11] S04: 会社PC専用のハードコードパスの外部化（環境変数→config.json→既定値）を、`youtube_summary_list.py`だけでなく`consolidated_html_summary_manager.py`・`morning_brief.py`・`Youtube_List_Setup.py`・`youtube_list_remove.py`・BATファイル7本・`schedule.json`まで対象を拡大して完遂。兄弟ツール3本（`multi_project_manager.py`・`Youtube_Playlist_management.py`・`Youtube_Channel_analizer.py`）をGit管理に追加。ChromeでのTTS音質劣化（Google音声への劣化フォールバック）を修正。新規リポジトリ`youtube-summary-viewer`＋GitHub Pagesで統合HTMLをiPhoneから閲覧できる仕組みを構築し、統合HTML生成→コピー→git pushを1本化する`publish_to_iphone.bat`を作成、実機で公開完了まで確認した。 / 重大判断1: PC依存パスの解決順（環境変数→config.json→既定値）を全ツールへ統一適用した。 / 重大判断2: `CONSOLIDATION_BATCH`（要約完了後にRSS統合バッチを自動起動する設定）は会社PCではコード直書きのため常に動いていたが、外部化により既定値が空（未設定時は起動をスキップ、エラーにはならずINFOログのみ）になった。この「要設定」への変化を移管時に明示していなかったため、自宅PCで統合が自動起動されない不具合として顕在化した（`config.json`に`paths.consolidation_batch`を明示的に設定することで解消。詳細はKnown Issues参照）。 / 重大判断3: iPhone公開は`noindex`タグで検索エンジンからは隠し、反映は自動化せず「統合バッチ実行→`publish_to_iphone.bat`」の手動トリガー運用とした。
 
 ---
 
