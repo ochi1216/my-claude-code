@@ -12,6 +12,10 @@
 
 セットアップ手順は [`excel_translation/README.md`](excel_translation/README.md) を参照。
 
+## PDF翻訳ツール
+
+セットアップ手順は [`pdf_translator/README.md`](pdf_translator/README.md) を参照。
+
 ## 開発ルール（バージョン管理）
 
 - **ファイル命名**: プログラムを更新する際は、ファイル名を `ツール名_yyyymmdd_連番.py`（例: `rtocs_organizer_20260711_01.py`）とする。同日に複数回更新する場合は連番（`_01`, `_02`...）を上げる。
