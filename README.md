@@ -12,6 +12,10 @@
 
 セットアップ手順は [`excel_translation/README.md`](excel_translation/README.md) を参照。
 
+## PDF翻訳ツール
+
+セットアップ手順は [`pdf_translator/README.md`](pdf_translator/README.md) を参照。
+
 ## PowerPoint翻訳ツール
 
 セットアップ手順は [`ppt_translator/README.md`](ppt_translator/README.md) を参照。
