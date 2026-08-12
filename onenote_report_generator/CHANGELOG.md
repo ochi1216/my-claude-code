@@ -1,3 +1,133 @@
+## VERSION 20260812_02
+
+### 追加・修正
+- **`gemini_client.py` の探索先を自動判定するよう修正**：VERSION 20260812_01 の
+  既定の探索先は引継ぎ資料どおり `../common` だったが、**本ツールだけ他ツールより
+  フォルダ階層が1つ深い**ため、実際の配置先に届いていなかった。
+
+  ```
+  スクリプト位置: PythonScripts\Onenote\onenote_report_generator\
+  20260812_01 の探索先: PythonScripts\Onenote\common\   ← 存在しない
+  実際の配置先:         PythonScripts\common\           ← 1階層上
+  ```
+
+  他ツール（例: `outlook_total_organizer`）は `PythonScripts\<ツール名>\` 直下に
+  あるため `../common` で正しく届くが、本ツールは2階層下にあるため届かなかった。
+  `../common` → `../../common` の順に `gemini_client.py` の実在を確認して自動選択する
+  方式へ変更した。これにより**環境変数の設定なしで、共通の `gemini_client.py` を
+  1つだけ置いて全ツールで共有できる**。
+- **エラーメッセージに探索した全候補を表示**：見つからなかった場合、どのフォルダを
+  探したかを全て列挙するようにした（1つだけ表示していると原因の切り分けが難しいため）。
+
+### 優先順位
+1. 環境変数 `GEMINI_COMMON_DIR`（設定されていればこれのみを使う）
+2. `../common`（他ツールと同じ階層構成の場合）
+3. `../../common`（本ツールのようにもう1階層深い場合）
+
+### 変更関数
+- なし（既存関数への変更ゼロ。`analyze_html` / `extract_with_color` /
+  `generate_html` / `_generate_worker` / `gemini_credentials_available` /
+  `_contents_to_payload_contents` がハッシュ比較で同一であることを確認済み）
+
+### 新規追加
+- `_resolve_common_dirs()` （探索先候補を優先順に返す）
+- `_COMMON_DIR_CANDIDATES` （モジュールレベル定数）
+
+### 変更ファイル
+- onenote_report_generator_20260812_02.py （20260812_01 比 +35行 / -9行）
+- templates/index.html は**変更なし**
+
+### 動作確認時の注意
+- 越智さんの実環境と同じ階層構造を再現し、**実物の `gemini_client.py` を
+  `PythonScripts\common` に置いた状態で import に成功することを確認済み**。
+  あわせて以下も検証済み：`../common` にある場合は近い方を優先すること／
+  `GEMINI_COMMON_DIR` が最優先されること／どこにも無い場合もツールは起動でき、
+  AI実行時のエラーに探索した全候補が表示されること。
+- VERSION 20260812_01 のシム検証（全27項目）も本バージョンで再実行し、全て合格。
+- **実機でのプロキシ経由の応答は引き続き未確認**（Linuxコンテナから到達できないため）。
+
+## VERSION 20260812_01
+
+### 追加・修正
+- **Gemini APIプロキシ対応への移行**：会社PCからGemini APIへの直接アクセスが
+  遮断された（2026-08-10頃）ことへの対応。共通モジュール `gemini_client.py` の
+  `generate_advanced()` 経由に移行し、直接呼び出しが失敗したら自宅PCのプロキシへ
+  自動フォールバックする構成にした。`rtocs_organizer` /
+  `analog_ic_se_strategy_organizer` / `outlook_total_organizer` に続く4ツール目。
+- **互換シム方式を採用**：`genai.Client` と同じインターフェースだけを持つ薄い
+  互換シム（`_CommonGeminiClient`）を追加し、**`genai.Client(...)` の生成箇所
+  1行だけ**を差し替えた。これにより `response.text` の読み取り・
+  `usage_metadata` によるトークン計測とコスト表示・`types.GenerateContentConfig(...)`
+  による config 構築は**一切変更不要**。実際に `analyze_html()` は1行も変更していない
+  （関数単位のハッシュ比較で同一を確認済み）。
+- **APIキー必須ガードの撤廃**：移行後は `config.json` の `GEMINI_API_KEY` が空でも
+  プロキシ経由で成功しうるため、旧来の「APIキーが無ければ例外」ガードを
+  `gemini_credentials_available()` に置き換えた。`GEMINI_API_KEY` /
+  `GEMINI_PROXY_URL` の**どちらか一方でも**あれば通す（プロキシ専用構成を
+  誤って弾かないため）。旧来の `config.json` 設定しか無い環境も止めない。
+  **このガードを放置すると移行後に全AI機能が例外で停止する**ため、移行の必須項目。
+- **`contents` のリスト形式に対応**：本ツールは `contents=[prompt]` とリストで
+  渡しており、文字列前提の既存シム実装のままでは `{"text": ["..."]}` という
+  不正なpayloadになる。`_contents_to_payload_contents()` を設けて文字列・リストの
+  両方に対応させた（`outlook_total_organizer` は全て文字列だったため未対応だった箇所）。
+- **`model` の明示的な受け渡し**：`generate_advanced(payload, model=model)` として
+  常に明示指定。省略すると共通モジュール側の既定モデルに落ち、「UI上は別モデルを
+  表示しているのに実際は flash が動く」silent failure になるため。
+
+### 事前調査で確定した事項
+- **Google Search Grounding は未使用**（`grep` で0件）。したがってシムに `tools` を
+  載せる処理は不要（引継ぎ資料 4-(5) の分岐は該当せず）。
+- **`genai.Client(` は1箇所のみ**（`outlook_total_organizer` は6箇所）。
+- **APIキーガードも1箇所のみ**（同5箇所）。
+- 本ツールは **Flask Webアプリ**であり、tkinter GUIでもバッチでもない。
+
+### 変更関数
+- `GeminiProcessor.__init__` （APIキーガードを `gemini_credentials_available()` へ
+  置換、`genai.Client(...)` → `_CommonGeminiClient(...)`）
+
+### 新規追加
+- `_COMMON_DIR` / `_generate_advanced` / `_GEMINI_CLIENT_IMPORT_ERROR`（モジュールレベル）
+- `gemini_credentials_available()` （認証情報の判定）
+- `_schema_to_jsonable()` （`response_schema` のpydantic変換への保険。現状本ツールは
+  `response_schema` 未使用だが、将来使用時に備えて残す）
+- `_contents_to_payload_contents()` （contents の文字列／リスト両対応）
+- `_CommonUsageMetadata` / `_CommonGeminiResponse` / `_CommonGeminiModels` / `_CommonGeminiClient`
+- `import sys` （共通モジュールのパス追加用）
+
+### 削除
+- `from google import genai` （`from google.genai import types` は
+  `types.GenerateContentConfig(...)` の構築に引き続き使うため**残す**）
+
+### 変更ファイル
+- onenote_report_generator_20260812_01.py （+160行 / -7行）
+- templates/index.html は**変更なし**（VERSION 20260729_02_01 のまま流用可）
+
+### 動作確認時の注意
+- **実機でのプロキシ経由の応答は未確認**。Linuxコンテナからは共通モジュールにも
+  自宅PCプロキシにも到達できないため、検証は偽の `gemini_client` を
+  `sys.modules` へ注入する方式で実施した（全27項目合格）。
+  検証済み：payload形状／`model`の明示的受け渡し／`response.text`・`usage_metadata`の
+  読み取り／`responseMimeType` の camelCase 化／`json.dumps` 可能性／空・壊れた
+  レスポンスで例外を投げないこと／共通モジュール未配置時に原因の分かるエラーが出ること／
+  認証情報判定の4パターン。
+- **`gemini_client.py` の配置が必要**。既定の探索先はスクリプトから見て `../common`
+  （＝ `Onenote\common\gemini_client.py`）。別の場所に置く場合は環境変数
+  `GEMINI_COMMON_DIR` でフォルダを指定する。
+- 共通モジュールが見つからない場合でも**ツール自体は起動する**（OneNote閲覧・
+  ブックマーク・過去レポート閲覧は使える）。AI要約を実行した時点で、探索したパスと
+  元のエラーを含むメッセージが表示される。
+- **`setx` で環境変数を設定した場合、現在開いているコマンドプロンプトには反映されない。**
+  設定後はコマンドプロンプトを開き直すこと。
+- `GEMINI_RETRY_DIRECT_AFTER_SECONDS` は `gemini_client.py` が読むため**3ツール共通に効く**。
+  本ツール側で個別に変えることはできない。
+
+### 変更しないこと（宣誓）
+- `GeminiProcessor.analyze_html` （プロンプト・`_LANG_VARIANTS` 含め一切変更なし）
+- `OneNoteGraphExtractor` の全メソッド（`extract_with_color` 等）
+- `ReportGenerator` の全メソッド
+- ブックマーク機能全体・全Flaskエンドポイント・`_generate_worker`
+- `templates/index.html`
+
 ## VERSION 20260729_02_01
 
 ### 追加・修正

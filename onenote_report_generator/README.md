@@ -7,14 +7,71 @@ Graph API 直接取得方式へ完全移行済み（`CHANGELOG.md` 参照）。
 
 ## 現在のVERSION
 
-`20260729_02_01`（要約の出力言語モード追加。リモートセッションでの
-自動テストのみ実施済み。越智さんの実機での確認は未実施）
+`20260812_02`（Gemini APIプロキシ対応への移行＋共通モジュールの探索先自動判定。
+リモートセッションでの自動テストのみ実施済み。**実機でのプロキシ経由の応答は未確認**）
 
 ## 必要要件
 
 - Python 3.9以上
 - Microsoft Entra ID アプリ登録（`Notes.Read` / `Sites.Read.All` / `Group.Read.All` 権限）
-- Gemini API キー
+- Gemini の認証情報（下記「Gemini APIプロキシ対応」参照）
+- 共通モジュール `gemini_client.py`（[gemini-common-tools](https://github.com/ochi1216/gemini-common-tools)）
+
+## Gemini APIプロキシ対応（VERSION 20260812_01 以降）
+
+会社PCからGemini APIへの直接アクセスが遮断されたため、共通モジュール
+`gemini_client.py` 経由で呼び出す構成に移行した。直接呼び出しを試し、失敗したら
+自宅PCのプロキシへ自動フォールバックする（遮断が解除されれば自動的に直接呼び出しに戻る）。
+
+### 配置
+
+`gemini_client.py` は、**他ツールと共有する1つのファイルを置けばよい**
+（VERSION 20260812_02 以降、探索先を自動判定するため）。
+
+```
+PythonScripts/
+├── common/
+│   └── gemini_client.py                    ← ここに置けば全ツールで共有できる
+├── outlook_total_organizer/
+│   └── outlook_total_organizer_*.py
+└── Onenote/
+    └── onenote_report_generator/
+        └── onenote_report_generator_20260812_02.py
+```
+
+探索の優先順位は以下のとおり。
+
+1. 環境変数 `GEMINI_COMMON_DIR`（設定されていればこれのみを使う）
+2. `../common`（他ツールと同じ階層構成の場合）
+3. `../../common`（本ツールのようにもう1階層深い場合）
+
+上記のいずれにも該当しない場所に置く場合のみ、環境変数
+`GEMINI_COMMON_DIR` でフォルダを指定する。
+
+> **補足**：本ツールは他ツールより1階層深い `PythonScripts\Onenote\onenote_report_generator\`
+> にあるため、VERSION 20260812_01 の既定（`../common` のみ）では
+> `PythonScripts\common` に届かなかった。20260812_02 でこれを自動解決している。
+
+### 環境変数
+
+| 変数 | 用途 |
+|---|---|
+| `GEMINI_API_KEY` | 直接呼び出し用 |
+| `GEMINI_PROXY_URL` | 自宅PCプロキシ（フォールバック先）。ngrok URLは再起動のたびに変わる |
+| `GEMINI_COMMON_DIR` | `gemini_client.py` の場所を明示したい場合のみ（未設定なら `../common` → `../../common` を自動探索） |
+| `GEMINI_RETRY_DIRECT_AFTER_SECONDS` | 直接呼び出しを諦める秒数。**`gemini_client.py` が読むため全ツール共通に効く** |
+
+- `GEMINI_API_KEY` と `GEMINI_PROXY_URL` は**どちらか一方でもあれば動作する**
+  （プロキシ専用構成も可）。
+- **`config.json` の `GEMINI_API_KEY` は移行後は使われない**（空でよい）。
+  値を残しておいても害はなく、旧バージョンへ戻したときに設定が残る利点がある。
+- **`setx` で設定した場合、現在開いているコマンドプロンプトには反映されない。**
+  設定後はコマンドプロンプトを開き直すこと。
+
+### 共通モジュールが見つからない場合
+
+ツール自体は起動し、OneNote閲覧・ブックマーク・過去レポート閲覧は使える。
+AI要約を実行した時点で、探索したパスと元のエラーを含むメッセージが表示される。
 
 ## セットアップ手順
 
@@ -27,7 +84,8 @@ Graph API 直接取得方式へ完全移行済み（`CHANGELOG.md` 参照）。
 2. `config.example.json` を `config.json` にコピーし、環境に合わせて編集する。
 
    - `CLIENT_ID` / `TENANT_ID`：Entra ID アプリ登録の値
-   - `GEMINI_API_KEY`：未設定の場合は環境変数 `GEMINI_API_KEY` からも読み込み可能
+   - `GEMINI_API_KEY`：**VERSION 20260812_01 以降は使用しない**（空でよい）。
+     Gemini の認証情報は環境変数から読まれる（上記「Gemini APIプロキシ対応」参照）
    - `sites`：対象とする SharePoint サイトの一覧（`displayName` + `site_id` のペア）。
      **同一 Microsoft 365 テナント内であれば、ここに複数サイトを追加するだけで
      UI 上のサイト選択ドロップダウンに反映される**（VERSION 20260512_03_01 で対応済み）。
@@ -35,7 +93,7 @@ Graph API 直接取得方式へ完全移行済み（`CHANGELOG.md` 参照）。
 3. スクリプトを実行する。
 
    ```
-   python onenote_report_generator_20260729_02.py
+   python onenote_report_generator_20260812_02.py
    ```
 
    初回はブラウザで Device Code Flow の認証画面が開くので、表示されたコードで
@@ -63,12 +121,14 @@ Graph API 直接取得方式へ完全移行済み（`CHANGELOG.md` 参照）。
 
 ```
 onenote_report_generator/
-├── onenote_report_generator_20260729_02.py   ← メインFlaskアプリ（最新版）
+├── onenote_report_generator_20260812_02.py   ← メインFlaskアプリ（最新版）
+├── onenote_report_generator_20260812_01.py   ← 旧バージョン（履歴保持のため残置）
+├── onenote_report_generator_20260729_02.py   ← 旧バージョン（履歴保持のため残置）
 ├── onenote_report_generator_20260729_01.py   ← 旧バージョン（履歴保持のため残置）
 ├── onenote_report_generator_20260727_01.py   ← 旧バージョン（履歴保持のため残置）
 ├── onenote_report_generator_20260706_01.py   ← 旧バージョン（履歴保持のため残置）
 ├── templates/
-│   └── index.html                             ← VERSION 20260729_02_01 反映済み
+│   └── index.html                             ← VERSION 20260729_02_01（20260812系では変更なし）
 ├── config.example.json                        ← config.json のテンプレート（コミット対象）
 ├── requirements.txt
 ├── CHANGELOG.md
