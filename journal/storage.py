@@ -2,7 +2,7 @@
 """
 storage.py
 学びジャーナル - Excel(SharePoint同期フォルダ)読み書きモジュール
-Version: 0.9.0
+Version: 0.10.0
 """
 
 import os
@@ -445,6 +445,41 @@ def peek_next_time_range(path: str = EXCEL_PATH, now: datetime = None) -> tuple:
     if TIMELOG_SHEET not in wb.sheetnames:
         return "anchor", now, now
     return _compute_time_range(wb[TIMELOG_SHEET], now)
+
+
+def peek_next_time_range_v2(path: str = EXCEL_PATH, now: datetime = None) -> tuple:
+    """
+    次にappend_time_log()を呼んだ場合に記録される作業時間の範囲を、
+    実際には書き込まずに事前計算する。ポップアップUIに「いま押すと何時から
+    何時までになるか」を、タグを押す前から常時プレビュー表示するために使う。
+
+    peek_next_time_range()は_compute_time_range()（record_check_in()向けの
+    旧仕様。WORK_START_TIME起点や"gap"分割が無い）を使っているため、
+    現在の主経路であるappend_time_log()の挙動とはズレる。record_check_in()の
+    契約（旧仕様のまま変更しない）は壊さず、append_time_log()と同じ
+    _compute_time_range_v2()を使う別関数として追加した。
+
+    Args:
+        path: Excelファイルパス
+        now: 基準時刻（省略時はdatetime.now()）
+
+    Returns:
+        tuple[str, datetime, datetime]: (kind, start, end)
+            kind: "anchor" | "interval" | "gap"（append_time_log()と同じ）。
+            "gap"の場合、startは上限適用前の生の開始時刻。実際に
+            「未記録」と「実作業」の2行に分かれる境界（now - MAX_TIMELOG_GAP_HOURS）
+            は、append_time_log()の書き込みロジックと同じ計算を呼び出し側で
+            行うこと（表示用の値をここで先読みで確定させない）。
+    """
+    if now is None:
+        now = datetime.now()
+    now = now.replace(second=0, microsecond=0)
+
+    ensure_workbook_exists(path)
+    wb = _load_with_retry(path)
+    if TIMELOG_SHEET not in wb.sheetnames:
+        return "anchor", now, now
+    return _compute_time_range_v2(wb[TIMELOG_SHEET], now)
 
 
 def record_check_in(tag: str, sub_item: str, l: str, k: str, p: str, t: str,
