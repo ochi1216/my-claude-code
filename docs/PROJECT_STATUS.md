@@ -1,5 +1,9 @@
 # PROJECT_STATUS — RSS オーガナイザー開発
 
+> **⚠️ このプロジェクトは 2026-08-13 に `ochi1216/home-pc-workspace` の `rss-organizer/` へ移管しました。**
+> 以後の状況は移管先の `rss-organizer/docs/PROJECT_STATUS.md` を参照してください。
+> 本ファイルは移管時点の記録です。
+
 最終更新: S01完了（2026-08-01）
 
 ## Project Overview

@@ -1,5 +1,9 @@
 # Session History
 
+> **⚠️ このプロジェクトは 2026-08-13 に `ochi1216/home-pc-workspace` の `rss-organizer/` へ移管しました。**
+> 移管後のセッション記録は移管先の `rss-organizer/docs/SESSION_HISTORY.md` にあります。
+> 本ファイルには移管前（S01まで）の記録が残っています。
+
 ## Session Index
 
 | Session | Title | Date | Status | Main Files |

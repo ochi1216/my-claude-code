@@ -1,5 +1,13 @@
 # CLAUDE.md
 
+> ## ⚠️ RSS オーガナイザー開発は移管済み
+>
+> 2026-08-13 に `ochi1216/home-pc-workspace` の `rss-organizer/` へ移管した。
+> **以後の開発は移管先で行う。このリポジトリの `rss_organizer/` と `docs/` は
+> 移管時点の記録であり、更新しない。**
+> 以下のセッション管理ルールも、このリポジトリでは実質的に役目を終えている。
+> 移管先には同等の `CLAUDE.md` を置いてある。
+
 このリポジトリで Claude Code Web セッションを使って開発する際のセッション管理ルール。
 このルールは「RSS オーガナイザー開発」プロジェクト（`rss_organizer/`、管理ファイルは `docs/PROJECT_STATUS.md` / `docs/SESSION_HISTORY.md` / `docs/NEXT_TASK.md`）に適用する。
 

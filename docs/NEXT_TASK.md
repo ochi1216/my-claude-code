@@ -1,5 +1,9 @@
 # NEXT_TASK
 
+> **⚠️ このプロジェクトは 2026-08-13 に `ochi1216/home-pc-workspace` の `rss-organizer/` へ移管しました。**
+> 次タスクの管理は移管先の `rss-organizer/docs/NEXT_TASK.md` で行います。
+> 本ファイルに書かれている次タスク候補は、移管前の時点のものです。
+
 ## Project Name
 RSS オーガナイザー開発
 
