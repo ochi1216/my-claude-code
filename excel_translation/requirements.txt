@@ -1,0 +1,10 @@
+# excel_translation の依存ライブラリ
+#
+# Gemini API の呼び出しは共通モジュール gemini-common-tools の gemini_client.py
+# 経由へ移行したため、旧SDK google-generativeai は 20260812_01 以降不要。
+# gemini_client.py 自体は requests を使うため、別途インストールが必要。
+
+pandas
+openpyxl
+xlrd          # .xls (Excel 97-2003) を pandas で読み込む場合に必要
+requests      # gemini_client.py が使用

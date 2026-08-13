@@ -1,0 +1,11 @@
+# ppt_translation の依存ライブラリ
+#
+# Gemini API の呼び出しは共通モジュール gemini-common-tools の gemini_client.py
+# 経由へ移行したため、旧SDK google-generativeai は 20260812_01 以降不要。
+# gemini_client.py 自体は requests を使うため、別途インストールが必要。
+#
+# ※ run_ppt_translator.bat は専用のvenvを作ってここに書かれたものだけを入れるため、
+#   requests を書き忘れると gemini_client の import に失敗する（起動はするが翻訳できない）。
+
+python-pptx>=0.6.21
+requests      # gemini_client.py が使用
