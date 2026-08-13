@@ -2,16 +2,15 @@
 """
 dashboard.py
 LKPT Dashboard - 日次〜年次の集計ダッシュボード
-Version: 0.20.0
+Version: 0.21.0
 """
 
-import json
 import math
 import os
 import queue
+import sys
 import threading
 import tkinter as tk
-import urllib.request
 from tkinter import font as tkfont
 from datetime import datetime, timedelta
 
@@ -23,13 +22,55 @@ from storage import (
     complete_action, get_actions,
 )
 
-# COACHビュー（LKPTの期間要約）用。追加ライブラリを増やさない方針のため、
-# SDKは使わずurllib（標準ライブラリ）でGemini APIのREST版を直接呼ぶ。
+# COACHビュー（LKPTの期間要約）用。
+#
+# 2026-08-10頃、会社PCからGemini APIへの直接アクセスが遮断された。以前は
+# 「追加ライブラリを増やさない方針のため、SDKは使わずurllib（標準ライブラリ）で
+# Gemini APIのREST版を直接呼ぶ」実装だったが、直接アクセスが遮断される環境では
+# それだけでは動かなくなったため、共通モジュール`gemini_client.py`
+# （リポジトリ: https://github.com/ochi1216/gemini-common-tools）経由に変更する。
+# 直接呼び出しが失敗すると自宅PCのプロキシへ自動フォールバックする
+# （HANDOVER_daily_journal_gemini_proxy.md参照）。
+#
+# 元々SDK(google-genai)は使っておらず、urllibで組み立てていたリクエスト
+# payload・レスポンス解析がそのままgemini_client.pyのgenerate_advanced()の
+# 入出力形式と一致するため、他ツールのような互換シムクラスは不要で、
+# 呼び出し箇所を差し替えるだけで済む。
 GEMINI_MODEL = "gemini-2.5-flash"
-GEMINI_API_URL = (
-    f"https://generativelanguage.googleapis.com/v1beta/models/"
-    f"{GEMINI_MODEL}:generateContent"
-)
+
+
+def _resolve_gemini_common_dirs():
+    """
+    gemini_client.pyの探索先候補を優先順に返す。
+    ツールがPythonScripts直下に1階層で置かれている場合は"../common"で
+    届くが、2階層以上深い場合は届かない（HANDOVER文書の「ハマりどころ(1)」）。
+    環境変数GEMINI_COMMON_DIRで明示されていればそれを最優先する。
+    """
+    env_dir = os.environ.get("GEMINI_COMMON_DIR")
+    if env_dir:
+        return [env_dir]
+    here = os.path.dirname(os.path.abspath(__file__))
+    return [
+        os.path.normpath(os.path.join(here, "..", "common")),
+        os.path.normpath(os.path.join(here, "..", "..", "common")),
+    ]
+
+
+_GEMINI_COMMON_DIR_CANDIDATES = _resolve_gemini_common_dirs()
+for _d in _GEMINI_COMMON_DIR_CANDIDATES:
+    if _d not in sys.path:
+        sys.path.insert(0, _d)
+
+# gemini_client.pyが未配置・パス誤りでも、AIを使わない機能（LKPT記録・
+# ダッシュボード表示等）まで巻き添えで起動できなくなることを防ぐため、
+# importはtry/exceptで受け、実際にCOACHビューでAI呼び出しが行われた
+# 時点で初めてエラーとして表面化させる。
+try:
+    from gemini_client import generate_advanced as _generate_advanced
+    _GEMINI_CLIENT_IMPORT_ERROR = None
+except Exception as _e:
+    _generate_advanced = None
+    _GEMINI_CLIENT_IMPORT_ERROR = _e
 
 # ============================================================
 # UI設定（ダークテーマ）
@@ -415,28 +456,35 @@ def build_coach_prompt(entries: list, period_label: str,
 
 def call_gemini_summary(prompt: str) -> str:
     """
-    Gemini API（REST）を呼び出して要約テキストを取得する。
-    GEMINI_API_KEY環境変数が必須。ネットワーク呼び出しはブロッキングするため、
-    呼び出し側は必ず別スレッドから呼ぶこと（Tkinterのメインループを止めないため）。
+    共通モジュール(gemini_client.py)経由でGemini APIを呼び出し、要約テキストを
+    取得する。直接呼び出しが失敗すれば自宅PCのプロキシへ自動フォールバックする
+    （会社PCからの直接アクセス遮断対策。HANDOVER_daily_journal_gemini_proxy.md
+    参照）。ネットワーク呼び出しはブロッキングするため、呼び出し側は必ず
+    別スレッドから呼ぶこと（Tkinterのメインループを止めないため）。
     """
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        raise RuntimeError("環境変数 GEMINI_API_KEY が設定されていません。")
+    # 認証情報が環境変数のどちらにも無い場合は、共通モジュールまで進めずに
+    # ここで分かりやすいエラーを出す（直接・プロキシ両方失敗した曖昧な
+    # エラーより先に、根本原因を示すため）
+    if not (os.environ.get("GEMINI_API_KEY") or os.environ.get("GEMINI_PROXY_URL")):
+        raise RuntimeError(
+            "環境変数 GEMINI_API_KEY / GEMINI_PROXY_URL のいずれも設定されていません。"
+        )
+    if _generate_advanced is None:
+        raise RuntimeError(
+            "Gemini共通モジュール(gemini_client.py)を読み込めませんでした。\n"
+            f"探索したパス: {' / '.join(_GEMINI_COMMON_DIR_CANDIDATES)}\n"
+            f"元のエラー: {_GEMINI_CLIENT_IMPORT_ERROR}\n"
+            "gemini-common-tools を配置し、必要なら環境変数 GEMINI_COMMON_DIR で"
+            "gemini_client.py のあるフォルダを指定してください。"
+        )
 
-    body = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode("utf-8")
-    req = urllib.request.Request(
-        f"{GEMINI_API_URL}?key={api_key}",
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=45) as res:
-        payload = json.loads(res.read().decode("utf-8"))
+    payload = {"contents": [{"parts": [{"text": prompt}]}]}
+    result = _generate_advanced(payload, model=GEMINI_MODEL)
 
     try:
-        return payload["candidates"][0]["content"]["parts"][0]["text"].strip()
+        return result["candidates"][0]["content"]["parts"][0]["text"].strip()
     except (KeyError, IndexError) as e:
-        raise RuntimeError(f"Gemini APIの応答形式が想定と異なります: {payload}") from e
+        raise RuntimeError(f"Gemini APIの応答形式が想定と異なります: {result}") from e
 
 
 def aggregate_lkpt_field_counts(entries: list) -> dict:
