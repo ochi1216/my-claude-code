@@ -32,6 +32,14 @@ Outlookメール解析・アクションダッシュボードツール。詳細�
 
 セットアップ手順は [`word_translator/README.md`](word_translator/README.md) を参照。
 
+## RSS Organizer（`ochi1216/home-pc-workspace` へ移管済み）
+
+> **⚠️ このプロジェクトは 2026-08-13 に [`ochi1216/home-pc-workspace`](https://github.com/ochi1216/home-pc-workspace) の `rss-organizer/` へ移管しました。以後の開発は移管先で行います。**
+>
+> `rss_organizer/` に残っているのは移管時点の記録です。会社PCの絶対パスが
+> 埋め込まれたままなので、**新しいPCでそのまま動かさないでください**。
+> 詳細は [`rss_organizer/README.md`](rss_organizer/README.md) を参照。
+
 ## 開発ルール（バージョン管理）
 
 - **ファイル命名**: プログラムを更新する際は、ファイル名を `ツール名_yyyymmdd_連番.py`（例: `rtocs_organizer_20260711_01.py`）とする。同日に複数回更新する場合は連番（`_01`, `_02`...）を上げる。
