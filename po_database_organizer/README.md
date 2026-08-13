@@ -1,0 +1,103 @@
+# PO Database Organizer
+
+SharePoint上でプロジェクトごと・業者ごとにフォルダ管理されているPO（パーチャスオーダー）
+関連書類をスキャンし、「Project × Vendor × PO番号」を軸にしたカタログをExcel/JSONで
+生成するツール。R19 Site Organizer（Graph API + MSAL Device Code Flow によるSharePoint
+フォルダ走査）の技術基盤を、PO管理用途に転用したもの。
+
+## スコープ（Phase 1）
+
+現時点ではPO番号以外の命名規則（見積・検収・請求などの文書種別の判別ルール）が
+確立していないため、**無理な自動分類はしない**方針とした。
+
+- ファイル名が `PO` で始まるファイルのみを確実にPO本体として認識し、PO番号を抽出する
+  （正規表現は `config.json` の `po_number_pattern` で調整可能。デフォルト `^PO[-_]?(\d{3,})`）
+- それ以外のファイル（メール履歴・エビデンス等）はPO番号に紐付けず、Project/Vendor単位
+  までの情報を保持したまま「未分類書類」として一覧化する（＝見えていなかった漏れの可視化）
+- 発注/検収/請求/支払などの**ステータス判定はここでは行わない**。「PO一覧」シートに空の
+  Status列を用意するだけに留め、他の管理Excelと `PO番号` キーで結合して後付けできるように
+  しておく。ステータス遷移ルールは、実際に他のExcelと突き合わせてから固める想定（Phase 2）
+
+## 必要要件
+
+- Python 3.9以上
+- 対象SharePointサイトへの `Sites.Read.All` 権限（Entra IDアプリ登録・Admin Consent済み）
+
+## セットアップ手順
+
+1. 依存パッケージをインストールする。
+
+   ```
+   pip install -r requirements.txt
+   ```
+
+2. `config.example.json` を `config.json` にコピーし、環境に合わせて編集する。
+
+   ```json
+   {
+     "tenant_id": "<YOUR_TENANT_ID>",
+     "client_id": "<YOUR_CLIENT_ID>",
+     "site_host": "nexperia.sharepoint.com",
+     "site_path": "/sites/JapanDesign",
+     "library_name": "PO",
+     "po_number_pattern": "^PO[-_]?(\\d{3,})"
+   }
+   ```
+
+   - `tenant_id` / `client_id` は、既存のR19 Site Organizerで使用しているEntra IDアプリ
+     登録の値をそのまま流用できる（同一テナント・同一パーミッション体系のため）。
+   - `site_host` / `site_path` は対象サイトのURLから決定する。ブラウザ上のURLが
+     `https://nexperia.sharepoint.com.mcas.ms/sites/JapanDesign/PO/Forms/view.aspx` の
+     ように `.mcas.ms`（Microsoft Defender for Cloud Apps経由のプロキシ）を含む場合でも、
+     Graph APIは常に `graph.microsoft.com` を直接叩くため、`site_host` には `.mcas.ms` を
+     含めず実体のホスト名（`nexperia.sharepoint.com`）を指定する。
+   - `library_name` は対象のドキュメントライブラリ名（URLの `/PO/` 部分に対応する想定）。
+     一致するライブラリが無い場合は起動時ログに候補一覧が表示されるので、それを見て
+     修正する。
+
+3. スクリプトを実行する。
+
+   ```
+   python po_database_organizer_20260713_01.py
+   ```
+
+   初回はターミナルにDevice Code Flowの認証コード（URLとコード）が表示されるので、
+   表示されたURLをブラウザで開いてサインインする。以降は `token_cache.json` に
+   キャッシュされ、有効期限内は再認証不要。
+
+4. `http://127.0.0.1:5010` が自動で開くので、「スキャン開始」を押す。
+
+   - スキャンは `cache/scan_cache.json` にVendorフォルダ単位で結果を累積保存するため、
+     途中で中断しても再実行時は前回分がスキップされる（再開可能）。強制的に全件
+     取り直したい場合は「キャッシュ無視で再スキャン」を使う。
+
+5. 完了後、「Excel出力」または「JSON出力」でカタログを保存する。
+
+## 出力構成
+
+### Excel（複数シート）
+
+| シート | 内容 |
+|---|---|
+| PO一覧 | Project / Vendor / PO番号 / 代表ファイル / 関連書類数 / 最終更新日 / リンク / Status(空列) |
+| 関連書類 | PO番号ごとに紐付いたファイルの明細（同一PO番号で複数リビジョンがある場合は全件） |
+| 未分類書類 | PO番号を特定できなかったファイル一覧（Project/Vendor/サブフォルダ単位） |
+| Projects / Vendors | 名寄せ用マスタ（他Excelとの結合キーとして利用） |
+
+`PO番号` 列をキーに、契約管理表・検収管理表など他の管理Excelと VLOOKUP / Power Query で
+結合できる構成にしている。
+
+### JSON
+
+`{"projects": [...], "vendors": [...], "pos": [...], "documents": [...]}` のスター型
+（正規化された4テーブル構成）。Excel出力の元データであり、将来的にSQLite等へ移行する
+場合のソースとしても利用できる。
+
+## 既知の制限（今回のスコープ外）
+
+- PO番号を伴わない書類（メール履歴・エビデンス等）の自動分類は行っていない。分類ルールが
+  定まった段階で `classify_filename()` にロジックを追加する想定。
+- ステータス（発注/検収/請求/支払等）の自動判定は行っていない。他の管理Excelとの突き合わせ
+  結果をもとに、Phase 2でルールを設計する。
+- Vendorフォルダ配下の再帰探索は `config.json` の `max_depth`（デフォルト6階層）で
+  打ち切る。極端に深いフォルダ構成では取りこぼしが発生し得る。
