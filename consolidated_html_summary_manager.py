@@ -23,7 +23,10 @@ RETENTION_DAYS = 7
 # 旧HTMLが残っていたため棒グラフが見えなくなった）。
 # detail_html/trendの出力形式を変更するたびにこの値をインクリメントし、
 # 古いキャッシュを強制的に無効化すること。
-DASHBOARD_CACHE_SCHEMA_VERSION = 2
+# [S05] 3へ更新。ダッシュボードの構成変更に加え、キャッシュの保存単位を
+# 「ダッシュボード全体」から「Geminiの解説文だけ」へ変えたため、旧キャッシュは
+# そのまま読めない。値を上げることで強制的に破棄させる。
+DASHBOARD_CACHE_SCHEMA_VERSION = 3
 
 class SummaryFolderManager:
     def __init__(self, target_folder):
@@ -36,6 +39,10 @@ class SummaryFolderManager:
         # 読み書きしているのはこのスクリプト自身だけである。target_folder
         # 直下を掃除するため、専用のjsonサブフォルダへ移す。
         self.json_dir = os.path.join(target_folder, 'json')
+        # [S05] 今回の実行で新しく取り込んだ分。extract_data()が設定する。
+        # DB全体の件数とは別物で、ダッシュボード最上部の「今回の更新」に使う。
+        self.new_files = []
+        self.new_item_count = 0
 
 
     def parse_youtube_card(self, card):
@@ -242,6 +249,10 @@ class SummaryFolderManager:
             if file_data["items"]:
                 # DBにマージ（ファイル名で上書き・追加）
                 db_data[filename] = file_data
+                # [S05] このループはSummaryフォルダに置かれていたファイルだけを回る。
+                # 処理後はarchiveへ移すため、ここを通ったものが「今回の新規追加」に等しい。
+                self.new_files.append(filename)
+                self.new_item_count += len([it for it in file_data["items"] if not it.get('is_error')])
             
             # パース成功・失敗にかかわらず、ファイルをarchiveへ移動
             try:
@@ -299,13 +310,21 @@ class SummaryFolderManager:
         return item.get('is_favorite') is True or item.get('category') == 'Followed Note'
 
     def _collect_window_items(self, data_list, since_ts):
-        """指定時刻以降に生成されたファイルから、エラーでないitemsを (file_data, item) のリストで返す"""
+        """指定時刻以降に生成されたファイルから、エラーでないitemsを返す
+
+        [S05] 戻り値を (file_data, item, iIdx) の3要素に変更した。
+        カードへのリンクは filename と iIdx でしか特定できないため
+        （HTML側のアンカーに使われる fIdx は絞り込み状態で変動する）、
+        ここで元の並び順のインデックスを保持しておく必要がある。
+        エラーitemを飛ばしても iIdx は詰めない。HTML側は items 配列の
+        添字でアンカーを振っており、詰めるとリンク先がずれるため。
+        """
         results = []
         for fd in data_list:
             if fd.get('mtime', 0) >= since_ts:
-                for it in fd.get('items', []):
+                for iIdx, it in enumerate(fd.get('items', [])):
                     if not it.get('is_error'):
-                        results.append((fd, it))
+                        results.append((fd, it, iIdx))
         return results
 
     def _compute_daily_trend(self, data_list, now_dt, days=7):
@@ -343,14 +362,77 @@ class SummaryFolderManager:
             f'<span class="chev">▼</span>'
         )
 
-    def _render_detail_html(self, total, label, jump_hours, category_counts, highlights, has_trend=False, trend_container_id=""):
-        """ダッシュボード帯の展開時詳細（集計・注目記事・推移グラフの枠）をHTML化する（Gemini不使用）"""
-        html = (
+    def _render_new_arrivals_html(self):
+        """[S05] ダッシュボード最上部の「今回の更新」。今回取り込んだファイル数とカード数を出す。
+
+        DB全体の件数ではなく、この実行でSummaryフォルダから読み込んだ分だけを数える。
+        新規が0件（既存の統合HTMLを作り直しただけの実行）のときは、
+        「0件」と出すより何も出さない方が誤解が無いため、空文字を返す。
+        """
+        if not self.new_files:
+            return ''
+        return (
+            '<div class="dd-new">'
+            '<span class="dd-new-label">今回の更新</span>'
+            f'<span class="dd-new-val">サマリー <b>{len(self.new_files)}</b>枚'
+            f'　/　カード <b>{self.new_item_count}</b>件</span>'
+            '</div>'
+        )
+
+    def _render_representative_html(self, highlights):
+        """[S05] 代表カードへのリンク。
+
+        「代表」の判定は _is_highlighted_item と同じ（お気に入りチャンネル /
+        Followed Note）。Geminiに選ばせる案もあったが、返ってきたタイトル文字列を
+        カードへ突き合わせる必要があり、表記揺れでリンクが外れる。ここは
+        決定的に特定できる既存の判定を使う。
+
+        リンク先は fIdx ではなく filename と iIdx で渡す。fIdx は絞り込み状態で
+        変わるため、生成時点の値を埋め込むと別のカードへ飛んでしまう。
+        """
+        if not highlights:
+            return ''
+        lines = "".join(
+            '<button class="rep-item" '
+            f'onclick="jumpToCardFromDash(\'{fd.get("filename", "")}\', {iIdx})">'
+            f'⭐ {self._escape(it.get("title", ""))}</button>'
+            for fd, it, iIdx in highlights[:10]
+        )
+        more = ''
+        if len(highlights) > 10:
+            more = f'<div class="rep-more">ほか {len(highlights) - 10}件</div>'
+        return (
+            f'<div class="reps"><div class="rep-label">⭐ 代表カード（全{len(highlights)}件中）</div>'
+            f'{lines}{more}</div>'
+        )
+
+    def _escape(self, text):
+        """HTML属性・本文へ埋め込むための最小限のエスケープ"""
+        return (str(text).replace('&', '&amp;').replace('<', '&lt;')
+                .replace('>', '&gt;').replace('"', '&quot;').replace("'", '&#39;'))
+
+    def _render_detail_html(self, total, label, jump_hours, category_counts, highlights,
+                            has_trend=False, trend_container_id="", narrative_html=""):
+        """ダッシュボード帯の展開時詳細をHTML化する
+
+        [S05] 並び順を変更した。上から順に
+        「今回の更新」→「総数と範囲切替」→「サマリーごとの傾向（Gemini）」→
+        「代表カードへのリンク」→「カテゴリ内訳」→「推移グラフ」。
+        知りたい順（何が増えたか／何が話題か／どれを読むか）に合わせている。
+        """
+        html = self._render_new_arrivals_html()
+
+        html += (
             '<div class="dd-row">'
             f'<div class="dd-total">{total}<span>件・{label}</span></div>'
             f'<button class="dd-jump" data-hours="{jump_hours}" onclick="toggleDashTimeFilter({jump_hours})">この範囲だけ見る</button>'
             '</div>'
         )
+
+        if narrative_html:
+            html += narrative_html
+
+        html += self._render_representative_html(highlights)
 
         if category_counts:
             chips = "".join(
@@ -367,20 +449,87 @@ class SummaryFolderManager:
                 f'<div class="trend-bars" id="{trend_container_id}"></div></div>'
             )
 
-        if highlights:
-            highlight_lines = "".join(
-                f'<div class="hl-item">⭐ {it.get("title","")}</div>'
-                for _, it in highlights[:10]
-            )
-            html += (
-                f'<div class="highlights"><div class="hl-label">⭐ 注目記事 {len(highlights)}件</div>'
-                f'{highlight_lines}</div>'
-            )
-
         return html
 
-    def _generate_ai_narrative(self, items, highlights, prompt_intro):
-        """Gemini APIで注目記事優先のサンプルから横断的なトレンド解説を生成する。取得できない場合はNoneを返す"""
+    def _build_per_file_prompt(self, items):
+        """[S05] ファイル単位の傾向を1回のAPI呼び出しで得るためのプロンプトを組む。
+
+        ファイル数だけAPIを呼ぶとコストと時間が比例して増えるため、
+        全ファイルを1つのプロンプトに入れ、通し番号で返させる。
+        戻り値は (prompt, 対象ファイル情報のリスト)。
+        """
+        MAX_FILES = 12
+        MAX_ITEMS_PER_FILE = 12
+        MAX_SUMMARY_CHARS = 120
+
+        grouped = {}
+        order = []
+        for fd, it, _iIdx in items:
+            fn = fd.get('filename', '')
+            if fn not in grouped:
+                grouped[fn] = {'fd': fd, 'items': []}
+                order.append(fn)
+            grouped[fn]['items'].append(it)
+
+        targets = [grouped[fn] for fn in order[:MAX_FILES]]
+
+        prompt = (
+            "以下は要約ファイルの一覧です。ファイルごとに、そこで話題になっている傾向を"
+            "1〜2文の日本語で要約してください。\n"
+            "出力は必ず次の形式で、1ファイルにつき1行だけ返してください。前置きや補足は書かないでください。\n"
+            "[1] 要約文\n[2] 要約文\n\n"
+        )
+        for n, g in enumerate(targets, start=1):
+            fd = g['fd']
+            prompt += f"[{n}] カテゴリ:{fd.get('category', '')} 件数:{len(g['items'])}\n"
+            for it in g['items'][:MAX_ITEMS_PER_FILE]:
+                summary = (it.get('summary') or '')[:MAX_SUMMARY_CHARS]
+                prompt += f"  - {it.get('title', '')}: {summary}\n"
+            prompt += "\n"
+        return prompt, targets
+
+    def _render_per_file_narrative_html(self, text, targets):
+        """[S05] 「[n] 本文」形式の応答をファイルごとの見出し付きHTMLにする。
+
+        期待した形式で返らなかった場合は解析結果を捨て、全文をそのまま
+        表示する既存の整形にフォールバックする。解説が消えるより、
+        体裁が崩れてでも内容が見える方がましなため。
+        """
+        parsed = {}
+        for line in text.splitlines():
+            m = re.match(r'^\s*\[(\d+)\]\s*(.+)$', line)
+            if m:
+                parsed[int(m.group(1))] = m.group(2).strip()
+
+        if not parsed:
+            return self._format_narrative_html(text)
+
+        blocks = ""
+        for n, g in enumerate(targets, start=1):
+            body = parsed.get(n)
+            if not body:
+                continue
+            fd = g['fd']
+            head = f"{fd.get('category', '')}　{fd.get('mtime_str', '')}　{len(g['items'])}件"
+            blocks += (
+                '<div class="tf-block">'
+                f'<div class="tf-name">{self._escape(head)}</div>'
+                f'<div class="tf-text">{self._escape(body)}</div>'
+                '</div>'
+            )
+        if not blocks:
+            return self._format_narrative_html(text)
+        return (
+            '<div class="trends"><div class="tf-label">サマリーごとの傾向</div>'
+            f'{blocks}</div>'
+        )
+
+    def _generate_ai_narrative(self, items, highlights, prompt_intro, per_file=False):
+        """Gemini APIでトレンド解説を生成する。取得できない場合はNoneを返す
+
+        per_file=True のときはファイル単位の傾向、False のときは従来どおり
+        窓全体を横断したテーマ解説を生成する。いずれもAPI呼び出しは1回。
+        """
         try:
             from google import genai
         except ImportError:
@@ -395,14 +544,18 @@ class SummaryFolderManager:
         if not items:
             return None
 
-        # 注目記事を優先し、残り枠を通常itemsで埋める（最大50件）
-        highlight_ids = {id(it) for _, it in highlights}
-        ordered = list(highlights) + [pair for pair in items if id(pair[1]) not in highlight_ids]
-        sample = ordered[:50]
+        targets = None
+        if per_file:
+            prompt, targets = self._build_per_file_prompt(items)
+        else:
+            # 注目記事を優先し、残り枠を通常itemsで埋める（最大50件）
+            highlight_ids = {id(it) for _fd, it, _iIdx in highlights}
+            ordered = list(highlights) + [t for t in items if id(t[1]) not in highlight_ids]
+            sample = ordered[:50]
 
-        prompt = prompt_intro + "\n\n"
-        for fd, it in sample:
-            prompt += f"- [{fd.get('category','')}] {it.get('title')}: {it.get('summary')}\n"
+            prompt = prompt_intro + "\n\n"
+            for fd, it, _iIdx in sample:
+                prompt += f"- [{fd.get('category','')}] {it.get('title')}: {it.get('summary')}\n"
 
         client = genai.Client(api_key=api_key)
         max_attempts = 2
@@ -413,7 +566,10 @@ class SummaryFolderManager:
                     contents=prompt,
                     config={'http_options': {'timeout': 60000}}
                 )
-                return self._format_narrative_html(response.text.strip())
+                text = response.text.strip()
+                if per_file:
+                    return self._render_per_file_narrative_html(text, targets)
+                return self._format_narrative_html(text)
             except Exception as e:
                 print(f"[Warning] Gemini API Request failed (Attempt {attempt + 1}/{max_attempts}): {e}")
                 if attempt < max_attempts - 1:
@@ -433,13 +589,53 @@ class SummaryFolderManager:
             formatted = formatted.replace('\n', '<br>')
         return f'<div style="margin-top:10px; padding-top:8px; border-top:1px solid #e2e8f0;">{formatted}</div>'
 
+    def _load_cached_narrative(self, cache_filename, current_hash):
+        """[S05] キャッシュ済みのGemini解説を返す。無効・不一致ならNone。"""
+        cache_file = os.path.join(self.json_dir, cache_filename)
+        # [20260809] 旧バージョンはtarget_folder直下に書いていた。新しい場所に
+        # まだ無ければ、そちらを読む（無ければ単に「未キャッシュ」として
+        # 新規生成すればよいだけなので、DBほど厳密な移行は不要）。
+        legacy_cache_file = os.path.join(self.target_folder, cache_filename)
+        read_from = cache_file if os.path.exists(cache_file) else legacy_cache_file
+        if not os.path.exists(read_from):
+            return None
+        try:
+            with open(read_from, 'r', encoding='utf-8') as f:
+                cache_data = json.load(f)
+            if cache_data.get("hash") == current_hash:
+                return cache_data.get("narrative_html")
+        except Exception as e:
+            print(f"[Warning] Failed to read overview cache ({cache_filename}): {e}")
+        return None
+
+    def _save_cached_narrative(self, cache_filename, current_hash, narrative_html):
+        """[S05] Gemini解説だけをキャッシュへ保存する。"""
+        cache_file = os.path.join(self.json_dir, cache_filename)
+        legacy_cache_file = os.path.join(self.target_folder, cache_filename)
+        try:
+            with open(cache_file, 'w', encoding='utf-8') as f:
+                json.dump({"hash": current_hash, "narrative_html": narrative_html}, f, ensure_ascii=False)
+            if os.path.exists(legacy_cache_file):
+                try:
+                    os.remove(legacy_cache_file)
+                except Exception as e:
+                    print(f"[Warning] Failed to remove legacy overview cache file: {e}")
+        except Exception as e:
+            print(f"[Warning] Failed to write overview cache ({cache_filename}): {e}")
+
     def _build_period_overview(self, data_list, hours, emoji, label, jump_hours, prompt_intro,
-                                cache_filename, include_trend=False):
+                                cache_filename, include_trend=False, per_file_narrative=False):
         """
         指定時間幅（トレイリングウィンドウ）のダッシュボード帯用データ(tile_html/detail_html)を構築する(Track 0)。
         対象0件ならNoneを返す（＝そのタイルごと非表示）。
-        Gemini呼び出しはコストがかかるため、ウィンドウ内のファイル構成（＝中身）が前回生成時から
-        変化していなければキャッシュした結果をそのまま再利用する。
+
+        [S05] キャッシュの対象を「Geminiの解説文だけ」に限定した。
+        以前はダッシュボード全体（件数・注目記事・推移グラフ）をまとめてキャッシュし、
+        キーは「窓内のファイル名の集合」だけだった。しかし推移グラフの日付軸と
+        「最終更新」は生成時刻に依存するため、ファイル構成が変わらないまま日付が
+        変わると、前日の日付軸を表示し続け、当日のバケットが存在しない状態になっていた。
+        件数・グラフ・注目記事はローカル計算だけで安価なので、毎回作り直す。
+        高価なのはGemini呼び出しだけであり、そこだけをキャッシュすれば足りる。
         """
         now_ts = time.time()
         now_dt = datetime.fromtimestamp(now_ts)
@@ -450,7 +646,7 @@ class SummaryFolderManager:
         if not items:
             return None
 
-        # ウィンドウ内のファイル構成が変わったかどうかで中身の変化を判定する。
+        # ウィンドウ内のファイル構成が変わったかどうかで解説の作り直しを判定する。
         # スキーマバージョンも含めることで、出力形式の変更時に古いキャッシュを強制的に破棄する。
         state_str = f"schema{DASHBOARD_CACHE_SCHEMA_VERSION}:" + ",".join(sorted(fd.get('filename', '') for fd in window_files))
         current_hash = hashlib.md5(state_str.encode('utf-8')).hexdigest()
@@ -461,65 +657,43 @@ class SummaryFolderManager:
             except Exception as e:
                 print(f"[Warning] Failed to create json directory: {e}")
 
-        cache_file = os.path.join(self.json_dir, cache_filename)
-        # [20260809] 旧バージョンはtarget_folder直下に書いていた。新しい場所に
-        # まだ無ければ、そちらを読む（無ければ単に「未キャッシュ」として
-        # 新規生成すればよいだけなので、DBほど厳密な移行は不要）。
-        legacy_cache_file = os.path.join(self.target_folder, cache_filename)
-        read_from = cache_file if os.path.exists(cache_file) else legacy_cache_file
-        if os.path.exists(read_from):
-            try:
-                with open(read_from, 'r', encoding='utf-8') as f:
-                    cache_data = json.load(f)
-                    if cache_data.get("hash") == current_hash:
-                        print(f"[Info] Using cached overview ({cache_filename}, unchanged).")
-                        return cache_data.get("dashboard_entry")
-            except Exception as e:
-                print(f"[Warning] Failed to read overview cache ({cache_filename}): {e}")
-
-        print(f"[Info] Generating new overview ({cache_filename})...")
-
         category_counts = {}
         highlights = []
-        for fd, it in items:
+        for fd, it, iIdx in items:
             cat = fd.get('category', 'UNKNOWN')
             category_counts[cat] = category_counts.get(cat, 0) + 1
             if self._is_highlighted_item(it):
-                highlights.append((fd, it))
+                highlights.append((fd, it, iIdx))
+
+        narrative_html = self._load_cached_narrative(cache_filename, current_hash)
+        if narrative_html is not None:
+            print(f"[Info] Reusing cached AI narrative ({cache_filename}, unchanged).")
+        else:
+            print(f"[Info] Generating new AI narrative ({cache_filename})...")
+            narrative_html = self._generate_ai_narrative(
+                items, highlights, prompt_intro, per_file=per_file_narrative
+            )
+            if not narrative_html:
+                narrative_html = (
+                    '<div style="margin-top:8px; font-size:0.85em; color:#a0aec0;">'
+                    '（AI解説はGEMINI_API_KEY未設定または生成失敗のため省略されました）</div>'
+                )
+            self._save_cached_narrative(cache_filename, current_hash, narrative_html)
 
         trend = self._compute_daily_trend(data_list, now_dt, days=7) if include_trend else None
         trend_container_id = "weeklyTrendBars" if include_trend else ""
         detail_html = self._render_detail_html(
             len(items), label, jump_hours, category_counts, highlights,
-            has_trend=include_trend, trend_container_id=trend_container_id
+            has_trend=include_trend, trend_container_id=trend_container_id,
+            narrative_html=narrative_html
         )
-        narrative_html = self._generate_ai_narrative(items, highlights, prompt_intro)
-        if not narrative_html:
-            narrative_html = (
-                '<div style="margin-top:8px; font-size:0.85em; color:#a0aec0;">'
-                '（AI解説はGEMINI_API_KEY未設定または生成失敗のため省略されました）</div>'
-            )
-        detail_html += narrative_html
         detail_html += f'<div class="stale-note">最終更新 {now_dt.strftime("%m/%d %H:%M")}</div>'
 
-        dashboard_entry = {
+        return {
             "tile_html": self._render_tile_html(emoji, label, len(items)),
             "detail_html": detail_html,
             "trend": trend,
         }
-
-        try:
-            with open(cache_file, 'w', encoding='utf-8') as f:
-                json.dump({"hash": current_hash, "dashboard_entry": dashboard_entry}, f, ensure_ascii=False)
-            if read_from == legacy_cache_file and os.path.exists(legacy_cache_file):
-                try:
-                    os.remove(legacy_cache_file)
-                except Exception as e:
-                    print(f"[Warning] Failed to remove legacy overview cache file: {e}")
-        except Exception as e:
-            print(f"[Warning] Failed to write overview cache ({cache_filename}): {e}")
-
-        return dashboard_entry
 
     def generate_manager_html(self, data_list):
         # Track 0 (俯瞰ダッシュボード帯) の生成：直近24時間・直近7日間の2タイル
@@ -531,6 +705,10 @@ class SummaryFolderManager:
                 "複数ソースで共通して言及されているテーマを2〜3個挙げ、それぞれ1〜2文で解説してください。"
             ),
             cache_filename="overview_cache_daily.json",
+            # 直近24時間はファイル数が限られるため、ファイル単位の傾向を出す。
+            # 7日間側で同じことをするとファイル数が増えすぎてプロンプトが肥大するため、
+            # あちらは従来どおり窓全体を横断したテーマ解説のままにしている。
+            per_file_narrative=True,
         )
         weekly_overview = self._build_period_overview(
             data_list, hours=24 * 7, emoji="📅", label="直近7日間", jump_hours=24 * 7,
@@ -855,7 +1033,17 @@ URL: ${url}
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex, nofollow">
-    <meta name="apple-mobile-web-app-capable" content="yes">
+    <!-- [S05] apple-mobile-web-app-capable は絶対に足さないこと。
+         これを入れるとホーム画面アイコンからの起動が「スタンドアロンWebアプリ」になり、
+         Safari本体とはキャッシュもlocalStorageも別の入れ物で動く。実機で次の2つが起きた。
+           1. pushもGitHub Pagesのデプロイも成功しているのにiPhoneだけ古いまま。
+              スタンドアロン側にはリロードボタンもアドレスバーも無く、更新手段が無い。
+           2. Safariで既読にしたカードが、アイコンから開くと未読に戻って見える。
+              既読はlocalStorageに入るが、その保存先がSafari側と別だったため。
+         同一オリジンの x-list-dashboard はこのタグを持たず、どちらの症状も起きていない。
+         全画面表示のために S04 で足したものだが、代償が大きいので外した。
+         なお apple-mobile-web-app-title と apple-touch-icon はスタンドアロン化とは
+         無関係で、ホーム画面のアイコンと名前にだけ効くので残している。 -->
     <meta name="apple-mobile-web-app-title" content="要約ビューア">
     <link rel="apple-touch-icon" href="apple-touch-icon.png">
     <title>Consolidated Summary Manager</title>
@@ -917,6 +1105,26 @@ URL: ${url}
         .dd-jump:active { background: #ebf8ff; }
         .dd-jump.active { background: #3182ce; color: #fff; border-color: #3182ce; }
 
+        /* [S05] ダッシュボード最上部「今回の更新」。今回取り込んだ分だけを示す。 */
+        .dd-new { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; background: #ebf8ff; border: 1px solid #bee3f8; border-radius: 8px; padding: 8px 12px; margin-bottom: 10px; }
+        .dd-new-label { font-size: 0.68rem; color: #2b6cb0; font-weight: 800; letter-spacing: 0.03em; }
+        .dd-new-val { font-size: 0.92rem; color: #1a202c; font-variant-numeric: tabular-nums; }
+        .dd-new-val b { color: #2b6cb0; font-size: 1.15rem; font-weight: 800; }
+
+        /* [S05] サマリーごとの傾向（Gemini生成） */
+        .trends { margin-bottom: 12px; padding-top: 8px; border-top: 1px solid #e2e8f0; }
+        .tf-label { font-size: 0.72rem; color: #8492a6; margin-bottom: 6px; font-weight: 600; }
+        .tf-block { margin-bottom: 8px; }
+        .tf-name { font-size: 0.68rem; color: #2b6cb0; font-weight: 700; }
+        .tf-text { font-size: 0.85rem; color: #4a5568; line-height: 1.6; }
+
+        /* [S05] 代表カードへのリンク。押すと該当カードへ飛ぶ。 */
+        .reps { margin-bottom: 12px; }
+        .rep-label { font-size: 0.72rem; color: #8492a6; margin-bottom: 5px; font-weight: 600; }
+        .rep-item { display: block; width: 100%; text-align: left; background: #fffdf5; border: 1px solid #f0e0b0; border-radius: 6px; padding: 7px 10px; margin-bottom: 5px; font-size: 0.83rem; line-height: 1.5; color: #744210; cursor: pointer; font-family: inherit; }
+        .rep-item:active { background: #fef9c3; }
+        .rep-more { font-size: 0.72rem; color: #a0aec0; }
+
         .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
         .chip { display: inline-flex; align-items: center; gap: 4px; background: #ebf8ff; color: #2b6cb0; border-radius: 10px; padding: 3px 10px; font-size: 0.78rem; font-weight: 600; }
         .chip b { font-variant-numeric: tabular-nums; }
@@ -950,6 +1158,8 @@ URL: ${url}
         .tag.active { background: #3182ce; color: white; border-color: #3182ce; font-weight: bold; }
         .sort-select { padding: 5px; border-radius: 6px; border: 1px solid #cbd5e0; font-size: 0.85rem; flex-grow: 1; color: #2d3748;}
         
+        /* [S05] 生成日時の表示。常時見えるが読書の邪魔にならないよう小さく淡くする。 */
+        .build-stamp { margin-top: 8px; font-size: 0.7rem; color: #a0aec0; text-align: right; font-variant-numeric: tabular-nums; }
         .action-buttons { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 5px; padding-top: 10px; border-top: 1px dashed #e2e8f0; }
         .btn-action { padding: 6px 12px; font-size: 0.8rem; border-radius: 6px; border: 1px solid #cbd5e0; background: #f7fafc; color: #4a5568; cursor: pointer; font-weight: bold;}
         .btn-action:active { background: #edf2f7; }
@@ -1104,6 +1314,12 @@ URL: ${url}
             <button class="btn-action" id="btnToggleAllPoints">📝 全ポイント開く</button>
             <button class="btn-action btn-toggle on" id="btnToggleVoice">🎙️ 高音質</button>
         </div>
+        <!-- [S05] 生成日時。iPhoneのホーム画面から起動した場合、Safari本体とは
+             別のキャッシュで動くため、公開が成功していても古い版が表示され続ける
+             ことがある。キャッシュ自体は制御せず（1MB超を毎回再取得させないため）、
+             「今見ているのがいつ生成された版か」を必ず見える位置に出すことで、
+             古いまま気づかない状態をなくす。 -->
+        <div class="build-stamp">生成: {{GENERATED_AT_PLACEHOLDER}}</div>
     </div>
 
     <div class="file-list" id="fileListContainer"></div>
@@ -1563,6 +1779,47 @@ URL: ${url}
             saveState();
             applyFiltersAndSort();
             updateDashJumpButtons();
+        }
+
+        // [S05] ダッシュボードの代表カードから該当カードへ飛ぶ。
+        // fIdx は filteredData の添字で絞り込み状態により変わるため、生成時点の
+        // 値は使えない。filename と iIdx を受け取り、クリック時に解決する。
+        // 対象が絞り込みで隠れている場合は、隠している条件だけを解除してから飛ぶ。
+        // 解除せずに「見つかりません」と出すより、押した通りに読める方がよい。
+        function jumpToCardFromDash(filename, iIdx) {
+            let fIdx = filteredData.findIndex(d => d.filename === filename);
+
+            if (fIdx < 0) {
+                // 代表カードは ALL_DATA と同じ元データから作られるので、必ず存在する。
+                // 見つからないのは絞り込みで外れている場合だけなので、条件を解除する。
+                state.filter = 'ALL';
+                state.showOnlySelected = false;
+                state.showOnlyUnread = false;
+                state.dashTimeFilterHours = null;
+                saveState();
+                applyFiltersAndSort();
+                updateDashJumpButtons();
+                document.getElementById('btnToggleSelected').classList.remove('on');
+                document.getElementById('btnToggleUnread').classList.remove('on');
+                fIdx = filteredData.findIndex(d => d.filename === filename);
+                if (fIdx < 0) return;
+            }
+
+            const card = document.getElementById(`file-card-${fIdx}`);
+            if (card && !card.classList.contains('expanded')) {
+                card.classList.add('expanded');
+            }
+
+            suppressNextHighlightScroll = true;
+            setTimeout(() => {
+                const target = document.getElementById(`item-${fIdx}-${iIdx}`)
+                    || document.getElementById(`file-card-${fIdx}`);
+                if (!target) return;
+                const headerOffset = getDynamicHeaderOffset();
+                const rect = target.getBoundingClientRect();
+                const targetY = window.scrollY + rect.top - headerOffset - 6;
+                window.scrollTo({ top: Math.max(0, targetY), behavior: 'auto' });
+            }, 80);
         }
 
         function updateDashJumpButtons() {
@@ -2760,7 +3017,7 @@ URL: ${url}
                     txt = `それでは、${fileItemCount}件のサマリーを開始します。`;
                 } else {
                     const fname = qData.filename || '';
-                    const prefixMatch = fname.match(/^(summary_[^_]+(?:_[^_]+)*)_\d{8}_/);
+                    const prefixMatch = fname.match(/^(summary_[^_]+(?:_[^_]+)*)_\\d{8}_/);
                     const prefix = prefixMatch ? prefixMatch[1] : fname;
                     txt = `次に、${prefix}の、${fileItemCount}件のサマリーに移ります。`;
                 }
@@ -3004,6 +3261,12 @@ URL: ${url}
         final_html = html_content.replace('{{JSON_DATA_PLACEHOLDER}}', json_data_str)
         final_html = final_html.replace('{{DASHBOARD_DATA_PLACEHOLDER}}', dashboard_data_str)
         final_html = final_html.replace('        // __INJECT_NEW_FUNCTIONS__\n', NEW_FUNCTIONS_JS)
+        # [S05] 生成日時を埋め込む。iPhone側で古いキャッシュを見ていないかを
+        # 利用者が目視で判断できるようにするためのもの。
+        final_html = final_html.replace(
+            '{{GENERATED_AT_PLACEHOLDER}}',
+            datetime.now().strftime('%Y-%m-%d %H:%M')
+        )
 
         
         with open(self.output_file, 'w', encoding='utf-8') as f:

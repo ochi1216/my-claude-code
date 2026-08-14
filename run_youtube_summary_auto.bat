@@ -222,18 +222,47 @@ rem Step 7: Execute Python
 rem ========================================
 echo. >> "%LOG_FILE%" 2>&1
 echo [7/7] Executing Python script... >> "%LOG_FILE%" 2>&1
-echo [DIAG] Python fixed path check:
 echo "!PYTHON_EXE!" "!LATEST_SCRIPT!" --auto --batch-size 10 --playlists V S A B N M >> "%LOG_FILE%" 2>&1
 echo ========================================= >> "%LOG_FILE%" 2>&1
 
+rem [S05] The diagnostics and the Python run itself had no redirect, so
+rem everything they printed - including the [Paths] lines that show which
+rem output folder and consolidation batch were resolved - was lost on
+rem Task Scheduler runs, where there is no console to read. Capture the
+rem output in a temp file, then print it to the screen and append it to
+rem the log, so both stdout and stderr survive either way.
+rem A pipe into PowerShell Tee-Object would show output live, but it is
+rem not used here: after a pipe, ERRORLEVEL reports the last command in
+rem the pipeline, which would silently break the EXIT_CODE check below.
+set "TMP_OUT=%LOG_DIR%\run_output_%TIMESTAMP%.tmp"
+
+rem Redirect each diagnostic line on its own instead of grouping them in
+rem a parenthesised block. The psutil line contains parentheses inside a
+rem quoted string, and cmd.exe miscounts those when they sit inside a
+rem block - the same trap recorded in the pitfall catalog.
 echo [DIAG] Python fixed path check:
-"!PYTHON_EXE!" --version
-"!PYTHON_EXE!" -c "import sys; print(sys.executable)"
-"!PYTHON_EXE!" -c "import psutil; print('psutil OK', psutil.__version__)"
+"!PYTHON_EXE!" --version > "%TMP_OUT%" 2>&1
+"!PYTHON_EXE!" -c "import sys; print(sys.executable)" >> "%TMP_OUT%" 2>&1
+"!PYTHON_EXE!" -c "import psutil; print('psutil OK', psutil.__version__)" >> "%TMP_OUT%" 2>&1
+type "%TMP_OUT%"
+type "%TMP_OUT%" >> "%LOG_FILE%"
 
-"!PYTHON_EXE!" "!LATEST_SCRIPT!" --auto --batch-size 10 --playlists V S A B N M
-
+"!PYTHON_EXE!" "!LATEST_SCRIPT!" --auto --batch-size 10 --playlists V S A B N M > "%TMP_OUT%" 2>&1
 set "EXIT_CODE=!ERRORLEVEL!"
+
+rem A missing temp file means the redirect itself failed and the script
+rem never ran. Treat that as a failure instead of reporting success.
+if not exist "%TMP_OUT%" (
+    echo ERROR: could not create "%TMP_OUT%" - the script did not run.
+    echo ERROR: could not create "%TMP_OUT%" - the script did not run. >> "%LOG_FILE%"
+    set "EXIT_CODE=1"
+    goto :after_python
+)
+type "%TMP_OUT%"
+type "%TMP_OUT%" >> "%LOG_FILE%"
+del "%TMP_OUT%" >NUL 2>&1
+
+:after_python
 
 echo. >> "%LOG_FILE%" 2>&1
 echo Python execution completed with exit code: !EXIT_CODE! >> "%LOG_FILE%" 2>&1

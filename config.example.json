@@ -1,0 +1,81 @@
+{
+  "general": {
+    "default_mode": "glasp",
+    "max_videos": 10,
+    "auto_save": true,
+    "output_format": "both",
+    "language": "ja",
+    "auto_mode_on_startup": false
+  },
+  "glasp": {
+    "round1_click": false,
+    "retry_count": 2,
+    "retry_delay": 2,
+    "retry_timeout": 3,
+    "batch_size": 10,
+    "batch_interval": 0.5,
+    "cleanup_delay": 3,
+    "max_batch_size": 20,
+    "chrome_debug_port": 9222,
+    "auto_start_chrome": false,
+    "tab_generation_timeout": 5,
+    "tab_generation_timeout_first": 8,
+    "summary_completion_timeout": 10,
+    "early_failure_check": 5,
+    "cdp_safe_timeout": 60,
+    "close_wait_time": 3,
+    "summary_check_interval": 0.5,
+    "max_youtube_tab_pool_size": 10,
+    "use_selenium_actions": true,
+    "batch_delay": 2,
+    "quick_check": {
+      "base_wait_time": 1.0,
+      "max_wait_time": 8.0,
+      "wait_intervals": [1.0, 2.0, 2.0, 2.0, 1.0],
+      "min_text_length": 500,
+      "transcript_timeout": 5.0,
+      "enable_detailed_logging": true
+    }
+  },
+  "api": {
+    "default_model": "gemini-2.5-flash-lite",
+    "parallel_count": 3,
+    "timeout": 30,
+    "max_retries": 3,
+    "gemini_api_key": "",
+    "openai_api_key": ""
+  },
+  "rate_limit": {
+    "max_requests_per_hour": 200,
+    "base_delay": 1.5,
+    "warning_threshold": 180,
+    "burst_size": 5,
+    "burst_interval": 5,
+    "window_minutes": 60
+  },
+  "ui": {
+    "window_width": 1600,
+    "window_height": 600,
+    "theme": "default",
+    "auto_scroll": true,
+    "show_cost": true,
+    "show_rate_limit_status": true,
+    "show_batch_progress": true,
+    "show_tab_tracker": true
+  },
+  "output": {
+    "save_transcript": false,
+    "save_metadata": true,
+    "group_by_channel": false,
+    "html_template": "modern"
+  },
+  "memory": {
+    "warning_threshold_mb": 4000,
+    "force_gc_interval": 5,
+    "enable_monitoring": true
+  },
+  "paths": {
+    "output_dir": "C:\\Users\\ochi1\\OneDrive\\ドキュメント\\PythonScripts\\Summary",
+    "consolidation_batch": "C:\\Users\\ochi1\\OneDrive\\ドキュメント\\PythonScripts\\publish_to_iphone.bat"
+  }
+}

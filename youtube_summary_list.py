@@ -7973,8 +7973,16 @@ class IntegratedSummaryApp(tk.Tk):
             self.playlist_progress_label.config(text=playlist_status)
 
 
-    def log_to_ui(self, message: str, level: str = "INFO"):
-        """統一ログ出力関数"""
+    def log_to_ui(self, message: str, level: str = "INFO", silent_override: bool = False):
+        """統一ログ出力関数
+
+        [S05] silent_override を引数として受け取る。以前はこの関数の引数にも
+        モジュールにも silent_override が無いまま下の条件で参照しており、
+        state.silent_mode が False の間は短絡評価で到達しないため休眠して
+        いたが、set_silent_mode(True) を呼んだ瞬間に log_to_ui の全呼び出しが
+        NameError になる状態だった。無人実行で静かに壊れる形のため、
+        log_message と同じ引数の形に揃えて解消する。
+        """
         if state.silent_mode and not silent_override:
             return
 

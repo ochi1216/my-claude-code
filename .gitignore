@@ -3,3 +3,43 @@ __pycache__/
 
 # 実行時に生成されるログ（計測ログ glasp_measure.log を含む）
 *.log
+logs/
+
+# ------------------------------------------------------------
+# 秘密情報。絶対にコミットしない。
+# config.json には Gemini と OpenAI の APIキーが平文で入る。
+# 設定項目の書き方は config.example.json を参照。
+# credentials / token 系は YouTube Data API の OAuth 資格情報。
+# ------------------------------------------------------------
+config.json
+credentials.json
+credentials_project2.json
+token.pickle
+token_project2.pickle
+
+# ------------------------------------------------------------
+# PCごとに異なる実行時の状態・キャッシュ・ユーザーデータ。
+# コミットすると、別PCの状態を上書きして事故になる。
+# ------------------------------------------------------------
+learned_channels.json
+rate_limit_state.json
+summary_database.json
+overview_cache_daily.json
+overview_cache_weekly.json
+registered_videos.json
+quota_usage.json
+yt_ranker.db
+
+# Youtube_List_Setup.py が既定値から自動生成する設定群。
+# playlists.json / channel_rules.json / filter_settings.json /
+# system_config.json / video_cache.json が入る。削除しても再生成される。
+config/
+
+# 実行中のみ存在するロックファイル
+# glasp_suspended.lock は確認画面の待機中だけ、youtube_tool.lock は実行中だけ存在する。
+*.lock
+
+# 既定の出力先。通常は環境変数 YT_SUMMARY_OUTPUT_DIR または
+# config.json の paths.output_dir が共有 Summary フォルダを指すため使われないが、
+# 両方とも未設定のときにここへ出力される。
+output/
