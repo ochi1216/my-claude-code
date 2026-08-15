@@ -2,7 +2,7 @@
 """
 storage.py
 学びジャーナル - Excel(SharePoint同期フォルダ)読み書きモジュール
-Version: 0.10.0
+Version: 0.11.0
 """
 
 import os
@@ -876,6 +876,45 @@ def get_sub_item_master(path: str = EXCEL_PATH) -> dict:
 
     print(f"📋 中項目マスタを取得しました（{len(rows)}件）")
     return result
+
+
+def get_last_other_comment(tag: str, path: str = EXCEL_PATH) -> str:
+    """
+    指定タグで直近に使われた「Other」（中項目の自由記述）の内容を返す。
+    無ければ空文字列。
+
+    「同じ作業を続けているなら書き換えなくていい、変えたいときだけ書き換える」
+    という運用にするため、ポップアップで「Other」を選んだ時にこの値を
+    初期表示するのに使う（読み取り専用。書き込みは行わない）。
+
+    TimeLogシートを新しい行から遡り、そのタグのプリセット中項目（"Other"
+    というラベル自体を含む）のどれにも一致しない値を「実際に自由記述された
+    内容だった」とみなす。自由記述が一度も無ければ空文字列を返す。
+
+    Args:
+        tag: 対象タグ名
+        path: Excelファイルパス
+
+    Returns:
+        str: 直近の自由記述内容（無ければ空文字列）
+    """
+    ensure_workbook_exists(path)
+    wb = _load_with_retry(path)
+    if TIMELOG_SHEET not in wb.sheetnames:
+        return ""
+
+    preset_labels = set(get_sub_item_master(path).get(tag, []))
+
+    ws = wb[TIMELOG_SHEET]
+    for row in reversed(list(ws.iter_rows(min_row=2, values_only=True))):
+        row_tag = row[2] if len(row) > 2 else None
+        sub_item = row[3] if len(row) > 3 else None
+        if row_tag != tag or not sub_item:
+            continue
+        if sub_item in preset_labels:
+            continue
+        return sub_item
+    return ""
 
 
 def add_action(content: str, tag: str = "", origin: str = "manual",
