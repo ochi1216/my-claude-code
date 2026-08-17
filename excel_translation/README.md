@@ -4,9 +4,9 @@ Excelファイル(`.xlsx` / `.xlsm` / `.xls`)のセルをGemini APIで翻訳し�
 
 ## 最新版
 
-`excel_translation_20260812_01.py`
+`excel_translation_20260817_01.py`
 
-バージョンごとの変更点は [`CHANGELOG.md`](CHANGELOG.md) を参照。旧版(`excel_translation_20260616_03.py`)は削除せず残してある。
+バージョンごとの変更点は [`CHANGELOG.md`](CHANGELOG.md) を参照。旧版(`excel_translation_20260616_03.py` / `excel_translation_20260812_01.py`)は削除せず残してある。
 
 ## セットアップ
 
@@ -32,7 +32,7 @@ PythonScripts\
 │   └── gemini_client.py
 └── excel\
     └── excel_transrate\
-        └── excel_translation_20260812_01.py
+        └── excel_translation_20260817_01.py
 ```
 
 `GEMINI_COMMON_DIR` 未設定時は、スクリプトから見て 1つ上 → 2つ上 → 3つ上 の順に
@@ -59,7 +59,7 @@ PythonScripts\
 ## 実行
 
 ```
-python excel_translation_20260812_01.py
+python excel_translation_20260817_01.py
 ```
 
 翻訳対象のExcelファイルは事前に閉じておくこと。出力は
@@ -69,7 +69,7 @@ python excel_translation_20260812_01.py
 ## テスト
 
 ```
-python tests/test_excel_translation_20260812_01.py
+python tests/test_excel_translation_20260817_01.py
 ```
 
 偽の `gemini_client` を `sys.modules` へ注入し、`generate_advanced()` へ渡るpayloadと
