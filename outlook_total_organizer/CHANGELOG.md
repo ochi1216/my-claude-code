@@ -1,5 +1,40 @@
 # CHANGELOG — outlook_total_organizer
 
+## VERSION 20260817_04
+
+### 追加・修正
+	**`_03`の左右分割配置が実機で全く効いていなかった不具合を修正**。ユーザーから実際の起動ログをご提供いただき、原因を確定できた。
+	```
+	Outlookウィンドウ配置エラー: (-2147352567, '例外が発生しました。', (4096, 'Microsoft Outlook',
+	'最大化または最小化されているため、エクスプローラーまたはインスペクターのサイズまたは位置を変更できません。', ...))
+	```
+	`_03`では`explorer.WindowState = 0`を設定した**直後**に`explorer.Left = ...`を設定していたが、Outlook内部ではWindowStateの変更が実際のウィンドウへ反映されるまでにわずかな遅延があり、その間は依然として「最大化中」として扱われるため、直後のLeft設定がCOM例外を投げていた。この例外は`arrange_outlook_window`全体を囲む`try/except`でまとめて捕捉され、関数全体がそこで中断していたため、**Outlookは一度も位置・サイズを変更されていなかった**。実機で報告された「タスクバーに隠れる」「全画面のまま」「重なる」の3症状のうち、少なくとも後者2つ(Outlookが全画面のまま・重なる)はこれで完全に説明がつく。
+	修正として`_apply_explorer_geometry`を新設し、(1)`WindowState`/`Left`/`Top`/`Width`/`Height`の各プロパティ設定を個別に例外捕捉してリトライする(1つのプロパティの一時的な失敗が他のプロパティの設定を巻き添えで止めないようにする)、(2)`WindowState`については設定後、読み取り値が実際に0になった(=変更がOutlook内部で反映された)のを確認してから`Left`/`Top`/`Width`/`Height`を設定する、という2点で対応した。
+	あわせて、`get_primary_work_area`（タスクバーを除いた作業領域の取得）と`set_process_dpi_aware`（DPI Awareness設定）が失敗した場合に**これまで無言で握りつぶしていた点を、`print`でコンソールに理由を出力するよう変更**した。「タスクバーに隠れる」症状については今回の実機ログにエラーが出ていなかった(＝別要因の可能性が高い)ため、次回実機確認時にこの症状が再現した場合、コンソールログから原因を切り分けられるようにした。あわせて起動時に画面配置の計算結果(work area取得成否・本ツール/Outlookそれぞれの配置座標)を`print`するようにした。
+
+### 変更関数
+	`OutlookMailManager.arrange_outlook_window`（Explorerへの位置・サイズ設定を`_apply_explorer_geometry`呼び出しに置き換え）
+	`set_process_dpi_aware`（失敗時に理由を`print`するよう変更。ロジック自体は変更なし）
+	`get_primary_work_area`（失敗時に理由を`print`するよう変更。ロジック自体は変更なし）
+	`MailManagerGUI.__init__`（起動時に画面配置の計算結果を`print`するログを追加）
+
+### 新規追加：
+	メソッド `OutlookMailManager._apply_explorer_geometry(self, explorer, left, top, width, height, timeout_seconds=10.0)`
+
+### 削除：
+	なし
+
+変更ファイル：
+	`outlook_total_organizer_20260817_04.py`（`_20260817_03`からのコピー＋今回の変更。`_20260817_03`はそのまま残置）
+
+変更しないこと（宣誓）：
+	`show_thread_in_explorer`（件名クリックでのOutlook検索遷移）や、`arrange_outlook_window`の起動待ちポーリング・work area/gap/DPIの計算式自体には触れていない(`_03`のロジックを変更したのは、位置・サイズの「適用のしかた」のみ)。
+
+動作確認時の注意：
+	本ツールはWindows専用（win32com/ctypes.windll依存）のため、本セッションの実行環境（Linuxコンテナ）では`ctypes.windll`自体が存在せず、実際のCOM呼び出しは検証できていない。`python3 -m py_compile`による構文チェック、`_20260817_03`との`diff`で変更範囲が今回の追加分のみであることを確認済み。
+	Outlook非依存のスタンドアロン`python3`ハーネスで、**実際にユーザーから提供いただいたエラーメッセージと同一のCOM例外**を再現する偽Explorer(WindowStateの反映に遅延があり、反映前にLeft/Top/Width/Heightへ代入すると実機同様の例外を投げる)を用意し、`_apply_explorer_geometry`および`arrange_outlook_window`全体が、この例外が発生する状況でも最終的に正しくWindowState=0・指定位置へたどり着くことを検証し合格した。`_03`時点の回帰テスト(work area・gap・DPI関連)も再実行し、合格を維持していることを確認した。またLinux環境で`get_primary_work_area`/`set_process_dpi_aware`の失敗理由が実際に`print`されることも確認した(Windows API自体が存在しないため、これは意図した「失敗時のログ出力」機能自体の動作確認であり、実機での成功ケースの確認ではない)。
+	実機（Windows＋Outlook）でのご確認が必須: (1)Outlookが最大化されずに起動し、手動での解除操作が不要になること。(2)本ツールとOutlookの間に隙間ができ、重ならないこと。(3)本ツールの下部がタスクバーに隠れないこと(もし今回も再現する場合、起動時のコンソールログに`🖥 画面配置: work_area(取得=...)`という行が出力されるはずなので、そのログを共有いただきたい。「取得=失敗」となっていれば`get_primary_work_area`側の問題、「取得=成功」なのに隠れる場合は別要因(work areaの値自体は正しいが座標系がずれている等)を疑う必要がある)。(4)コンソールに`Outlookウィンドウ配置エラー`が出力されないこと(出力される場合は新しいエラー内容を共有いただきたい)。
+
 ## VERSION 20260817_03
 
 ### 追加・修正
