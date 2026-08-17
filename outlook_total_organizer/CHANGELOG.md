@@ -1,5 +1,34 @@
 # CHANGELOG — outlook_total_organizer
 
+## VERSION 20260817_02
+
+### 追加・修正
+	**起動時にメイン画面を左右分割し、左半分に本ツール・右半分にOutlookを自動配置する機能を追加**。ユーザーからのご依頼: 「Outlookが起動していればOutlookを右半分、起動していなければ起動して右半分、本ツールを左半分に配置する起動シーケンス」。
+	Outlookの起動要否判定は明示的なプロセス存在チェックを行わず、`win32com.client.Dispatch("Outlook.Application")`が「未起動なら起動し、起動済みなら既存インスタンスを返す」という標準のCOM Dispatch挙動を持つことを利用し、起動済み/未起動のどちらでも同じコードパスで扱う設計にした（分岐ロジックを自前で持たない分、シンプルで取りこぼしが無い）。
+	起動直後はOutlookのCOMサーバーへの応答や`ActiveExplorer()`の取得が一時的に失敗しうるため、`arrange_outlook_window`内で最大20秒(既定)のポーリングリトライを行う。Explorerウィンドウが最大化/最小化中は`Left`/`Top`/`Width`/`Height`の設定が反映されないため、先に`WindowState = 0`(通常ウィンドウ)へ戻してから位置・サイズを設定している。
+	本ツール自身のウィンドウは`self.root.winfo_screenwidth()`/`winfo_screenheight()`でメイン画面の解像度を取得し、その左半分(`x=0`起点)へ`geometry()`で配置する。従来の固定サイズ`"1100x750"`はこれに置き換えた。
+	Outlook側の起動・COM操作は数秒〜十数秒かかりうるため、本ツールのウィンドウ表示を妨げないよう、Outlookの配置処理はワーカースレッド(`threading.Thread(daemon=True)`)で実行する(既存の`_gen`等と同じ、COM呼び出しでGUIを固めない設計方針を踏襲)。
+
+### 変更関数
+	`MailManagerGUI.__init__`（`self.root.geometry("1100x750")`の固定値指定を、画面解像度から算出した左半分への配置に変更。Outlookの右半分配置をワーカースレッドで起動する処理を追加）
+
+### 新規追加：
+	メソッド `OutlookMailManager.arrange_outlook_window(self, left, top, width, height, wait_seconds=20.0) -> bool`
+
+### 削除：
+	なし
+
+変更ファイル：
+	`outlook_total_organizer_20260817_02.py`（`_20260817_01`からのコピー＋今回の変更。`_20260817_01`はそのまま残置）
+
+変更しないこと（宣誓）：
+	`show_thread_in_explorer`（件名クリックでのOutlook検索遷移）や、Outlookのメール取得・検索・要約系のロジックには一切触れていない。既存の起動時処理（設定読み込み・ローカルサーバー起動・Gemini関連の初期化順序）の順序自体も変更していない。
+
+動作確認時の注意：
+	本ツールはWindows専用（win32com依存）のため、本セッションの実行環境（Linuxコンテナ）ではOutlook実機・実際のマルチウィンドウ配置での動作検証ができていない。`python3 -m py_compile`による構文チェック、`_20260817_01`との`diff`で変更範囲が今回の追加分のみであることを確認済み。
+	Outlook非依存のスタンドアロン`python3`ハーネス(win32com/pythoncom/tkinterをスタブ化)で、`arrange_outlook_window`について以下を検証し全て合格した: (1)Outlookが既に起動している場合、`ActiveExplorer()`で取得したExplorerに指定どおりの`WindowState`/`Left`/`Top`/`Width`/`Height`が設定され`Activate()`が呼ばれること、(2)未起動の場合、`GetDefaultFolder`→`GetExplorer`→`Display`経由で取得したExplorerに同様に位置が設定されること、(3)起動直後の一時的なCOM例外(`GetNamespace`失敗)が発生しても、タイムアウト内であればリトライの末に成功すること、(4)常に失敗し続ける異常系ではタイムアウト後に例外を外へ投げずFalseを返すこと。また`MailManagerGUI.__init__`のソースコードを検証し、画面幅の半分を計算して自ウィンドウを左半分(`x=0`)に配置していること、Outlookの配置処理がデーモンスレッドで実行され自ウィンドウの表示をブロックしないこと、Outlookには正しく右半分の座標(`left_w, 0, screen_w-left_w, screen_h`)が渡されることを確認した。
+	実機（Windows＋Outlook）でのご確認をお願いしたい点: (1)Outlook未起動の状態から本ツールを起動し、Outlookが自動的に起動したうえで画面右半分に配置されること。(2)Outlookが既に起動している状態(複数ウィンドウが開いている場合を含む)から本ツールを起動し、アクティブなExplorerウィンドウが右半分に移動すること。(3)本ツール自身のウィンドウが画面左半分に正しいサイズで表示されること。(4)マルチモニター環境で、意図した「メイン画面」（プライマリディスプレイ）に配置されるか（`winfo_screenwidth`/`winfo_screenheight`はプライマリディスプレイの解像度を返す想定だが、環境によって挙動が異なる可能性があるため要確認）。(5)Outlookの起動に20秒以上かかる遅い環境で、タイムアウトにより配置がスキップされないか（スキップされた場合はOutlookは通常どおり起動するが位置調整だけ行われない）。
+
 ## VERSION 20260817_01
 
 ### 追加・修正
