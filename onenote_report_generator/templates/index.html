@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>OneNote Report Generator 20260729_02_01</title>
+    <title>OneNote Report Generator 20260815_01</title>
     <style>
         body { font-family: 'Segoe UI', Meiryo, sans-serif; margin: 0; background: #f0f2f5; }
         .container { max-width: 800px; margin: 40px auto; background: white; border-radius: 8px; padding: 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
@@ -49,7 +49,7 @@
 <body>
 <div class="container">
     <h1>📓 OneNote Report Generator</h1>
-    <small>VERSION 20260729_02_01</small>
+    <small>VERSION 20260815_01</small>
 
     <div class="auth-box" id="authBox">
         <strong>🔐 認証状態：</strong><span id="authStatus">確認中...</span>
@@ -59,7 +59,9 @@
     <div id="mainForm">
         <!-- ブックマーク復元バー（VERSION 20260529_01_01追加） -->
         <div class="bm-bar">
-            <select id="bmSelect" onchange="onBmSelectChange()">
+            <!-- VERSION 20260815_01: 認証完了前の復元失敗を防ぐため、初期状態は無効。
+                 setAuthenticated() で認証＋サイト一覧の読み込み完了後に有効化する -->
+            <select id="bmSelect" onchange="onBmSelectChange()" disabled>
                 <option value="">📌 ブックマークを選択して復元...</option>
             </select>
             <button class="btn btn-bm-del" id="bmDeleteBtn"
@@ -183,11 +185,18 @@ async function pollAuth() {
     }
 }
 
-function setAuthenticated() {
+// VERSION 20260815_01: async化し、サイト一覧の読み込み完了を待ってから
+// ブックマーク復元を許可する。
+// 従来は window.onload が checkAuth() と loadBookmarks() を同時に走らせており、
+// 認証（MSALのトークン更新でネットワーク往復が発生する）が終わる前に
+// ブックマークを選ぶと、サーバー側の _token がまだ空のため
+// /api/notebooks が {"error":"未認証"} を返して復元に失敗していた。
+async function setAuthenticated() {
     document.getElementById('authBox').classList.add('ok');
     document.getElementById('authStatus').textContent = '認証済み ✅';
     document.getElementById('authCode').style.display = 'none';
-    loadSites();
+    await loadSites();
+    document.getElementById('bmSelect').disabled = false;
 }
 
 async function loadSites() {
@@ -417,15 +426,28 @@ function onBmSelectChange() {
 }
 
 // VERSION 20260706_01_01: Array.isArrayガードを3箇所追加
-async function restoreBookmark(bm) {
-    const TIMEOUT_MS = 10000;
+// VERSION 20260815_01: 初回復元が必ず失敗する問題への対策
+//   - タイムアウトを10秒→60秒へ延長。OneNote Graph APIは、しばらく
+//     アクセスしていないノートブックへの初回リクエストに10〜30秒以上かかる
+//     ことがあり、10秒では足りていなかった（手動でドロップダウンを操作する
+//     経路にはタイムアウトが無いため、そちらは成功していた）
+//   - 失敗時に自動で1回だけ再試行する。ユーザーが選び直す操作を不要にする
+async function restoreBookmark(bm, attempt) {
+    attempt = attempt || 1;
+    const MAX_ATTEMPTS = 2;
+    const TIMEOUT_MS   = 60000;
 
+    // 注: あえて AbortController でリクエストを中断していない。
+    // タイムアウト後も裏で走り続けるリクエストが OneNote 側のキャッシュを
+    // 暖めるため、再試行が成功しやすくなる。読み取り専用のGETなので副作用はない。
     function fetchWithTimeout(url, opts) {
         opts = opts || {};
         return Promise.race([
             fetch(url, opts),
             new Promise(function(_, rej) {
-                setTimeout(function() { rej(new Error('タイムアウト (10秒)')); }, TIMEOUT_MS);
+                setTimeout(function() {
+                    rej(new Error('タイムアウト (' + (TIMEOUT_MS / 1000) + '秒)'));
+                }, TIMEOUT_MS);
             })
         ]);
     }
@@ -511,7 +533,17 @@ async function restoreBookmark(bm) {
         showToast('✅ 「' + bm.label + '」を復元しました');
 
     } catch(e) {
-        // 失敗時: UIをクリア状態に戻す
+        console.error('[BM] restoreBookmark失敗 (試行 ' + attempt + '/' + MAX_ATTEMPTS + '):', e);
+
+        // VERSION 20260815_01: 自動再試行。
+        // UIはクリアせずそのまま次の試行へ入る（クリアすると画面がちらつくため）
+        if (attempt < MAX_ATTEMPTS) {
+            showToast('⏳ 復元に失敗しました。自動で再試行します…（' + e.message + '）');
+            await new Promise(function(r) { setTimeout(r, 1500); });
+            return restoreBookmark(bm, attempt + 1);
+        }
+
+        // 再試行しても失敗: UIをクリア状態に戻す
         document.getElementById('siteSelect').value = '';
         currentSiteId = '';
         document.getElementById('notebookSelect').innerHTML =
@@ -527,8 +559,7 @@ async function restoreBookmark(bm) {
         document.getElementById('bmSaveBtn').disabled   = true;
         document.getElementById('bmSelect').value = '';
         document.getElementById('bmDeleteBtn').disabled = true;
-        showToast('❌ 復元失敗: ' + e.message, true);
-        console.error('[BM] restoreBookmark失敗:', e);
+        showToast('❌ 復元失敗: ' + e.message + '（' + MAX_ATTEMPTS + '回試行しました）', true);
     }
 }
 

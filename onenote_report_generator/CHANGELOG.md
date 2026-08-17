@@ -1,3 +1,63 @@
+## VERSION 20260815_01
+
+### 追加・修正
+ブックマーク復元が**初回は必ず失敗し、同じブックマークを選び直すと成功する**という
+事象への対策。原因を1つに断定せず、考えられる2つの原因の**両方に効く対策**を入れた。
+
+**対策① タイムアウトを10秒 → 60秒へ延長**
+
+`restoreBookmark` だけが `fetchWithTimeout`（10秒）を使っており、手動でドロップダウンを
+操作する経路（`loadNotebooks` / `loadSections` / `loadPages`）にはタイムアウトが無い。
+「ブックマークだけ失敗し、手動操作なら成功する」という非対称性は、この差で説明できる。
+OneNote Graph API は、しばらくアクセスしていないノートブックへの初回リクエストに
+10〜30秒以上かかることがあり、10秒では足りていなかった。
+
+**対策② 失敗時に自動で1回だけ再試行**
+
+ユーザーが選び直す操作を不要にした。再試行中はUIをクリアせず（画面のちらつき防止）、
+2回とも失敗した場合のみUIをクリアして失敗表示する。失敗トーストには試行回数を表示する。
+
+**対策③ 認証完了前はブックマーク選択を無効化**
+
+`window.onload` が `checkAuth()` と `loadBookmarks()` を同時に走らせているため、
+認証（MSALのトークン更新でネットワーク往復が発生する）が完了する前にブックマークを
+選ぶと、サーバー側の `_token` がまだ空で `/api/notebooks` が `{"error":"未認証"}` を
+返して失敗する競合があった。`bmSelect` の初期状態を `disabled` とし、
+`setAuthenticated()` でサイト一覧の読み込み完了を待ってから有効化するようにした。
+
+### 設計上の判断
+- **あえて `AbortController` でリクエストを中断していない。** タイムアウト後も裏で
+  走り続けるリクエストが OneNote 側のキャッシュを暖めるため、再試行が成功しやすくなる。
+  読み取り専用のGETなので副作用はない。
+
+### 変更関数
+- `setAuthenticated` （async化し、`loadSites()` 完了後に `bmSelect` を有効化）
+- `restoreBookmark` （`attempt` 引数を追加、タイムアウト60秒、catch節に自動再試行を追加）
+
+### 新規追加
+- なし
+
+### 変更ファイル
+- templates/index.html のみ（**Python本体は変更なし**。引き続き
+  `onenote_report_generator_20260812_02.py` を使用する）
+
+### 動作確認時の注意
+- 実物のJavaScriptをDOMスタブ・モックfetch上で実行して検証（全13項目合格）。
+  検証済み：初期状態で `bmSelect` が無効であること／`setAuthenticated()` 完了後に
+  有効化されること／1回目が失敗しても自動再試行して最終的に成功すること／
+  2回とも失敗した場合のみUIをクリアすること／タイムアウトが60秒であること。
+- **実機での確認は未実施。** 特に「実際に初回から成功するようになったか」は
+  OneNote Graph API の実応答時間に依存するため、実機での確認が必要。
+- 60秒待っても失敗する場合は、原因がタイムアウトではない可能性が高い。その場合は
+  ブラウザの開発者ツール（F12）のConsoleタブに出る
+  `[BM] restoreBookmark失敗 (試行 n/2)` のログを確認すること。
+
+### 変更しないこと（宣誓）
+- Python側の全コード（`onenote_report_generator_20260812_02.py`）
+- `loadBookmarks` / `saveBookmark` / `deleteBookmark` / `showToast`
+- `loadNotebooks` / `loadSections` / `loadPages` / `updatePageRange` / `startGenerate`
+- `restoreBookmark` の try 節の中身（①〜④の取得順序・`Array.isArray` ガード）
+
 ## VERSION 20260812_02
 
 ### 追加・修正
