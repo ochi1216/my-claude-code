@@ -20,3 +20,14 @@ onenote_report_generator/token_cache.bin
 onenote_report_generator/bookmarks.json
 onenote_report_generator/bookmarks.json.bak
 onenote_report_generator/reports/*.html
+
+# R19 Site Organizer のローカル設定・認証キャッシュ・実行時生成物
+# sites_list_*.json / quick_links_*.json には実際のサイト名・サイトID・URLが
+# 記録されるため、社内情報保護の観点からリポジトリには含めない（*.example.jsonのみコミット）。
+r19_site_organizer/config.json
+r19_site_organizer/token_cache.json
+r19_site_organizer/download_prefs.json
+r19_site_organizer/site_registry.json
+r19_site_organizer/cache/
+r19_site_organizer/sites_list_*.json
+r19_site_organizer/quick_links_*.json

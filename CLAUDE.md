@@ -12,6 +12,7 @@
 現在管理しているツール（未確認＝本セッションで内容を精査していないもの）：
 
 - `onenote_report_generator/` — OneNote議事録の自動要約レポート生成（本セッションで新規導入）
+- `r19_site_organizer/` — SharePointサイトのフォルダツリー閲覧・ダウンロード（社内Windows PC運用ツールから本セッションで移管）
 - `po_database_organizer/` — SharePoint PO書類のカタログ化（未確認）
 - `rtocs_organizer/` — BBT RTOCS Organizer（未確認）
 - `shareflex_dashboard/` — Shareflex Document Dashboard（未確認）

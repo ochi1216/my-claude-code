@@ -32,6 +32,11 @@ Outlookメール解析・アクションダッシュボードツール。詳細�
 
 セットアップ手順は [`word_translator/README.md`](word_translator/README.md) を参照。
 
+## R19 Site Organizer（R19 SharePoint Portal）
+
+SharePointサイトのフォルダ構成をツリー表示・ダウンロードできるツール。セットアップ手順は
+[`r19_site_organizer/README.md`](r19_site_organizer/README.md) を参照。
+
 ## RSS Organizer（`ochi1216/home-pc-workspace` へ移管済み）
 
 > **⚠️ このプロジェクトは 2026-08-13 に [`ochi1216/home-pc-workspace`](https://github.com/ochi1216/home-pc-workspace) の `rss-organizer/` へ移管しました。以後の開発は移管先で行います。**

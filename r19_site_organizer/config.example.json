@@ -1,0 +1,16 @@
+{
+  "_comment": "このファイルをコピーして config.json を作成すること。config.json はGitにコミットしないこと（.gitignoreで除外済み）",
+  "tenant_id": "<YOUR_TENANT_ID>",
+  "client_id": "<YOUR_CLIENT_ID>",
+  "token_cache_path": "token_cache.json",
+  "site_host": "nexperia.sharepoint.com",
+  "site_path": "/sites/PSBGRD",
+  "max_items_per_folder": 200,
+  "max_deep_files_per_folder": 200,
+  "max_deep_folders_per_folder": 100,
+  "human_loop_interval": 30,
+  "file_protocol_map": {},
+  "_unused_legacy_keys_comment": "以下2キーは現行コード（r19_site_organizer_20260817_01.py）内で参照箇所なし。旧config.jsonからの引き継ぎのため残しているが未確認・削除しても動作に影響しないと思われる",
+  "target_page": "Home.aspx",
+  "depth_limit": 3
+}
