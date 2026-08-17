@@ -1,5 +1,36 @@
 # CHANGELOG — outlook_total_organizer
 
+## VERSION 20260817_03
+
+### 追加・修正
+	**起動時の左右分割配置(`_02`で追加)について、実機確認で報告された3件の不具合を修正**。
+	(1) **本ツール下部がタスクバーに隠れる**: `_02`では`winfo_screenwidth()`/`winfo_screenheight()`でディスプレイの物理解像度全体を取得し、その高さをそのままウィンドウ高さに使っていたため、タスクバーの高さ分だけ下部がはみ出していた。`SystemParametersInfoW(SPI_GETWORKAREA, ...)`でタスクバー等を除いた「作業領域(work area)」を取得し、本ツール・Outlookどちらもこの作業領域の高さに合わせるよう変更した。取得に失敗した場合は従来どおり画面全体へフォールバックする。
+	(2) **Outlookが全画面(最大化)で起動され、手動で解除する手間が発生する**: `arrange_outlook_window`では`WindowState = 0`(通常ウィンドウ)を設定した直後にLeft/Top/Width/Heightを設定していたが、実機ではその「後」にOutlook自身が前回終了時のウィンドウ状態(最大化)を非同期に復元してしまい、こちらの設定が上書きされる事象が発生していたと考えられる。設定後0.5秒間隔で最大4回、`WindowState`/`Left`/`Top`/`Width`/`Height`が意図した値からずれていないか確認し、ずれていれば再設定するリトライを追加した。
+	(3) **本ツールとOutlookの間に隙間が欲しいが、重なってしまっている**: 単純な画面幅の半分(`screen_w // 2`)で境界を分けていたため隙間が無かった点に加え、**ディスプレイの拡大率(DPI スケーリング)が100%以外の環境では、Python(Tkinter)側が認識する座標とOutlook(DPI Aware)側が認識する座標がずれ、意図せず重なって見えていた可能性がある**。この対策として、`tk.Tk()`生成前に`SetProcessDpiAwareness`(またはフォールバックで`SetProcessDPIAware`)を呼び、本プロセスをOutlookと同じ実ピクセル座標系で動作させるようにした。あわせて`WINDOW_SPLIT_GAP`(既定12px)を新設し、本ツールの右端とOutlookの左端の間に明示的な隙間を空けるよう配置計算を変更した。
+
+### 変更関数
+	`MailManagerGUI.__init__`（画面全体ではなく作業領域(work area)を基準に左右配置を計算するよう変更。`WINDOW_SPLIT_GAP`による隙間を追加。`tk.Tk()`生成前に`set_process_dpi_aware()`を呼ぶよう追加）
+	`OutlookMailManager.arrange_outlook_window`（初回の位置設定後、Outlook自身による状態復元で位置がずれていないか確認し、ずれていれば再設定するリトライ処理を追加）
+
+### 新規追加：
+	関数 `set_process_dpi_aware`（本プロセスをDPI Awareにする。失敗しても例外を投げない）
+	関数 `get_primary_work_area`（タスクバー等を除いたプライマリモニターの作業領域を取得。失敗時はNone）
+	クラス属性 `MailManagerGUI.WINDOW_SPLIT_GAP`（本ツールとOutlookの間の隙間、既定12px）
+
+### 削除：
+	なし
+
+変更ファイル：
+	`outlook_total_organizer_20260817_03.py`（`_20260817_02`からのコピー＋今回の変更。`_20260817_02`はそのまま残置）
+
+変更しないこと（宣誓）：
+	`show_thread_in_explorer`（件名クリックでのOutlook検索遷移）や、`arrange_outlook_window`の起動判定ロジック(Dispatchの標準挙動に任せる方式)自体は変更していない。メール取得・検索・要約系のロジックにも触れていない。
+
+動作確認時の注意：
+	本ツールはWindows専用（win32com/ctypes.windll依存）のため、本セッションの実行環境（Linuxコンテナ）では`ctypes.windll`自体が存在せず、DPI Awareness設定・work area取得のWindows API呼び出し自体は実行できていない。`set_process_dpi_aware`/`get_primary_work_area`が例外を握りつぶし安全にフォールバックすることのみLinux上で確認した。`python3 -m py_compile`による構文チェック、`_20260817_02`との`diff`で変更範囲が今回の追加分のみであることを確認済み。
+	Outlook非依存のスタンドアロン`python3`ハーネスで、(a)work area・隙間(gap)を用いた配置計算式を実際の数値例(1920x1040相当)で検証し、本ツールとOutlookの間に指定どおり12pxの隙間ができ重ならないこと、Outlookの右端が作業領域を超えないこと、(b)Outlook自身が起動直後に最大化状態を復元してしまうケースを模擬したうえで、`arrange_outlook_window`のリトライにより最終的に通常ウィンドウ・指定位置へ戻ること、を検証し全て合格した。既存の`show_thread_in_explorer`関連テストも再実行し、合格を維持していることを確認した。
+	実機（Windows＋Outlook）でのご確認が必須: (1)本ツールの下部がタスクバーに隠れず全体が表示されること。(2)Outlookが最大化されずに起動し、手動での解除操作が不要になること(特にOutlookが完全に未起動の状態からの起動で確認いただきたい。今回のリトライは最大2秒間・4回分のみのため、環境によってはこの時間内に状態復元が起きない/間に合わない可能性がある)。(3)本ツールとOutlookの間に少し隙間ができ、重ならないこと。ディスプレイの拡大率(100%/125%/150%等、設定は「ディスプレイの詳細設定」で確認可能)によって見え方が変わりうるため、可能であれば拡大率の異なる環境でもご確認いただきたい。(4)マルチモニター環境での「プライマリモニター」の扱いが意図通りか。
+
 ## VERSION 20260817_02
 
 ### 追加・修正
