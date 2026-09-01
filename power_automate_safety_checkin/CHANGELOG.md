@@ -62,9 +62,13 @@
   拠点→通知先の解決は、ループ内でSwitchや変数を使わずに済むよう、先頭の`CMP_Site_Map`で
   作った対応表をキー参照する方式にした。被災者数はWDLに`filter`関数が無いため
   「配列のフィルター」アクション(`type: Query`)で絞ってから数えている。**実機未検証。**
-- **未回答(タイムアウト)の受け皿`CMP_No_Response`を追加。** 実際の訓練では時間内に
-  回答しない人が必ずいるため、それでループ全体が失敗にならないようにする。
-  `runAfter`は`TimedOut`のみとし、本物の失敗は表に出るようにしてある。
+- **未回答(タイムアウト)でループが失敗しないよう、待機アクションの後続を条件1つに
+  まとめた。** 当初は後続を2つに分けて片方を`runAfter=TimedOut`で受けたが、実機では
+  タイムアウト時に`ActionFailed. No dependent actions succeeded.`でループ全体が
+  失敗した(受け皿は成功していたが、もう一方がスキップのまま残るとスコープが失敗判定に
+  なる)。`CHK_Responded`(runAfter=[Succeeded,TimedOut])で受け、その中で
+  `actions('TM_Post_CheckIn_Card')?['status']`を見て回答あり/未回答に分岐する。
+  `Failed`は受けないため、本物の失敗は引き続きフローの失敗として表に出る。
 - `responseTimeout` / `loopConcurrency` / `summaryIntervalMinutes` を設定で
   変えられるようにした。生成対象のフローは`workflowIds`に載っているものだけになる。
 - 検証用の架空拠点`NARA`(検証者1名のみ所属)を導入。実在拠点の名簿に触れずに

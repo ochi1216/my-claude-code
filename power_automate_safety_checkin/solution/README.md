@@ -114,15 +114,36 @@ pac solution import --environment <ENV_ID> --path .\EQSafetyCheckin.zip
 
 ## 未確認事項
 
-- 未回答(タイムアウト)時にイテレーションが正常終了するかは**未検証**。
-  `CMP_No_Response`(runAfter=TimedOut)で受けてループ全体が失敗しないようにしているが、
-  この受け方で本当に成功扱いになるかは実機で確認が必要。`responseTimeout`を
-  `PT1M`にして、回答せずに放置するテストで確認する。
+- 未回答(タイムアウト)時にループが正常終了するかは**再検証中**。詳細は下記。
 - `EQ05_Status_Summary_DEV`は**実機未検証**。
 - エラー処理(`SCOPE_Try`/`SCOPE_Catch`による`EQ_Received_Items`へのログ記録)は**未実装**。
   `EQ_Received_Items`の列内部名も未取得。
 - 実在拠点(OITA/OSAKA/TOKYO)での訓練は**未実施**。現状は架空拠点`NARA`でのみ検証している。
 - 3名結合テスト・18名訓練は未実施。
+
+## タイムアウト(未回答)の扱い
+
+実際の訓練では時間内に回答しない人が必ずいるため、それでフローが失敗しては困る。
+
+最初は待機アクションの後続を2つに分け、片方(`SP_Create_Response`)を
+`runAfter=Succeeded`、もう片方(受け皿のCompose)を`runAfter=TimedOut`にしていたが、
+**タイムアウト時にループ全体が失敗した**(実測)。エラーは
+`ActionFailed. An action failed. No dependent actions succeeded.`。
+受け皿自体は成功していたが、もう一方がスキップのまま残るとスコープが失敗と判定される。
+
+このため、**待機アクションの後続を`CHK_Responded`という条件1つにまとめ**、
+その中で回答あり/未回答に分岐する構造へ変更した。
+
+```
+TM_Post_CheckIn_Card (待機, limit.timeout)
+  └─ CHK_Responded  runAfter: [Succeeded, TimedOut]
+       条件: actions('TM_Post_CheckIn_Card')?['status'] == 'Succeeded'
+       ├─ はい: SP_Create_Response → CHK_Affected → 上司通知
+       └─ いいえ: CMP_No_Response (記録のみ)
+```
+
+`runAfter`に`Failed`を含めていないのは意図的で、本物の失敗はこれまで通り
+フローの失敗として表に出す。
 
 ## EQ05での拠点→通知先の解決
 

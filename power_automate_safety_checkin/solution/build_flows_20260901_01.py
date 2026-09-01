@@ -306,6 +306,9 @@ def build_eq06(cfg, cards_dir):
         )
         manager_recipient = override if override else "@%s" % manager_email
 
+        # 回答あり/未回答の分岐は、待機アクションの後続を「1つ」にまとめる。
+        # 後続を2つに分けて片方をスキップさせると、タイムアウト時に
+        # 「ActionFailed. No dependent actions succeeded」でループ全体が失敗する。
         loop_actions = {
             "TM_Post_CheckIn_Card": teams_post_card_and_wait(
                 {
@@ -320,83 +323,108 @@ def build_eq06(cfg, cards_dir):
                 {},
                 response_timeout,
             ),
-            "SP_Create_Response": sp_action(
-                "PostItem",
-                {
-                    "dataset": site_url,
-                    "table": lists["EQ_Responses"],
-                    # EventIDと社員IDの組をキーにしておくと、後から集計・突合しやすい
-                    "item/%s" % col("EQ_Responses", "Title"): (
-                        "@concat(%s?['data']?['eventId'],'|',%s?['data']?['employeeId'])"
-                        % (resp, resp)
-                    ),
-                    "item/%s" % col("EQ_Responses", "EventID"): "@%s?['data']?['eventId']" % resp,
-                    "item/%s" % col("EQ_Responses", "EmployeeID"): (
-                        "@%s?['data']?['employeeId']" % resp
-                    ),
-                    # カード内のIDではなく、実際に回答した人のメールを記録する
-                    # (カードのdataは詐称されうるため。応答にはresponderが必ず入る)
-                    "item/%s" % col("EQ_Responses", "Email"): "@%s?['responder']?['email']" % resp,
-                    # 列が数値型のため、文字列で返る responseCode を変換する
-                    "item/%s" % col("EQ_Responses", "ResponseCode"): "@int(%s)" % code,
-                    "item/%s" % col("EQ_Responses", "SafetyStatus"): "@%s" % safety,
-                    "item/%s" % col("EQ_Responses", "WorkStatus"): "@%s" % work,
-                    "item/%s" % col("EQ_Responses", "RespondedAt"): "@%s?['responseTime']" % resp,
-                    # 空欄のInput.Textは応答に現れないため、既定値を用意する
-                    "item/%s" % col("EQ_Responses", "Comment"): "@%s" % comment,
-                    "item/%s" % col("EQ_Responses", "Revision"): 1,
-                },
-                {"TM_Post_CheckIn_Card": ["Succeeded"]},
-            ),
-            # タイムアウト(時間内に回答が無かった)は異常ではないので、
-            # ここで受けてイテレーションを正常終了させる。これが無いと
-            # 未回答者が1人いるだけでフロー全体が失敗になる。
-            "CMP_No_Response": {
-                "runAfter": {"TM_Post_CheckIn_Card": ["TimedOut"]},
-                "type": "Compose",
-                "inputs": {
-                    "result": "no response within timeout",
-                    "employeeId": "@items('LOOP_Each_Member')?['%s']"
-                    % col("EQ_Config_Members", "Title"),
-                    "eventId": "@outputs('CMP_EventID')",
-                },
-            },
-            "CHK_Affected": {
-                "runAfter": {"SP_Create_Response": ["Succeeded"]},
+            "CHK_Responded": {
+                # TimedOut(時間内に回答が無かった)は異常ではないので受ける。
+                # Failedは受けない。本物の失敗はそのまま表に出したいため。
+                "runAfter": {"TM_Post_CheckIn_Card": ["Succeeded", "TimedOut"]},
                 "type": "If",
-                "expression": {"and": [{"equals": ["@%s" % safety, "Affected"]}]},
+                "expression": {
+                    "and": [
+                        {
+                            "equals": [
+                                "@actions('TM_Post_CheckIn_Card')?['status']",
+                                "Succeeded",
+                            ]
+                        }
+                    ]
+                },
                 "actions": {
-                    "GET_Managers": sp_action(
-                        "GetItems",
+                    "SP_Create_Response": sp_action(
+                        "PostItem",
                         {
                             "dataset": site_url,
-                            "table": lists["EQ_Config_Members"],
-                            "$filter": manager_filter,
-                            "$orderby": "%s asc" % col(
-                                "EQ_Config_Members", "EscalationOrder"
+                            "table": lists["EQ_Responses"],
+                            # EventIDと社員IDの組をキーにしておくと、後から集計・突合しやすい
+                            "item/%s" % col("EQ_Responses", "Title"): (
+                                "@concat(%s?['data']?['eventId'],'|',%s?['data']?['employeeId'])"
+                                % (resp, resp)
                             ),
-                            "$top": 50,
+                            "item/%s" % col("EQ_Responses", "EventID"): (
+                                "@%s?['data']?['eventId']" % resp
+                            ),
+                            "item/%s" % col("EQ_Responses", "EmployeeID"): (
+                                "@%s?['data']?['employeeId']" % resp
+                            ),
+                            # カード内のIDではなく、実際に回答した人のメールを記録する
+                            # (カードのdataは詐称されうるため。応答にはresponderが必ず入る)
+                            "item/%s" % col("EQ_Responses", "Email"): (
+                                "@%s?['responder']?['email']" % resp
+                            ),
+                            # 列が数値型のため、文字列で返る responseCode を変換する
+                            "item/%s" % col("EQ_Responses", "ResponseCode"): "@int(%s)" % code,
+                            "item/%s" % col("EQ_Responses", "SafetyStatus"): "@%s" % safety,
+                            "item/%s" % col("EQ_Responses", "WorkStatus"): "@%s" % work,
+                            "item/%s" % col("EQ_Responses", "RespondedAt"): (
+                                "@%s?['responseTime']" % resp
+                            ),
+                            # 空欄のInput.Textは応答に現れないため、既定値を用意する
+                            "item/%s" % col("EQ_Responses", "Comment"): "@%s" % comment,
+                            "item/%s" % col("EQ_Responses", "Revision"): 1,
                         },
                         {},
                     ),
-                    "LOOP_Notify_Managers": {
-                        "runAfter": {"GET_Managers": ["Succeeded"]},
-                        "type": "Foreach",
-                        "foreach": "@body('GET_Managers')?['value']",
+                    "CHK_Affected": {
+                        "runAfter": {"SP_Create_Response": ["Succeeded"]},
+                        "type": "If",
+                        "expression": {"and": [{"equals": ["@%s" % safety, "Affected"]}]},
                         "actions": {
-                            "TM_Notify_Manager": teams_post_card(
+                            "GET_Managers": sp_action(
+                                "GetItems",
                                 {
-                                    "poster": "Flow bot",
-                                    "location": "Chat with Flow bot",
-                                    "body/recipient": manager_recipient,
-                                    "body/messageBody": manager_card,
+                                    "dataset": site_url,
+                                    "table": lists["EQ_Config_Members"],
+                                    "$filter": manager_filter,
+                                    "$orderby": "%s asc"
+                                    % col("EQ_Config_Members", "EscalationOrder"),
+                                    "$top": 50,
                                 },
                                 {},
-                            )
+                            ),
+                            "LOOP_Notify_Managers": {
+                                "runAfter": {"GET_Managers": ["Succeeded"]},
+                                "type": "Foreach",
+                                "foreach": "@body('GET_Managers')?['value']",
+                                "actions": {
+                                    "TM_Notify_Manager": teams_post_card(
+                                        {
+                                            "poster": "Flow bot",
+                                            "location": "Chat with Flow bot",
+                                            "body/recipient": manager_recipient,
+                                            "body/messageBody": manager_card,
+                                        },
+                                        {},
+                                    )
+                                },
+                            },
                         },
+                        "else": {"actions": {}},
                     },
                 },
-                "else": {"actions": {}},
+                "else": {
+                    "actions": {
+                        # 未回答も訓練の結果のひとつ。記録だけ残して正常終了させる
+                        "CMP_No_Response": {
+                            "runAfter": {},
+                            "type": "Compose",
+                            "inputs": {
+                                "result": "no response within timeout",
+                                "employeeId": "@items('LOOP_Each_Member')?['%s']"
+                                % col("EQ_Config_Members", "Title"),
+                                "eventId": "@outputs('CMP_EventID')",
+                            },
+                        }
+                    }
+                },
             },
         }
     else:
