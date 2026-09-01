@@ -130,6 +130,22 @@ def build_eq06(cfg, cards_dir):
     """
     site_url = cfg["sharePointSiteUrl"]
     lists = cfg["listIds"]
+    columns = cfg["columnInternalNames"]
+
+    def col(list_name, display_name):
+        """表示名から内部名を引く。
+
+        Excelアップロードで作ったリストは内部名が field_1, field_2 ... と
+        なるため(evidence/sharepoint_internal_names.json)、フローの
+        item/<列> や $filter では必ず内部名を使う。
+        """
+        try:
+            return columns[list_name][display_name]
+        except KeyError:
+            raise KeyError(
+                "%s の列 '%s' の内部名が deploy_config.json に未定義です"
+                % (list_name, display_name)
+            )
 
     # --- 1. 拠点設定のSwitch(各ケースで変数へ書き込む) ---
     site_cases = {}
@@ -191,12 +207,18 @@ def build_eq06(cfg, cards_dir):
             "SiteName": "@{variables('varSiteConfig')?['SiteName']}",
             "Intensity": "@{triggerBody()?['IntensityCode']}",
             "OccurredAtJST": "@{outputs('CMP_OccurredAtJST')}",
-            "EmployeeID": "@{items('LOOP_Each_Member')?['Title']}",
+            "EmployeeID": "@{items('LOOP_Each_Member')?['%s']}" % col("EQ_Config_Members", "Title"),
         },
     )
 
-    member_filter = (
-        "SiteCode eq '@{triggerBody()?['SiteCode']}' and IsActive eq 1 and IsManager eq 0"
+    # IsActive / IsManager はテキスト型で作られているため、数値ではなく文字列で比較する
+    flags = cfg.get("memberFlagValues", {"active": "TRUE", "notManager": "FALSE"})
+    member_filter = "%s eq '@{triggerBody()?['SiteCode']}' and %s eq '%s' and %s eq '%s'" % (
+        col("EQ_Config_Members", "SiteCode"),
+        col("EQ_Config_Members", "IsActive"),
+        flags["active"],
+        col("EQ_Config_Members", "IsManager"),
+        flags["notManager"],
     )
 
     threshold_actions = {
@@ -213,15 +235,15 @@ def build_eq06(cfg, cards_dir):
             {
                 "dataset": site_url,
                 "table": lists["EQ_Events"],
-                "item/Title": "@outputs('CMP_EventID')",
-                "item/SiteCode": "@triggerBody()?['SiteCode']",
-                "item/OccurredAt": "@utcNow()",
-                "item/Epicenter": "@triggerBody()?['Epicenter']",
-                "item/SiteIntensityCode": "@triggerBody()?['IntensityCode']",
-                "item/SiteIntensityValue": "@variables('varIntensityValue')",
-                "item/AlertStatus": "Open",
-                "item/StartedBy": "Manual",
-                "item/IsTest": "@triggerBody()?['IsTest']",
+                "item/%s" % col("EQ_Events", "Title"): "@outputs('CMP_EventID')",
+                "item/%s" % col("EQ_Events", "SiteCode"): "@triggerBody()?['SiteCode']",
+                "item/%s" % col("EQ_Events", "OccurredAt"): "@utcNow()",
+                "item/%s" % col("EQ_Events", "Epicenter"): "@triggerBody()?['Epicenter']",
+                "item/%s" % col("EQ_Events", "SiteIntensityCode"): "@triggerBody()?['IntensityCode']",
+                "item/%s" % col("EQ_Events", "SiteIntensityValue"): "@variables('varIntensityValue')",
+                "item/%s" % col("EQ_Events", "AlertStatus"): "Open",
+                "item/%s" % col("EQ_Events", "StartedBy"): "Manual",
+                "item/%s" % col("EQ_Events", "IsTest"): "@triggerBody()?['IsTest']",
             },
             {"CMP_EventID": ["Succeeded"]},
         ),
@@ -283,7 +305,7 @@ def build_eq06(cfg, cards_dir):
                                 {
                                     "poster": "Flow bot",
                                     "location": "Chat with Flow bot",
-                                    "body/recipient": "@items('LOOP_Each_Member')?['Email']",
+                                    "body/recipient": "@items('LOOP_Each_Member')?['%s']" % col("EQ_Config_Members", "Email"),
                                     "body/messageBody": checkin_card,
                                 },
                                 {},

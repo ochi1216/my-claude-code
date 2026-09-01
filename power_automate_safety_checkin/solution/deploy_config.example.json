@@ -1,20 +1,42 @@
 {
   "_comment": "このファイルをコピーして deploy_config.json を作り、実値を入れる。deploy_config.json は .gitignore で除外されるためコミットされない（CLAUDE.md: Tenant ID・Team ID・Channel ID・サイトIDをコミットしない）。値は pac CLI で取得できる（取得方法は solution/README.md 参照）。",
-
   "sharePointSiteUrl": "https://<tenant>.sharepoint.com/sites/<SiteName>",
-
   "listIds": {
     "EQ_Events": "<EQ_EVENTS_LIST_GUID>",
     "EQ_Config_Members": "<EQ_CONFIG_MEMBERS_LIST_GUID>",
     "EQ_Responses": "<EQ_RESPONSES_LIST_GUID>",
     "EQ_Received_Items": "<EQ_RECEIVED_ITEMS_LIST_GUID>"
   },
-
+  "columnInternalNames": {
+    "EQ_Events": {
+      "Title": "Title",
+      "SiteCode": "field_2",
+      "OccurredAt": "field_3",
+      "Epicenter": "field_5",
+      "SiteIntensityCode": "field_7",
+      "SiteIntensityValue": "field_8",
+      "AlertStatus": "field_9",
+      "StartedBy": "field_10",
+      "IsTest": "field_11"
+    },
+    "EQ_Config_Members": {
+      "Title": "Title",
+      "DisplayName": "field_1",
+      "Email": "field_2",
+      "SiteCode": "field_3",
+      "IsActive": "field_4",
+      "IsManager": "field_5",
+      "EscalationOrder": "field_6"
+    }
+  },
+  "memberFlagValues": {
+    "active": "TRUE",
+    "notManager": "FALSE"
+  },
   "connectionReferences": {
     "sharepoint": "<njp_sharedsharepointonline_xxxxx>",
     "teams": "<njp_sharedteams_xxxxx>"
   },
-
   "sites": [
     {
       "siteCode": "OITA",
@@ -38,11 +60,9 @@
       "channelId": "<TOKYO_CHANNEL_ID>"
     }
   ],
-
   "workflowIds": {
     "EQ06_Manual_Drill_DEV": "11111111-2222-3333-4444-555555555555"
   },
-
   "solution": {
     "uniqueName": "EQSafetyCheckinSolution",
     "publisherUniqueName": "NexperiaJP",
