@@ -47,6 +47,16 @@ v0.41.0までの変更点（LKPT既定OPEN・リサイズ時の幅高さ保持�
   切り替える。並び順・文字サイズとも、storage.pyに追加した
   Settingsシートに変更のたびに書き出し、アプリを再起動しても前回の
   設定を引き継ぐようにした（storage.py v0.12.0が必要）
+- ✖(閉じる)・🔮(読み)・📊(ダッシュボード)ボタンも、ひれぶりと同じ理由で
+  絵文字文字列からPNG画像に変更した。🔮の期日件数バッジは、画像
+  使用時はcompound="right"でアイコンの右に数字を添える形にした
+  （1つの文字列に絵文字と数字を混ぜる必要が無くなった）
+- タスク見出し右側の文字サイズ調整・並び順アイコンの文字色を、視認性の
+  指摘を受けてPLACEHOLDER_COLOR（淡いグレー）からTEXT_COLOR（白）に
+  変更した
+- 並び順トグルの矢印が「今の状態」なのか「押すとどうなるか」なのか
+  紛らわしいという指摘を受け、ホバー時のツールチップで両方を文章で
+  説明するようにした（LKPTのL/K/P/Tラベルと同じ_Tooltipの仕組みを流用）
 """
 
 import ctypes
@@ -143,6 +153,14 @@ EMOTION_ICON_FILES = {
     "怒": "emotion_do.png",
     "哀": "emotion_ai.png",
     "楽": "emotion_raku.png",
+}
+
+# 閉じる／読み／ダッシュボードの3ボタンも同じ理由（絵文字が色つきで
+# 描画できない）でPNG画像に差し替える
+BTN_ICON_FILES = {
+    "close": "btn_close.png",
+    "forecast": "btn_forecast.png",
+    "dashboard": "btn_dashboard.png",
 }
 
 # L/K/P/Tが何を意味するか毎回忘れてしまう問題への対応。
@@ -458,11 +476,12 @@ class PopupWindow:
         self._themed_bg_widgets = []
         self._themed_fg_widgets = []
 
-        # ひれぶりアイコンの画像（PhotoImageはガベージコレクトされないよう
-        # 参照を保持し続ける必要があるため、インスタンス変数として持つ）。
+        # アイコン画像（PhotoImageはガベージコレクトされないよう参照を
+        # 保持し続ける必要があるため、インスタンス変数として持つ）。
         # 読み込みに失敗した場合は空のままにし、呼び出し側で絵文字文字列
         # へフォールバックする
-        self._emotion_images = self._load_emotion_images()
+        self._emotion_images = self._load_png_images(EMOTION_ICON_FILES)
+        self._btn_images = self._load_png_images(BTN_ICON_FILES)
 
         # 直前に書き込んだTimeLog行を覚えておくための一式。
         # PopupWindowはアプリ起動中ずっと同じインスタンスが使われるため、
@@ -510,20 +529,21 @@ class PopupWindow:
             self.action_sort_order = ACTION_SORT_ORDER_ASC
         self.action_font_size_label = None  # 現在のサイズを示す数値ラベル
         self.action_sort_btn = None         # 並び順トグルボタン（↓/↑）
+        self._action_sort_tooltip = None    # 上記の状態・操作を説明するツールチップ
 
-    def _load_emotion_images(self) -> dict:
+    def _load_png_images(self, mapping: dict) -> dict:
         """
-        ひれぶりアイコンのPNGを読み込む。1つでも読み込みに失敗したら
-        絵文字文字列表示にフォールバックできるよう、空の辞書を返す
-        （中途半端に一部だけ画像・一部だけ文字、という混在は避ける）。
+        assets/配下のPNGアイコンをまとめて読み込む。1つでも読み込みに
+        失敗したら絵文字文字列表示にフォールバックできるよう、空の辞書を
+        返す（中途半端に一部だけ画像・一部だけ文字、という混在は避ける）。
         """
         images = {}
         try:
-            for emotion, filename in EMOTION_ICON_FILES.items():
+            for key, filename in mapping.items():
                 path = os.path.join(ASSETS_DIR, filename)
-                images[emotion] = tk.PhotoImage(file=path)
+                images[key] = tk.PhotoImage(file=path)
         except Exception as e:
-            print(f"⚠️ ひれぶりアイコン画像の読み込みに失敗しました（絵文字表示にフォールバックします）: {e}")
+            print(f"⚠️ アイコン画像の読み込みに失敗しました（絵文字表示にフォールバックします）: {e}")
             return {}
         return images
 
@@ -951,52 +971,72 @@ class PopupWindow:
 
         # 3つとも同じfont・pady（=同じボタンの箱の大きさ）に統一する。
         # 以前DBだけフォントを大きくして揃えようとしたが、行の高さが一番
-        # 大きいDBに引っ張られてかえってバランスが崩れたため撤回した経緯がある
+        # 大きいDBに引っ張られてかえってバランスが崩れたため撤回した経緯がある。
+        # 絵文字はTcl/Tkが色つきで描画できないため、self._btn_imagesが
+        # 読み込めていればPNG画像を使い、失敗していた場合だけ絵文字文字列に
+        # フォールバックする（ひれぶりアイコンと同じ方針）
         icon_btn_font = tkfont.Font(family="Yu Gothic UI", size=13)
 
         # 記録済みの内容は取り消さないため「キャンセル」ではなく「閉じる」。
         # TIMEを押した時点で既に書き込まれているので、キャンセルと名乗るのは
         # 嘘になる（取り消したい場合は同じタグをもう一度押す）
+        close_img = self._btn_images.get("close")
+        close_kwargs = (
+            {"image": close_img} if close_img is not None
+            else {"text": "✖", "font": icon_btn_font, "fg": BUTTON_TEXT_COLOR}
+        )
         close_btn = tk.Button(
             self.btn_frame,
-            text="✖",
-            font=icon_btn_font,
             bg=CANCEL_BTN_BG,
-            fg=BUTTON_TEXT_COLOR,
             activebackground=ACCENT_COLOR,
             relief="flat",
             pady=4,
             command=self._close,
+            **close_kwargs,
         )
+        if close_img is not None:
+            close_btn.image = close_img  # ガベージコレクト対策の参照保持
         close_btn.grid(row=0, column=0, sticky="ew", padx=3)
 
         # 読み（予測）の一覧・入力への入口。期日が来た未記入がある間は
-        # 件数を出して、こちらから気づけるようにする
+        # 件数を出して、こちらから気づけるようにする。
+        # 画像が使える場合、件数はcompound="right"でアイコンの右に文字として
+        # 添える（1つの文字列に絵文字と数字を混ぜる必要が無くなる）
+        forecast_img = self._btn_images.get("forecast")
+        forecast_kwargs = (
+            {"image": forecast_img, "compound": "right"} if forecast_img is not None
+            else {"font": icon_btn_font, "fg": BUTTON_TEXT_COLOR}
+        )
         self.forecast_btn = tk.Button(
             self.btn_frame,
-            text="🔮",
-            font=icon_btn_font,
             bg=FORECAST_BTN_BG,
-            fg=BUTTON_TEXT_COLOR,
             activebackground=ACCENT_COLOR,
             relief="flat",
             pady=4,
             command=self._open_forecasts,
+            **forecast_kwargs,
         )
+        if forecast_img is not None:
+            self.forecast_btn.image = forecast_img
         self.forecast_btn.grid(row=0, column=1, sticky="ew", padx=3)
         self._update_forecast_button()
 
+        dashboard_img = self._btn_images.get("dashboard")
+        dashboard_kwargs = (
+            {"image": dashboard_img} if dashboard_img is not None
+            else {"text": "📊", "font": icon_btn_font, "fg": BUTTON_TEXT_COLOR}
+        )
         dashboard_btn = tk.Button(
             self.btn_frame,
-            text="📊",
-            font=icon_btn_font,
             bg=DASHBOARD_BTN_BG,
-            fg=BUTTON_TEXT_COLOR,
             activebackground=ACCENT_COLOR,
             relief="flat",
             pady=4,
             command=self._open_dashboard,
+            **dashboard_kwargs,
         )
+        if dashboard_img is not None:
+            dashboard_btn.image = dashboard_img
         dashboard_btn.grid(row=0, column=2, sticky="ew", padx=3)
 
         # たまっているアクション一覧。MS To Doの参考画像に合わせ、○チェックは
@@ -1035,17 +1075,20 @@ class PopupWindow:
         # 左側（「タスク」見出し寄り）に置く
         self.action_sort_btn = tk.Button(
             font_ctrl_frame, text="", font=font_ctrl_reset_font,
-            bg=BG_COLOR, fg=PLACEHOLDER_COLOR, activebackground=BG_COLOR,
+            bg=BG_COLOR, fg=TEXT_COLOR, activebackground=BG_COLOR,
             activeforeground=ACCENT_COLOR, relief="flat", bd=0, cursor="hand2",
             padx=4, pady=0, command=self._toggle_action_sort_order,
         )
         self.action_sort_btn.pack(side="left", padx=(0, 8))
         self._register_themed(self.action_sort_btn, bg=True)
+        # 矢印だけだと「今の状態」なのか「押すとどうなるか」なのか紛らわしい
+        # という指摘への対応。ホバーすると両方を文章で説明する
+        self._action_sort_tooltip = _Tooltip(self.action_sort_btn, "")
         self._update_action_sort_button()
 
         action_font_shrink_btn = tk.Button(
             font_ctrl_frame, text="Ａ", font=font_ctrl_shrink_font,
-            bg=BG_COLOR, fg=PLACEHOLDER_COLOR, activebackground=BG_COLOR,
+            bg=BG_COLOR, fg=TEXT_COLOR, activebackground=BG_COLOR,
             activeforeground=ACCENT_COLOR, relief="flat", bd=0, cursor="hand2",
             padx=4, pady=0, command=self._decrease_action_font_size,
         )
@@ -1054,14 +1097,14 @@ class PopupWindow:
 
         self.action_font_size_label = tk.Label(
             font_ctrl_frame, text="", font=font_ctrl_reset_font,
-            bg=BG_COLOR, fg=PLACEHOLDER_COLOR, width=2, anchor="center",
+            bg=BG_COLOR, fg=TEXT_COLOR, width=2, anchor="center",
         )
         self.action_font_size_label.pack(side="left")
         self._register_themed(self.action_font_size_label, bg=True)
 
         action_font_grow_btn = tk.Button(
             font_ctrl_frame, text="Ａ", font=font_ctrl_grow_font,
-            bg=BG_COLOR, fg=PLACEHOLDER_COLOR, activebackground=BG_COLOR,
+            bg=BG_COLOR, fg=TEXT_COLOR, activebackground=BG_COLOR,
             activeforeground=ACCENT_COLOR, relief="flat", bd=0, cursor="hand2",
             padx=4, pady=0, command=self._increase_action_font_size,
         )
@@ -1070,7 +1113,7 @@ class PopupWindow:
 
         action_font_reset_btn = tk.Button(
             font_ctrl_frame, text="↺", font=font_ctrl_reset_font,
-            bg=BG_COLOR, fg=PLACEHOLDER_COLOR, activebackground=BG_COLOR,
+            bg=BG_COLOR, fg=TEXT_COLOR, activebackground=BG_COLOR,
             activeforeground=ACCENT_COLOR, relief="flat", bd=0, cursor="hand2",
             padx=6, pady=0, command=self._reset_action_font_size,
         )
@@ -1910,13 +1953,23 @@ class PopupWindow:
         self._persist_action_font_size()
 
     def _update_action_sort_button(self) -> None:
-        """並び順トグルボタンの矢印・ツールチップ相当の表示を今の設定に合わせる。"""
+        """
+        並び順トグルボタンの矢印・ツールチップを今の設定に合わせる。
+        矢印だけでは「今どちらの状態か」「押すとどうなるか」のどちらを
+        示しているのか分かりにくいという指摘への対応。矢印自体は
+        「今この向きに並んでいる」ことを示し、ホバーした時のツールチップで
+        現在の状態と、押した場合にどう変わるかの両方を文章で説明する
+        """
         if self.action_sort_btn is None:
             return
         if self.action_sort_order == ACTION_SORT_ORDER_DESC:
             self.action_sort_btn.config(text="↑")
+            tooltip_text = "今の並び：登録が新しい順（↑）\nクリックで古い順に切り替え"
         else:
             self.action_sort_btn.config(text="↓")
+            tooltip_text = "今の並び：登録が古い順（↓）\nクリックで新しい順に切り替え"
+        if self._action_sort_tooltip is not None:
+            self._action_sort_tooltip.text = tooltip_text
 
     def _toggle_action_sort_order(self) -> None:
         """
