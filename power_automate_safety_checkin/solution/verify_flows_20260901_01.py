@@ -34,7 +34,6 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import sys
 import tempfile
 
@@ -107,6 +106,37 @@ BASE_CONFIG = {
     "solution": {"uniqueName": "EQSafetyCheckinSolution",
                  "publisherUniqueName": "NexperiaJP", "publisherPrefix": "njp"},
 }
+
+
+def list_files(root):
+    """ディレクトリ配下のファイルを、rootからの相対パスの集合で返す。"""
+    found = set()
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for filename in filenames:
+            full = os.path.join(dirpath, filename)
+            found.add(os.path.relpath(full, root).replace("\\", "/"))
+    return found
+
+
+def compare_trees(old_dir, new_dir):
+    """2つのディレクトリを再帰的に比較し、違いを1行ずつ並べて返す。
+
+    Windowsには diff コマンドが無いため、外部コマンドを使わずに自前で比較する。
+    """
+    old_files, new_files = list_files(old_dir), list_files(new_dir)
+    differences = []
+    for name in sorted(old_files - new_files):
+        differences.append("旧のみに存在: %s" % name)
+    for name in sorted(new_files - old_files):
+        differences.append("新のみに存在: %s" % name)
+    for name in sorted(old_files & new_files):
+        with open(os.path.join(old_dir, name), "rb") as fh:
+            old_bytes = fh.read()
+        with open(os.path.join(new_dir, name), "rb") as fh:
+            new_bytes = fh.read()
+        if old_bytes != new_bytes:
+            differences.append("内容が異なる: %s" % name)
+    return differences
 
 
 def load_module(filename, name):
@@ -249,10 +279,9 @@ def main():
         old_dir, new_dir = os.path.join(tmp, "v01"), os.path.join(tmp, "v02")
         generate(mod01, copy.deepcopy(BASE_CONFIG), old_dir)
         generate(mod02, config_with(errorLogging=False, eventClose=False), new_dir)
-        diff = subprocess.run(["diff", "-r", old_dir, new_dir],
-                              capture_output=True, text=True)
-        check(diff.returncode == 0, "機能オフの生成物が 20260901_01 と一致",
-              diff.stdout[:600])
+        differences = compare_trees(old_dir, new_dir)
+        check(not differences, "機能オフの生成物が 20260901_01 と一致",
+              " / ".join(differences[:5]))
     finally:
         shutil.rmtree(tmp)
 
