@@ -218,11 +218,73 @@ convertTimeZone(utcNow(), 'UTC', 'Tokyo Standard Time', 'yyyy/MM/dd HH:mm')
 
 ---
 
-### エラー処理(SCOPE_Try/Catch/Finally)
+### エラー処理(SCOPE_Try/Catch) — 20260901_02 で実装
 
-引継ぎ資料の指示通り、上記1〜11全体を `SCOPE_Try` で包み、`SCOPE_Catch`
-(実行条件: 直前がFailedまたはTimed outまたはSkippedの場合に実行)で
-`SP_Log_Error`(EQ_Received_Itemsへ ProcessingStatus=`Error` で記録)を行う。
+`deploy_config.json`の`features.errorLogging`が`true`のときだけ生成される。
+実装は`solution/build_flows_20260901_02.py`の`build_catch_actions`。
+
+当初の記載は「上記1〜11全体を`SCOPE_Try`で包む」だったが、**変数の初期化
+(`InitializeVariable`)はフローの最上位にしか置けない**ため、実装では初期化を
+スコープの外に残し、それ以降を包んでいる。
+
+```
+INIT_varSiteConfig / INIT_varIntensityValue / INIT_varEventID / INIT_varEventItemId
+SCOPE_Try
+  ├ CMP_Site_Config
+  ├ CMP_Intensity_Value
+  └ CHK_Threshold_Met
+       └ (閾値以上のとき) CMP_EventID → SET_varEventID → SP_Create_Event
+                          → SET_varEventItemId → CMP_OccurredAtJST
+                          → TM_Post_Channel_Alert → GET_Active_Members
+                          → CHK_Members_Found → LOOP_Each_Member
+                          → SP_Close_Event
+SCOPE_Catch   runAfter: [Failed, TimedOut]
+  ├ FLT_Failed_Actions … result('SCOPE_Try') から status=Failed のものだけ残す
+  ├ CMP_Error_Code    … coalesce(first(...)?['error']?['code'], 'UNKNOWN')
+  ├ CMP_Error_Raw     … "action=<名前> / <メッセージ>"
+  ├ CMP_Error_Message … 255文字を超える分を切り詰める(1行テキスト列の上限)
+  ├ SP_Log_Error      … EQ_Received_Items へ ProcessingStatus=Error で記録
+  ├ CHK_Event_Created … varEventItemId > 0 なら AlertStatus を Error にする
+  └ END_Failed        … 実行そのものを Failed で終わらせる
+```
+
+当初の記載と変えた点:
+
+- `runAfter`に`Skipped`を含めない。`SCOPE_Try`の手前は変数の初期化しかなく、
+  スキップされる経路が存在しないため。
+- 末尾に`END_Failed`(Terminate)を置く。これが無いと「Catchが成功した」ことで
+  **実行全体が成功扱いになり、本物の失敗が実行履歴で緑色になる**。
+- `EQ_Received_Items`への書き込みが失敗しても`END_Failed`は動くようにしている
+  (`runAfter`に`Failed`/`Skipped`/`TimedOut`も含める)。
+
+**Terminateで終わる経路はCatchを通らない。** 拠点コード誤り(`END_Invalid_Site`)、
+震度コード誤り(`END_Invalid_Intensity`)、対象者ゼロ(`END_No_Members`)は
+`Terminate`で実行が即座に終わるため`EQ_Received_Items`には残らない。
+記録に残るのはコネクタの失敗(リストGUID誤り、SharePoint側の障害、Teams投稿の失敗)である。
+
+### イベントのクローズ処理 — 20260901_02 で実装
+
+`deploy_config.json`の`features.eventClose`が`true`のときだけ生成される。
+
+`EQ05_Status_Summary_DEV`は`AlertStatus`が`Open`のイベントを15分ごとに集計して
+チャネルへ投稿する。訓練が終わってもイベントを閉じないと、**終わった訓練の集計カードが
+投稿され続ける。** これを防ぐのがこの処理。
+
+| いつ | どこ | AlertStatus |
+| --- | --- | --- |
+| 全員分の回答待ち(`LOOP_Each_Member`)が終わったとき | `SP_Close_Event`(`CHK_Members_Found`の後) | `Closed` |
+| フローが失敗して`SCOPE_Catch`に入ったとき | `SP_Mark_Event_Error` | `Error` |
+
+どちらも`Open`ではなくなるため、EQ05はその回を拾わなくなる。`Closed`と`Error`を
+分けているのは、あとから「失敗して終わった回」を見分けられるようにするため。
+
+更新対象はイベントのタイトルではなく**SharePointの項目ID(整数)**で指す。
+`SP_Create_Event`の応答`body('SP_Create_Event')?['ID']`を変数`varEventItemId`へ
+控えておき、それを使う。`Title`は必須列のため、更新時にも同じ値を送り直している。
+
+SharePoint「項目の更新」アクションの`operationId`とパラメータ名は**未実測**のため、
+`deploy_config.json`の`sharePointUpdateAction`から読む。実測値が入るまで
+`features.eventClose`は有効にできない(実測手順は`solution/README.md`)。
 
 ---
 

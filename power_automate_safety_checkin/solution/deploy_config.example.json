@@ -39,12 +39,30 @@
       "RespondedAt": "field_7",
       "Comment": "field_8",
       "Revision": "field_9"
+    },
+    "EQ_Received_Items": {
+      "_comment": "未実測。features.errorLogging を有効にする前に、solution/README.md「列内部名の実測手順」で実測して置き換えること。Excelアップロードで作ったリストは field_1, field_2 ... という連番になるが、順番は保証されないため必ず実測する。",
+      "Title": "<未実測>",
+      "ProcessingStatus": "<未実測>",
+      "ErrorCode": "<未実測>",
+      "ErrorMessage": "<未実測>",
+      "CreatedAt": "<未実測>"
     }
   },
   "memberFlagValues": {
     "active": "TRUE",
     "notManager": "FALSE",
     "isManager": "TRUE"
+  },
+  "features": {
+    "_comment": "20260901_02 で追加。どちらも false（未指定時も false）なら、生成物は 20260901_01 と同一になる。",
+    "errorLogging": false,
+    "eventClose": false
+  },
+  "sharePointUpdateAction": {
+    "_comment": "SharePoint「項目の更新」アクションの実測値。GUIでこのアクションだけのフローを1本作ってエクスポートし、operationId と項目IDを渡すパラメータ名を確認する（手順は solution/README.md）。<未実測> のままでは features.eventClose を有効にできない。",
+    "operationId": "<未実測>",
+    "idParameter": "<未実測>"
   },
   "testRecipientOverride": "<検証中の送信先メールアドレス。空文字にすると名簿どおりに送信される>",
   "responseTimeout": "PT1H",

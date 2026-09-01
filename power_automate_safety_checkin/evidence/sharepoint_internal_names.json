@@ -200,6 +200,15 @@
     }
   },
   "EQ_Received_Items": {
-    "_status": "未取得"
+    "_status": "未取得",
+    "_note": "S03時点でも未実測。EQ_Received_Items はExcelアップロードで作成したため、他の3リストと同様に内部名が field_1, field_2 ... の連番になっている可能性が高いが、連番の割り当て順は保証されないため必ず実測すること。あわせて、EQ_Events で起きたのと同じ『見本データ無しのExcelから作ったためテキスト列が数値型になる』問題が EQ_Received_Items にも起きていないかを確認する(ProcessingStatus / ErrorCode / ErrorMessage は1行テキスト、CreatedAt は日付と時刻が必要)。",
+    "_expected_display_names": [
+      "Title",
+      "ProcessingStatus",
+      "ErrorCode",
+      "ErrorMessage",
+      "CreatedAt"
+    ],
+    "_how_to_measure": "SharePointにログイン済みのブラウザで下記を開き、InternalName / Title / TypeAsString を控える: https://<サイトURL>/_api/web/lists/getbytitle('EQ_Received_Items')/fields?$select=InternalName,Title,TypeAsString&$filter=Hidden eq false and ReadOnlyField eq false"
   }
 }

@@ -38,6 +38,7 @@ Solutionにフローを入れる形式は公開ドキュメントだけでは特
 | SharePoint 複数の項目の取得 | `GetItems` | `OpenApiConnection` |
 | Teams カードを投稿(応答を待たない) | `PostCardToConversation` | `OpenApiConnection` |
 | Teams カードを投稿して応答を待機 | `PostCardAndWaitForResponse` | `OpenApiConnectionWebhook` |
+| SharePoint 項目の更新 | **未実測** | 未実測 |
 
 Teamsコネクタのトリガー11種類を確認した結果、**カードの回答を受け取るトリガーは
 存在しない**(「チャットでメッセージに応答があったとき」は`WebhookMessageReactionTrigger`で
@@ -75,7 +76,7 @@ pac solution init --publisher-name NexperiaJP --publisher-prefix njp
 ## 生成とデプロイ(以降は毎回これだけ)
 
 ```powershell
-python build_flows_20260901_01.py --config deploy_config.json --out .\src --cards ..\cards
+python build_flows_20260901_02.py --config deploy_config.json --out .\src --cards ..\cards
 pac solution pack --zipfile .\EQSafetyCheckin.zip --folder .\src
 pac solution import --environment <ENV_ID> --path .\EQSafetyCheckin.zip
 ```
@@ -104,6 +105,33 @@ pac solution import --environment <ENV_ID> --path .\EQSafetyCheckin.zip
 拠点分岐・閾値判定・メンバー抽出まで一通り試せる。本番移行時に
 `sites`から取り除く。
 
+### 本番切替チェックリスト
+
+**この手順を実行した瞬間から、実在の社員へ実際にカードが届く。**
+実行前に必ず越智さんの明示的な確認を取ること。上から順に進める。
+
+実測・実装が済んでいること:
+
+- [ ] `EQ_Received_Items`の列内部名・列の型を実測し、`evidence/`と`deploy_config.json`へ反映した
+- [ ] SharePoint「項目の更新」アクションの`operationId`・`idParameter`を実測し、`deploy_config.json`へ反映した
+- [ ] `features.errorLogging` / `features.eventClose` を`true`にして生成し、インポートできた
+- [ ] 意図的に失敗させて、`EQ_Received_Items`へ`ProcessingStatus=Error`の行が入ることを確認した
+- [ ] 訓練終了後に`EQ_Events`の`AlertStatus`が`Closed`になり、`EQ05`がその回を集計しなくなることを確認した
+
+拠点の設定:
+
+- [ ] `sites[].teamId` / `channelId` に、OITA / OSAKA / TOKYO の実Team ID・Channel IDを設定した
+- [ ] `responseTimeout`を検証用の短い値から運用値(既定`PT1H`)へ戻した
+
+ここから先が「実在の社員へ届く」側の操作:
+
+- [ ] `sites`から架空拠点`NARA`を取り除いた
+- [ ] `EQ_Config_Members`から検証用メンバー(`emp98` / `emp99`)を削除した
+- [ ] **`testRecipientOverride`を空文字にした** ← 誤送信防止の安全弁を外す唯一の操作
+- [ ] 生成し直したときのコンソール表示が`[本番宛先モード]`になっていることを目視した
+- [ ] 実在拠点で、まず3名程度の小規模訓練を実施した
+- [ ] 問題がなければ18名訓練を実施した
+
 ## 生成されるフロー
 
 | フロー | 状態 |
@@ -112,13 +140,137 @@ pac solution import --environment <ENV_ID> --path .\EQSafetyCheckin.zip
 | `EQ04b_On_Response_DEV` | **不要になった**。カード応答を受け取るトリガーがテナントに存在しないため、回答の受け取りはEQ06のループ内(`PostCardAndWaitForResponse`)へ統合する |
 | `EQ05_Status_Summary_DEV` | 生成対象・実機動作確認済み(2026-09-01)。`workflowIds`に載っているフローだけが生成されるため、不要なら設定から外せばよい |
 
+## 機能フラグ(20260901_02 で追加)
+
+エラー処理とイベントのクローズは、どちらも実測値が揃っていないと正しく動かない。
+実測が済むまで既存の動作を止めないよう、`deploy_config.json`の`features`で
+個別に有効化する方式にした。**未指定・両方falseなら、生成物は`20260901_01`と
+1バイトも変わらない**(`verify_flows_20260901_01.py`で毎回確認している)。
+
+```json
+"features": {
+  "errorLogging": false,
+  "eventClose": false
+}
+```
+
+| フラグ | 有効にすると | 必要な実測値 |
+| --- | --- | --- |
+| `errorLogging` | EQ06・EQ05の本体を`SCOPE_Try`で包み、失敗時に`SCOPE_Catch`から`EQ_Received_Items`へ1行(`ProcessingStatus=Error`)記録して失敗終了する | `listIds.EQ_Received_Items`、`columnInternalNames.EQ_Received_Items` |
+| `eventClose` | 全員分の回答待ちが終わったら`EQ_Events`の`AlertStatus`を`Closed`に、失敗した場合は`Error`にする | `sharePointUpdateAction.operationId` / `.idParameter` |
+
+実測値が`<未実測>`のまま有効にすると、**生成の時点で止まる**。推測値で作ると
+インポートは通ってしまい、訓練当日の実行時に初めて失敗するため。
+
+### エラー処理の構造
+
+```
+INIT_var...            ← 変数の初期化は最上位にしか置けないため、スコープの外に残す
+SCOPE_Try
+  ├ CMP_Site_Config / CMP_Intensity_Value / CHK_Threshold_Met(従来の本体そのまま)
+SCOPE_Catch            runAfter: [Failed, TimedOut]
+  ├ FLT_Failed_Actions … result('SCOPE_Try') から status=Failed のものだけ残す
+  ├ CMP_Error_Code / CMP_Error_Raw / CMP_Error_Message(255文字で切り詰め)
+  ├ SP_Log_Error       … EQ_Received_Items へ ProcessingStatus=Error で記録
+  ├ CHK_Event_Created  … イベント作成済みなら AlertStatus を Error にする(eventClose時のみ)
+  └ END_Failed         … 実行そのものを失敗として終わらせる
+```
+
+最後の`END_Failed`が無いと、「Catchが成功した」ことで**実行全体が成功扱いになり、
+本物の失敗が実行履歴で緑色になってしまう**。
+
+`Skipped`は`runAfter`に含めていない。`SCOPE_Try`の手前は変数の初期化しかなく、
+スキップされる経路が無いため。
+
+**Terminateで終わる経路はCatchを通らない。** 拠点コード誤り(`END_Invalid_Site`)、
+震度コード誤り(`END_Invalid_Intensity`)、対象者ゼロ(`END_No_Members`)は
+`Terminate`で即座に実行が終わるため、`EQ_Received_Items`には残らない。
+記録に残るのは、コネクタの失敗(リストGUID誤り、SharePoint側の障害、
+Teams投稿の失敗など)である。
+
+### SharePoint「項目の更新」アクションの実測手順
+
+`operationId`もパラメータ名も公開情報からは確定できない。以下で実測する。
+
+1. Power AutomateのGUIで、インスタント フロー(手動トリガー)を新規作成する
+2. アクションを1つだけ追加する: SharePoint →「項目の更新」
+3. サイトのアドレス・リスト名(`EQ_Events`)・IDを適当に埋めて保存する
+4. そのフローを **エクスポート(パッケージ .zip)** し、展開して中のJSONを開く
+5. `"host"`の`"operationId"`と、項目IDを渡しているパラメータ名を控える
+
+```json
+"host": { "connectionName": "shared_sharepointonline", "operationId": "????" },
+"parameters": { "dataset": "...", "table": "...", "??": 1, "item/Title": "..." }
+```
+
+6. `deploy_config.json`の`sharePointUpdateAction`へ入れる
+
+```json
+"sharePointUpdateAction": {
+  "operationId": "<手順5で控えたoperationId>",
+  "idParameter": "<項目IDを渡しているパラメータ名>"
+}
+```
+
+7. 確認用のフローは削除してよい
+
+更新対象はイベントのタイトルではなく**SharePointの項目ID(整数)**で指す。
+イベント作成時の応答`body('SP_Create_Event')?['ID']`を変数`varEventItemId`へ
+控えておき、それを使う。`Title`は必須列のため、更新時にも同じ値を送り直している。
+
+### 列内部名の実測手順
+
+SharePointにログイン済みのブラウザで下記を開くと、表示名・内部名・型が一度に得られる。
+
+```
+https://<サイトURL>/_api/web/lists/getbytitle('EQ_Received_Items')/fields?$select=InternalName,Title,TypeAsString&$filter=Hidden eq false and ReadOnlyField eq false
+```
+
+`EQ_Received_Items`もExcelアップロードで作ったため、`EQ_Events`で起きたのと同じ
+**「見本データ無しのExcelから作ったせいでテキスト列が数値型になる」問題**が
+起きていないかを、内部名と一緒に必ず確認する。必要な型は以下。
+
+| 列 | 必要な型 |
+| --- | --- |
+| Title | 1行テキスト |
+| ProcessingStatus | 1行テキスト |
+| ErrorCode | 1行テキスト |
+| ErrorMessage | 1行テキスト(255文字を超える分はフロー側で切り詰めている) |
+| CreatedAt | 日付と時刻 |
+
+## 生成物の検証(テナントに入れる前)
+
+```powershell
+python verify_flows_20260901_01.py
+```
+
+`deploy_config.json`は不要(ダミー設定で構造だけを見る)。インポートで弾かれる
+ありがちな間違いをここで潰す。
+
+- 機能フラグを全てオフにしたとき、`20260901_01`と1バイトも変わらない出力になるか
+- `runAfter`が同じスコープ内に実在するアクションを指しているか
+- アクション名がフロー全体で一意か
+- `Terminate`がループの中に入っていないか(入れるとインポートで弾かれる)
+- `InitializeVariable`が最上位のみか(同上)
+- 参照・代入している変数がすべて初期化済みか
+- 並列ループの中で`SetVariable`を使っていないか(値が混ざる)
+- 未実測のまま機能を有効にしたとき、生成が止まるか
+
+実機での動作確認の代わりにはならない。Windows/Power Automate環境が要る確認は
+引き続き実機で行う。
+
 ## 未確認事項
 
-- `EQ05_Status_Summary_DEV`は**実機未検証**。
-- エラー処理(`SCOPE_Try`/`SCOPE_Catch`による`EQ_Received_Items`へのログ記録)は**未実装**。
-  `EQ_Received_Items`の列内部名も未取得。
+- **`EQ_Received_Items`の列内部名・列の型は未実測**(S03時点)。
+  実測するまで`features.errorLogging`は有効にできない。
+- **SharePoint「項目の更新」アクションの`operationId`・パラメータ名は未実測**。
+  実測するまで`features.eventClose`は有効にできない。
+- エラー処理・クローズ処理は**実機未検証**。生成物の構造検証のみ実施済み。
+  スコープの中に`Terminate`を置けること、`result('SCOPE_Try')`が期待する形の
+  配列を返すことは、インポートと実行で確認する必要がある。
 - 実在拠点(OITA/OSAKA/TOKYO)での訓練は**未実施**。現状は架空拠点`NARA`でのみ検証している。
 - 3名結合テスト・18名訓練は未実施。
+- 拠点ごとの実Team ID / Channel IDは**未設定**。
 
 ## タイムアウト(未回答)の扱い
 
