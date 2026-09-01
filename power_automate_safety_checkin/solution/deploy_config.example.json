@@ -41,12 +41,11 @@
       "Revision": "field_9"
     },
     "EQ_Received_Items": {
-      "_comment": "未実測。features.errorLogging を有効にする前に、solution/README.md「列内部名の実測手順」で実測して置き換えること。Excelアップロードで作ったリストは field_1, field_2 ... という連番になるが、順番は保証されないため必ず実測する。",
-      "Title": "<未実測>",
-      "ProcessingStatus": "<未実測>",
-      "ErrorCode": "<未実測>",
-      "ErrorMessage": "<未実測>",
-      "CreatedAt": "<未実測>"
+      "_comment": "2026-09-01実測。実際のリストは EQ_Received_Items.xlsx と列構成が異なり、エラー内容の列は ErrorMessage ではなく ErrorDetail、CreatedAt は存在しない。CreatedAt は任意（SharePointの標準列 Created が自動で入る）。なお ProcessingStatus / ErrorCode / ErrorDetail は数値型で作られているため、features.errorLogging を有効にする前に1行テキストへ直すこと。",
+      "Title": "Title",
+      "ProcessingStatus": "field_4",
+      "ErrorCode": "field_5",
+      "ErrorDetail": "field_6"
     }
   },
   "memberFlagValues": {

@@ -171,9 +171,11 @@ def require_error_log_config(cfg):
             "取得方法は solution/README.md を参照してください。"
         )
     columns = cfg.get("columnInternalNames", {}).get("EQ_Received_Items", {})
+    # CreatedAt は必須にしない。実測したリストにこの列は無く、SharePointの標準列
+    # Created(作成日時)が自動で入るため、無くても発生時刻は失われない。
     missing = [
         name
-        for name in ("Title", "ProcessingStatus", "ErrorCode", "ErrorMessage", "CreatedAt")
+        for name in ("Title", "ProcessingStatus", "ErrorCode", "ErrorDetail")
         if not is_measured(columns.get(name, ""))
     ]
     if missing:
@@ -232,6 +234,20 @@ def build_catch_actions(cfg, log_list_id, log_columns, title_expr, close_action=
     緑色になってしまう。
     """
     failed = "first(body('FLT_Failed_Actions'))"
+
+    log_parameters = {
+        "dataset": cfg["sharePointSiteUrl"],
+        "table": log_list_id,
+        "item/%s" % log_columns["Title"]: title_expr,
+        "item/%s" % log_columns["ProcessingStatus"]: "Error",
+        "item/%s" % log_columns["ErrorCode"]: "@outputs('CMP_Error_Code')",
+        "item/%s" % log_columns["ErrorDetail"]: "@outputs('CMP_Error_Message')",
+    }
+    # 発生時刻を入れる列があれば書く。無ければSharePointの標準列 Created に任せる。
+    created_at = log_columns.get("CreatedAt", "")
+    if is_measured(created_at):
+        log_parameters["item/%s" % created_at] = "@utcNow()"
+
     actions = {
         # result() はスコープ直下のアクションの結果を配列で返す。式には filter 関数が
         # 無いため、「配列のフィルター」で失敗したものだけを残してから先頭を見る。
@@ -266,19 +282,7 @@ def build_catch_actions(cfg, log_list_id, log_columns, title_expr, close_action=
                 "outputs('CMP_Error_Raw'))"
             ),
         },
-        "SP_Log_Error": sp_action(
-            "PostItem",
-            {
-                "dataset": cfg["sharePointSiteUrl"],
-                "table": log_list_id,
-                "item/%s" % log_columns["Title"]: title_expr,
-                "item/%s" % log_columns["ProcessingStatus"]: "Error",
-                "item/%s" % log_columns["ErrorCode"]: "@outputs('CMP_Error_Code')",
-                "item/%s" % log_columns["ErrorMessage"]: "@outputs('CMP_Error_Message')",
-                "item/%s" % log_columns["CreatedAt"]: "@utcNow()",
-            },
-            {"CMP_Error_Message": ["Succeeded"]},
-        ),
+        "SP_Log_Error": sp_action("PostItem", log_parameters, {"CMP_Error_Message": ["Succeeded"]}),
     }
 
     last = "SP_Log_Error"

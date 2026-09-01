@@ -80,10 +80,10 @@ BASE_CONFIG = {
             "WorkStatus": "field_6", "RespondedAt": "field_7", "Comment": "field_8",
             "Revision": "field_9",
         },
-        # 実測前でも検証できるよう、ここだけはダミーの内部名を入れてある
+        # 実測値(2026-09-01)。CreatedAt 列は存在しないため入れていない。
         "EQ_Received_Items": {
-            "Title": "Title", "ProcessingStatus": "field_1", "ErrorCode": "field_2",
-            "ErrorMessage": "field_3", "CreatedAt": "field_4",
+            "Title": "Title", "ProcessingStatus": "field_4", "ErrorCode": "field_5",
+            "ErrorDetail": "field_6",
         },
     },
     "memberFlagValues": {"active": "TRUE", "notManager": "FALSE", "isManager": "TRUE"},
@@ -230,7 +230,14 @@ def check_error_handling(label, definition, expect_event_close):
     params = catch["SP_Log_Error"]["inputs"]["parameters"]
     check(params["table"] == BASE_CONFIG["listIds"]["EQ_Received_Items"],
           "記録先が EQ_Received_Items になっている")
-    check(params["item/field_1"] == "Error", "ProcessingStatus に Error を書く")
+    check(params["item/field_4"] == "Error", "ProcessingStatus に Error を書く")
+    check(params["item/field_6"] == "@outputs('CMP_Error_Message')",
+          "ErrorDetail にエラー内容を書く")
+    # CreatedAt 列が無いリストでも、余計な列へ書きにいかないこと
+    check(not any(key.startswith("item/") and key not in
+                  ("item/Title", "item/field_4", "item/field_5", "item/field_6")
+                  for key in params),
+          "存在しない列へ書き込もうとしていない", str(sorted(params)))
     check(catch["END_Failed"]["inputs"]["runStatus"] == "Failed",
           "最後に実行を失敗として終わらせる(成功扱いで隠さない)")
     check(("CHK_Event_Created" in catch) is expect_event_close,
@@ -303,12 +310,25 @@ def main():
 
     # --- 9. 未実測のまま機能を有効にすると生成が止まるか -------------------
     print("")
+    print("[任意列] CreatedAt 列がある場合は、そこにも発生時刻を書くか")
+    cfg = config_with(errorLogging=True, eventClose=False)
+    cfg["columnInternalNames"]["EQ_Received_Items"]["CreatedAt"] = "field_9"
+    eq06 = mod02.build_eq06(cfg, CARDS)["properties"]["definition"]
+    log_params = (eq06["actions"]["SCOPE_Catch"]["actions"]["SP_Log_Error"]
+                  ["inputs"]["parameters"])
+    check(log_params.get("item/field_9") == "@utcNow()",
+          "CreatedAt を設定した場合は発生時刻を書く", str(sorted(log_params)))
+
+    print("")
     print("[安全弁] 未実測のまま機能を有効にすると生成が止まるか")
     cases = [
         ("EQ_Received_Items の列内部名が未実測",
          lambda c: c["columnInternalNames"].update({"EQ_Received_Items": {
              "Title": "<未実測>", "ProcessingStatus": "<未実測>", "ErrorCode": "<未実測>",
-             "ErrorMessage": "<未実測>", "CreatedAt": "<未実測>"}})),
+             "ErrorDetail": "<未実測>"}})),
+        ("EQ_Received_Items の ErrorDetail だけ未実測",
+         lambda c: c["columnInternalNames"]["EQ_Received_Items"].update(
+             {"ErrorDetail": "<未実測>"})),
         ("EQ_Received_Items のリストIDが未実測",
          lambda c: c["listIds"].update(
              {"EQ_Received_Items": "<EQ_RECEIVED_ITEMS_LIST_GUID>"})),

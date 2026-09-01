@@ -112,7 +112,8 @@ pac solution import --environment <ENV_ID> --path .\EQSafetyCheckin.zip
 
 実測・実装が済んでいること:
 
-- [ ] `EQ_Received_Items`の列内部名・列の型を実測し、`evidence/`と`deploy_config.json`へ反映した
+- [x] `EQ_Received_Items`の列内部名を実測した(2026-09-01)
+- [ ] `EQ_Received_Items`の`ProcessingStatus`/`ErrorCode`/`ErrorDetail`を数値型から1行テキストへ直した
 - [ ] SharePoint「項目の更新」アクションの`operationId`・`idParameter`を実測し、`deploy_config.json`へ反映した
 - [ ] `features.errorLogging` / `features.eventClose` を`true`にして生成し、インポートできた
 - [ ] 意図的に失敗させて、`EQ_Received_Items`へ`ProcessingStatus=Error`の行が入ることを確認した
@@ -230,13 +231,18 @@ https://<サイトURL>/_api/web/lists/getbytitle('EQ_Received_Items')/fields?$se
 **「見本データ無しのExcelから作ったせいでテキスト列が数値型になる」問題**が
 起きていないかを、内部名と一緒に必ず確認する。必要な型は以下。
 
-| 列 | 必要な型 |
-| --- | --- |
-| Title | 1行テキスト |
-| ProcessingStatus | 1行テキスト |
-| ErrorCode | 1行テキスト |
-| ErrorMessage | 1行テキスト(255文字を超える分はフロー側で切り詰めている) |
-| CreatedAt | 日付と時刻 |
+**実測済み(2026-09-01)**。実際のリストは`EQ_Received_Items.xlsx`と列構成が異なり、
+エラー内容の列は`ErrorMessage`ではなく`ErrorDetail`、`CreatedAt`は存在しなかった
+(SharePointの標準列`Created`が自動で入るため、`CreatedAt`は任意扱いにしている)。
+
+| 内部名 | 表示名 | 実測した型 | 必要な型 |
+| --- | --- | --- | --- |
+| `Title` | Title | Text | 1行テキスト ✓ |
+| `field_4` | ProcessingStatus | 数値 | **1行テキスト(要修正)** |
+| `field_5` | ErrorCode | 数値 | **1行テキスト(要修正)** |
+| `field_6` | ErrorDetail | 数値 | **1行テキスト(要修正)**。255文字を超える分はフロー側で切り詰めている |
+
+`field_1`〜`field_3`(`SourceUpdatedAt`/`SourceLink`/`InformationType`)はP1では使わない。
 
 ## 生成物の検証(テナントに入れる前)
 
@@ -261,8 +267,9 @@ python verify_flows_20260901_01.py
 
 ## 未確認事項
 
-- **`EQ_Received_Items`の列内部名・列の型は未実測**(S03時点)。
-  実測するまで`features.errorLogging`は有効にできない。
+- `EQ_Received_Items`の列内部名は実測済み(2026-09-01)。ただし
+  **`ProcessingStatus`/`ErrorCode`/`ErrorDetail`が数値型で作られており、
+  1行テキストへ直すまでエラー記録の書き込みは失敗する。**
 - **SharePoint「項目の更新」アクションの`operationId`・パラメータ名は未実測**。
   実測するまで`features.eventClose`は有効にできない。
 - エラー処理・クローズ処理は**実機未検証**。生成物の構造検証のみ実施済み。

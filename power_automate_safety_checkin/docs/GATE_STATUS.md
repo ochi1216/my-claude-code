@@ -8,7 +8,7 @@ P1(手動トリガー・自動地震検知なし)のスコープに合わせて�
 | A | コネクタ利用可否(RSS/SharePoint/Teamsが全てStandard) | **未確認** | P1ではRSSコネクタ自体を使わないため対象外。SharePoint/TeamsがStandard表示であることを実環境で確認する必要がある |
 | B | Teams Adaptive Cardアクション(非推奨でない・応答データが取得できる) | **合格(2026-09-01実測)** | 実テナントのTeamsコネクタに「チャットやチャネルにカードを投稿する」(`PostCardToConversation`、応答を待たない)が標準コネクタとして存在し、非推奨表記もない。投げ切り型の非同期設計をそのまま採用できる。「アダプティブ カードを投稿して応答を待機する」(`PostCardAndWaitForResponse`)も併存。1:1チャットへの投稿(`location: "Chat with Flow bot"`)も実機で成功。**ただし応答受信トリガーは存在しない**(下記) |
 | C | JMA Atom→XML本文取得 | **対象外(P1では不使用)** | 自動地震検知はP2として別途判断。P1は手動トリガーのみのため、このGateはP1の完成条件に含まれない |
-| D | SharePoint内部名 | **一部未実測** | `EQ_Events`・`EQ_Config_Members`・`EQ_Responses`は実測完了(2026-09-01)。**`EQ_Received_Items`は未実測**(S03時点。エラー処理を有効にする前提条件)。`evidence/sharepoint_internal_names.json`に記録。**Excelアップロードで作ったリストは、内部名が表示名と一致せず`field_1`,`field_2`...という連番になる**(`Title`のみ標準列)。フローの`item/<列>`・`$filter`では内部名を使う必要がある。あわせて、型の誤検出も判明(下記) |
+| D | SharePoint内部名 | **実測完了(2026-09-01)** | 4リストすべて実測済み。`EQ_Received_Items`はS03で実測し、**リポジトリの`EQ_Received_Items.xlsx`と列構成が違う**ことが判明(下記)。`evidence/sharepoint_internal_names.json`に記録。**Excelアップロードで作ったリストは、内部名が表示名と一致せず`field_1`,`field_2`...という連番になる**(`Title`のみ標準列)。フローの`item/<列>`・`$filter`では内部名を使う必要がある。あわせて、型の誤検出も判明(下記) |
 | E | 共同所有・接続継続 | **未確認** | Solutionの共同所有者設定、接続参照の再認証手順は`docs/MANUAL_STEPS.md`のTEST/PROD展開時に確認する |
 
 ## Gate D で判明した、SharePoint列の型の誤検出
@@ -23,6 +23,9 @@ P1(手動トリガー・自動地震検知なし)のスコープに合わせて�
 | EQ_Events | Epicenter | `field_5` | 数値 | 1行テキスト |
 | EQ_Events | SiteIntensityCode | `field_7` | 数値 | 1行テキスト |
 | EQ_Events | IsTest | `field_11` | 数値 | はい/いいえ |
+| EQ_Received_Items | ProcessingStatus | `field_4` | 数値 | 1行テキスト |
+| EQ_Received_Items | ErrorCode | `field_5` | 数値 | 1行テキスト |
+| EQ_Received_Items | ErrorDetail | `field_6` | 数値 | 1行テキスト |
 
 `AlertStatus`(`field_9`)と`StartedBy`(`field_10`)も同じ問題があったが、修正済み。
 `EQ_Config_Members`は型の問題なし(ただし`IsActive`/`IsManager`がテキスト型のため、
@@ -42,7 +45,8 @@ P1(手動トリガー・自動地震検知なし)のスコープに合わせて�
 - [x] 被災回答時の上司通知が動作(2026-09-01実測)
 - [x] 未回答(タイムアウト)でもフローが正常終了する(2026-09-01実測)
 - [x] `EQ05_Status_Summary_DEV`が集計結果をチャネルへ投稿する(2026-09-01実測)
-- [ ] `EQ_Received_Items`の列内部名・列の型を実測(**未実測**。エラー処理の前提条件)
+- [x] `EQ_Received_Items`の列内部名を実測(2026-09-01。`evidence/`に記録)
+- [ ] `EQ_Received_Items`の列の型を修正(上表の3列。数値型のままでは記録の書き込みが失敗する)
 - [ ] SharePoint「項目の更新」アクションの`operationId`・パラメータ名を実測
       (**未実測**。イベントのクローズ処理の前提条件)
 - [ ] エラー処理(`SCOPE_Try`/`SCOPE_Catch`)が実機で動作する(コードは実装済み・**実機未検証**)
@@ -106,7 +110,28 @@ Teamsコネクタのトリガーは11種類あり、その全てを確認した�
 | `Scope`の中に`Terminate`を置けるか | ループ(`Foreach`/`Until`)の中は不可だが、`Scope`の中は可 | インポート時に検証エラー |
 | `result('SCOPE_Try')`の戻り値 | `name` / `status` / `error.code` / `error.message` を持つオブジェクトの配列 | エラー内容が`UNKNOWN` / `(no message)`で記録される(記録自体は残る) |
 | `body('SP_Create_Event')?['ID']` | SharePointの項目作成の応答に、項目IDが`ID`というキーで含まれる | クローズ処理が対象を特定できず失敗 |
-| `EQ_Received_Items`の列の型 | `ProcessingStatus`等が1行テキスト、`CreatedAt`が日付と時刻 | `EQ_Events`と同じく数値型で作られていた場合、記録の書き込みが失敗する |
+| `EQ_Received_Items`の列の型 | `ProcessingStatus`/`ErrorCode`/`ErrorDetail`が1行テキスト | **実測の結果、3列とも数値型だった。修正するまで記録の書き込みが失敗する** |
 
 いずれも、実測値を`deploy_config.json`へ入れて生成し直せば直せる範囲にしてある
 (推測値を埋め込まず、設定から読む作りにしたのはこのため)。
+
+## Gate D の追加実測: EQ_Received_Items(2026-09-01)
+
+実際のリストは、リポジトリの`EQ_Received_Items.xlsx`
+(`Title`/`ProcessingStatus`/`ErrorCode`/`ErrorMessage`/`CreatedAt`)と**列構成が異なる**。
+
+| 内部名 | 表示名 | 型 | P1での用途 |
+| --- | --- | --- | --- |
+| `Title` | Title | Text | エラーのキー(EventID、または`ERR-EQ0x-<時刻>`) |
+| `field_1` | SourceUpdatedAt | 数値 | 未使用 |
+| `field_2` | SourceLink | 数値 | 未使用 |
+| `field_3` | InformationType | 数値 | 未使用 |
+| `field_4` | ProcessingStatus | 数値 | `Error`を記録(**要型修正**) |
+| `field_5` | ErrorCode | 数値 | エラーコード(**要型修正**) |
+| `field_6` | ErrorDetail | 数値 | エラー内容(**要型修正**) |
+
+- エラー内容の列は`ErrorMessage`ではなく**`ErrorDetail`**。フロー側をこの名前に合わせた。
+- **`CreatedAt`列は存在しない。** SharePointの標準列`Created`(作成日時)が自動で入るため、
+  発生時刻は失われない。`CreatedAt`は設定にあれば書き、無ければ書かない任意扱いにした。
+- `SourceUpdatedAt`/`SourceLink`/`InformationType`は、P2の自動地震検知でJMAフィードの
+  受信を記録するための列と思われる。**このリストがどの版のExcelから作られたかは未確認。**

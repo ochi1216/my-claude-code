@@ -2,6 +2,30 @@
 
 このフォルダ内の変更履歴。
 
+## [20260901_03] - 2026-09-01
+
+**変更ファイル:** `solution/build_flows_20260901_02.py`,
+`solution/verify_flows_20260901_01.py`, `solution/deploy_config.example.json`,
+`solution/README.md`, `docs/GATE_STATUS.md`,
+`evidence/sharepoint_internal_names.json`
+
+- **`EQ_Received_Items`の列内部名を実測した(Gate D完了)。** その結果、
+  **実際のリストがリポジトリの`EQ_Received_Items.xlsx`と列構成が違う**ことが判明した。
+  - エラー内容の列は`ErrorMessage`ではなく**`ErrorDetail`**(`field_6`)。
+    フロー側をこの名前に合わせた。
+  - **`CreatedAt`列は存在しない。** SharePointの標準列`Created`(作成日時)が
+    自動で入るため発生時刻は失われない。`CreatedAt`は、設定にあれば書き、
+    無ければ書かない任意扱いにした。
+  - `SourceUpdatedAt`/`SourceLink`/`InformationType`という、P2の自動地震検知で
+    JMAフィードの受信を記録するためと思われる列がある。
+    **このリストがどの版のExcelから作られたかは未確認。**
+- **`ProcessingStatus`/`ErrorCode`/`ErrorDetail`が数値型で作られていた。**
+  `EQ_Events`で起きたのと同じ、見本データ無しのExcelによる型の誤検出。
+  1行テキストへ直すまでエラー記録の書き込みは失敗する(SharePoint側での手作業が必要)。
+- 検証スクリプトに、実測した列構成での確認を追加した(`ErrorDetail`へ書くこと、
+  存在しない列へ書きにいかないこと、`CreatedAt`を設定した場合は書くこと、
+  `ErrorDetail`だけ未実測でも生成が止まること)。107項目→117項目。
+
 ## [20260901_02] - 2026-09-01
 
 **追加ファイル:** `solution/build_flows_20260901_02.py`,

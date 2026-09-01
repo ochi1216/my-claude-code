@@ -200,15 +200,55 @@
     }
   },
   "EQ_Received_Items": {
-    "_status": "未取得",
-    "_note": "S03時点でも未実測。EQ_Received_Items はExcelアップロードで作成したため、他の3リストと同様に内部名が field_1, field_2 ... の連番になっている可能性が高いが、連番の割り当て順は保証されないため必ず実測すること。あわせて、EQ_Events で起きたのと同じ『見本データ無しのExcelから作ったためテキスト列が数値型になる』問題が EQ_Received_Items にも起きていないかを確認する(ProcessingStatus / ErrorCode / ErrorMessage は1行テキスト、CreatedAt は日付と時刻が必要)。",
-    "_expected_display_names": [
-      "Title",
-      "ProcessingStatus",
-      "ErrorCode",
-      "ErrorMessage",
-      "CreatedAt"
-    ],
-    "_how_to_measure": "SharePointにログイン済みのブラウザで下記を開き、InternalName / Title / TypeAsString を控える: https://<サイトURL>/_api/web/lists/getbytitle('EQ_Received_Items')/fields?$select=InternalName,Title,TypeAsString&$filter=Hidden eq false and ReadOnlyField eq false"
+    "_measured_at": "2026-09-01",
+    "_finding": "実際のリストは power_automate_safety_checkin/EQ_Received_Items.xlsx (Title/ProcessingStatus/ErrorCode/ErrorMessage/CreatedAt)と列構成が異なる。エラー内容の列は ErrorMessage ではなく ErrorDetail で、CreatedAt は存在しない。代わりに SourceUpdatedAt / SourceLink / InformationType がある(P2の自動地震検知でJMAフィードの受信を記録するための列と思われるが、リストがどの版から作られたかは未確認)。発生時刻はSharePointの標準列 Created が自動で入るため、CreatedAt は必須にしていない。",
+    "Title": {
+      "internalName": "Title",
+      "type": "Text",
+      "expectedType": "Text",
+      "ok": true
+    },
+    "SourceUpdatedAt": {
+      "internalName": "field_1",
+      "type": "Number",
+      "expectedType": "DateTime",
+      "ok": false,
+      "note": "P1では未使用"
+    },
+    "SourceLink": {
+      "internalName": "field_2",
+      "type": "Number",
+      "expectedType": "Text",
+      "ok": false,
+      "note": "P1では未使用"
+    },
+    "InformationType": {
+      "internalName": "field_3",
+      "type": "Number",
+      "expectedType": "Text",
+      "ok": false,
+      "note": "P1では未使用"
+    },
+    "ProcessingStatus": {
+      "internalName": "field_4",
+      "type": "Number",
+      "expectedType": "Text",
+      "ok": false,
+      "note": "要修正: 'Error'という文字列が入らず、エラー記録そのものが失敗する"
+    },
+    "ErrorCode": {
+      "internalName": "field_5",
+      "type": "Number",
+      "expectedType": "Text",
+      "ok": false,
+      "note": "要修正: 同上"
+    },
+    "ErrorDetail": {
+      "internalName": "field_6",
+      "type": "Number",
+      "expectedType": "Text",
+      "ok": false,
+      "note": "要修正: 同上。255文字を超える分はフロー側で切り詰めている"
+    }
   }
 }
