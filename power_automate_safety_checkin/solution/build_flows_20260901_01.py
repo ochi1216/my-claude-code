@@ -256,7 +256,7 @@ def build_eq06(cfg, cards_dir):
     # 本番運用へ移る際は、この設定を空文字にする(それが唯一の切替操作)。
     member_email = "items('LOOP_Each_Member')?['%s']" % col("EQ_Config_Members", "Email")
     override = cfg.get("testRecipientOverride", "").strip()
-    recipient_expr = "'%s'" % override if override else "@%s" % member_email
+    recipient_expr = override if override else "@%s" % member_email
 
     # 回答の受け取り方。このテナントには「カードに応答があったとき」トリガーが
     # 無いため、既定は待機型(wait)。postOnlyにすると投げ切りになり回答は拾わない。
@@ -283,9 +283,7 @@ def build_eq06(cfg, cards_dir):
             # 実行履歴から読み取れるようにする。構造が確定したら、ここを
             # 回答の解釈・EQ_Responsesへの保存・上司通知に置き換える。
             "CMP_Raw_Response": {
-                "runAfter": {
-                    "TM_Post_CheckIn_Card": ["Succeeded", "TimedOut", "Failed"]
-                },
+                "runAfter": {"TM_Post_CheckIn_Card": ["Succeeded", "TimedOut"]},
                 "type": "Compose",
                 "inputs": "@body('TM_Post_CheckIn_Card')",
             },
