@@ -1,8 +1,20 @@
-# フローロジック仕様(コピペ用) — Power Automate PoC版(P1: 手動トリガー)
+# フローロジック仕様 — Power Automate PoC版(P1: 手動トリガー)
 
-このドキュメントは、Power Automateの画面で「何を組むか考える」時間をゼロにするためのものである。
-各アクションは、命名規則(`handover/CLAUDE_CODE_HANDOVER.md` §14.2の接頭辞)に従って
-そのままの名前で作成し、式は記載の通りコピペするだけでよい。
+**このドキュメントは「設計仕様」であり、手順書ではない。** S02で、GUIでの手組みは
+量・消失リスクの両面で現実的でないと判明したため、フローは
+`solution/build_flows_*.py` がこの仕様に基づいてJSONを生成し、
+`pac solution import` でDEV環境へ流し込む方式に変更した(手順は `solution/README.md`)。
+
+`EQ06_Manual_Drill_DEV` は2026-09-01に実機で動作確認済み。以下の記述は実測に
+合わせて更新してある。`EQ04b` / `EQ05` は未実装。
+
+## GUI構築で判明した、設計上の必須事項
+
+| 事項 | 内容 |
+| --- | --- |
+| Switchの出力は参照できない | `outputs('CMP_Site_Config')`のようにSwitchアクション名で結果を参照することはできない。Switchは制御構造であり出力を持たない。実行された分岐内のアクションしか参照できず、その名前は分岐ごとに異なる。このため**変数(`varSiteConfig`/`varIntensityValue`)経由**で受け渡す |
+| SharePointの列は内部名で指定する | Excelアップロードで作ったリストは内部名が`field_1`,`field_2`...となる。`item/<列>`や`$filter`では内部名を使う(`evidence/sharepoint_internal_names.json`) |
+| トリガー入力は選択肢にできない | このテナントの手動トリガーには「選択肢」型が無く、テキスト型のみ。`IntensityCode`の値の妥当性は`CMP_Intensity_Value`のdefaultケースで担保する |
 
 対象は **P1(手動トリガー版)** の5フローのみ。自動地震検知(EQ01/EQ02の自動連携)は
 Gate C不合格見込みのため、このPoCには含めない(詳細は `docs/REVIEW_earthquake_safety_system_0730_02.md` 参照)。
@@ -110,8 +122,11 @@ Power AutomateのSolution機能で、以下を**環境変数**として登録す
 
 式:
 ```
-greaterOrEquals(outputs('CMP_Intensity_Value'), outputs('CMP_Site_Config')?['ThresholdValue'])
+greaterOrEquals(variables('varIntensityValue'), variables('varSiteConfig')?['ThresholdValue'])
 ```
+
+Switchの出力は参照できないため、各ケースで`変数の設定`により`varIntensityValue`/
+`varSiteConfig`へ書き込んでおき、以降はその変数を参照する。
 
 - いいえの場合: **`END_Below_Threshold`**(終了・成功。「閾値未満のためイベントを作成しない」というのは
   正常系であり、失敗ではない)
@@ -134,7 +149,7 @@ concat('EQ-', formatDateTime(utcNow(), 'yyyyMMdd-HHmmss'), '-', triggerBody()['S
 | OccurredAt | `utcNow()` |
 | Epicenter | `triggerBody()['Epicenter']` |
 | SiteIntensityCode | `triggerBody()['IntensityCode']` |
-| SiteIntensityValue | `outputs('CMP_Intensity_Value')` |
+| SiteIntensityValue | `variables('varIntensityValue')` |
 | AlertStatus | `Open` |
 | StartedBy | `Manual` |
 | IsTest | `triggerBody()['IsTest']` |
@@ -149,15 +164,15 @@ convertTimeZone(utcNow(), 'UTC', 'Tokyo Standard Time', 'yyyy/MM/dd HH:mm')
 **7. `TM_Post_Channel_Alert`** — Teams「アダプティブ カードをチャットまたはチャネルに投稿する」
 (非対話・**待たないアクション**を選択すること。「〜して応答を待つ」ではない)
 
-- 投稿先: チーム = `outputs('CMP_Site_Config')?['TeamId']`、
-  チャネル = `outputs('CMP_Site_Config')?['ChannelId']`
+- 投稿先: チーム = `variables('varSiteConfig')?['TeamId']`、
+  チャネル = `variables('varSiteConfig')?['ChannelId']`
 - カードJSON: `cards/channel_alert_card.json` の内容をそのまま貼り付け
 - 変数バインド:
 
   | プレースホルダ | 式 |
   | --- | --- |
   | `TestPrefix` | `if(triggerBody()['IsTest'], '【訓練】', '')` |
-  | `SiteName` | `outputs('CMP_Site_Config')?['SiteName']` |
+  | `SiteName` | `variables('varSiteConfig')?['SiteName']` |
   | `Intensity` | `triggerBody()['IntensityCode']` |
   | `Epicenter` | `triggerBody()['Epicenter']` |
   | `OccurredAtJST` | `outputs('CMP_OccurredAtJST')` |
@@ -194,7 +209,7 @@ convertTimeZone(utcNow(), 'UTC', 'Tokyo Standard Time', 'yyyy/MM/dd HH:mm')
   | プレースホルダ | 式 |
   | --- | --- |
   | `EventID` | `outputs('CMP_EventID')` |
-  | `SiteName` | `outputs('CMP_Site_Config')?['SiteName']` |
+  | `SiteName` | `variables('varSiteConfig')?['SiteName']` |
   | `Intensity` | `triggerBody()['IntensityCode']` |
   | `OccurredAtJST` | `outputs('CMP_OccurredAtJST')` |
   | `EmployeeID` | `items('LOOP_Each_Member')?['Title']` |
@@ -341,11 +356,18 @@ WorkStatus, RespondedAt=`utcNow()`, Comment=`body('PAR_Response')?['comment']`
 
 ---
 
-## Gate B確認後に更新すべき箇所(一覧)
+## 実測で確定した値(2026-09-01)
 
-以下は実行履歴が得られるまで暫定値である。`evidence/`取得後、このドキュメントを更新すること。
+| 項目 | 確定値 |
+| --- | --- |
+| トリガー入力の参照 | `triggerBody()?['SiteCode']` 等。JSONスキーマで意味のあるプロパティ名を定義でき、そのまま参照できる |
+| Teams カード投稿(待たない) | アクション名「チャットやチャネルにカードを投稿する」、`operationId: PostCardToConversation` |
+| Teams カード投稿(応答を待つ) | アクション名「アダプティブ カードを投稿して応答を待機する」、`operationId: PostCardAndWaitForResponse` |
+| チャネルへの投稿 | `location: "Channel"` + `body/recipient/groupId` / `body/recipient/channelId` |
+| 1:1チャットへの投稿 | `location: "Chat with Flow bot"` + `body/recipient` にメールアドレス |
+| SharePoint 項目の作成 / 取得 | `operationId: PostItem` / `GetItems` |
 
-1. `TRG_Manual_Drill`の各入力の内部トークン名(`triggerBody()['SiteCode']`等)
-2. `TRG_On_Adaptive_Card_Response`のトリガー出力パス(`triggerBody()?['data']`、`?['responder']?['email']`)
-3. Teams「アダプティブ カードをチャットまたはチャネルに投稿する」アクションの正式名称と、
-   非推奨でないことの確認(Gate B)
+### 未確定
+
+- `TRG_On_Adaptive_Card_Response`(EQ04bで使うカード応答トリガー)が、このテナントの
+  Teamsコネクタに存在するかは**未確認**。存在しない場合は設計変更が必要。

@@ -2,6 +2,42 @@
 
 このフォルダ内の変更履歴。
 
+## [20260901_01] - 2026-09-01
+
+**追加ファイル:** `solution/build_flows_20260901_01.py`,
+`solution/deploy_config.example.json`, `evidence/sharepoint_internal_names.json`
+
+**変更ファイル:** `solution/README.md`, `docs/FLOW_LOGIC_SPEC.md`,
+`docs/GATE_STATUS.md`, `cards/checkin_card.json`, `.gitignore`
+
+- **フロー構築方式を、GUIでの手組みからJSON生成+CLIインポートへ変更した。**
+  GUIでの構築はEQ06だけで30ステップを超える上、「保存」前に画面を再読み込みすると
+  作りかけが全て消える(実際に一度失った)。クラウドフローの実体はJSONであり
+  Solutionとしてインポートできるため、生成をスクリプト化した。
+  結果、EQ06のフロー本体はGUIのクリック操作ゼロで構築できるようになった。
+- Solutionへフローを格納する形式は公開情報だけでは特定できなかったため、
+  実テナントに最小フローを作ってエクスポート・unpackし、実測で確定させた
+  (`.json.data.xml`という対のメタデータファイルが必要、`JsonFileName`は先頭スラッシュ必須、
+  `Customizations.xml`の`<Workflows />`は空のまま、など)。
+- **Gate B 合格**: Teamsの「チャットやチャネルにカードを投稿する」
+  (`PostCardToConversation`、応答を待たない)が標準コネクタに存在し、非推奨でないことを実測。
+  投げ切り型の非同期設計をそのまま採用できる。1:1チャットへの投稿
+  (`location: "Chat with Flow bot"`)も実機で成功を確認。
+- **Gate D 実測完了**: Excelアップロードで作ったリストは、内部名が表示名と一致せず
+  `field_1`,`field_2`...という連番になることが判明(`Title`のみ標準列)。
+  あわせて、見本データ無しでアップロードしたため多くの列が数値型で作られていたことも判明し、
+  5列の型を修正した。実測値は`evidence/sharepoint_internal_names.json`に記録。
+- `docs/FLOW_LOGIC_SPEC.md`の設計上の誤りを修正。Switchアクションには出力が無く
+  `outputs('CMP_Site_Config')`のような参照はできないため、変数
+  (`varSiteConfig`/`varIntensityValue`)経由で受け渡す設計に変更した。
+- **`EQ06_Manual_Drill_DEV`の実機動作確認完了**(単一拠点TOKYO)。
+  閾値未満(震度4)は`END_Below_Threshold`で正常終了、閾値以上(震度5弱)は
+  EQ_Eventsへのレコード作成・Teamsチャネルへのカード投稿・対象者2名への
+  個人カード送信まで、全アクションが成功した。
+- 個人カード(`cards/checkin_card.json`)の見出しにも`【訓練】`を付けるよう修正。
+  チャネル通知にしか訓練表示が無く、個人カードを受け取った人が訓練かどうか
+  判断できない状態だった(実機テストで実際に2名へ訓練表示なしのカードが届いた)。
+
 ## [20260731_04] - 2026-07-31
 
 - ユーザーがSharePointサイト(MyPrivate)へ4リスト

@@ -203,6 +203,7 @@ def build_eq06(cfg, cards_dir):
         cards_dir,
         "checkin_card.json",
         {
+            "TestPrefix": "@{if(triggerBody()?['IsTest'], '【訓練】', '')}",
             "EventID": "@{outputs('CMP_EventID')}",
             "SiteName": "@{variables('varSiteConfig')?['SiteName']}",
             "Intensity": "@{triggerBody()?['IntensityCode']}",
