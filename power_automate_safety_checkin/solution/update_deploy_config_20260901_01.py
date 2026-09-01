@@ -48,8 +48,8 @@ RECEIVED_ITEMS_COLUMNS = collections.OrderedDict([
     ("ErrorDetail", "field_6"),
 ])
 
-GUID_PATTERN = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
-                          r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+GUID_PATTERN = re.compile(r"^\{?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+                          r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}?$")
 
 # エラー処理の動作確認で、GET_Active_Members をわざと失敗させるための列内部名。
 #
@@ -120,6 +120,91 @@ def ask_list_id():
     return answer.strip()
 
 
+def describe_guid_format(value):
+    """リストGUIDの書式を、値そのものを出さずに説明する。"""
+    if not value:
+        return "未設定"
+    if value.startswith("<"):
+        return "プレースホルダのまま"
+    if not GUID_PATTERN.match(value):
+        return "GUIDの形式ではない(長さ %d)" % len(value)
+    braces = "中かっこあり" if value.startswith("{") else "中かっこなし"
+    body = value.strip("{}")
+    if body.lower() == body:
+        case = "小文字"
+    elif body.upper() == body:
+        case = "大文字"
+    else:
+        case = "大小混在"
+    return "%s・%s" % (braces, case)
+
+
+def diagnose(cfg, path):
+    """設定の書式を点検する。「List not found」の切り分け用。
+
+    SharePointコネクタの table は、環境によって中かっこ付きのGUIDが入っている
+    ことがある。3リストが中かっこ付きなのに1つだけ無い、といった食い違いは
+    インポートは通るのに実行・保存の時点で NotFound になるため見つけにくい。
+    """
+    print("")
+    print("%s の点検" % path)
+    print("")
+    print("listIds の書式(値そのものは表示しません):")
+    formats = {}
+    for name, value in cfg.get("listIds", {}).items():
+        if name.startswith("_"):
+            continue
+        shape = describe_guid_format(value if isinstance(value, str) else "")
+        formats.setdefault(shape, []).append(name)
+        print("  %-20s : %s" % (name, shape))
+
+    print("")
+    if len(formats) > 1:
+        print("!! 書式が揃っていません。多数派に合わせてください。")
+        for shape, names in sorted(formats.items(), key=lambda kv: -len(kv[1])):
+            print("   %s : %s" % (shape, ", ".join(names)))
+        print("   --normalize-list-ids を付けて実行すると、多数派の書式へ揃えます。")
+    else:
+        print("   listIds の書式は揃っています。")
+
+    print("")
+    print("列内部名:")
+    for list_name, columns in cfg.get("columnInternalNames", {}).items():
+        if not isinstance(columns, dict):
+            continue
+        unmeasured = [k for k, v in columns.items()
+                      if not k.startswith("_") and isinstance(v, str) and v.startswith("<")]
+        print("  %-20s : %d列%s" % (list_name, len([k for k in columns if not k.startswith("_")]),
+                                     "(未実測: %s)" % ", ".join(unmeasured) if unmeasured else ""))
+
+    features = cfg.get("features", {})
+    override = cfg.get("testRecipientOverride", "").strip()
+    print("")
+    print("機能: errorLogging=%s / eventClose=%s"
+          % (features.get("errorLogging"), features.get("eventClose")))
+    print("宛先: %s" % ("検証者だけ(testRecipientOverride 設定あり)" if override
+                        else "*** 名簿どおり(本番宛先モード) ***"))
+
+
+def normalize_list_ids(cfg):
+    """listIds の書式を、多数派に合わせて揃える。"""
+    shapes = {}
+    for name, value in cfg.get("listIds", {}).items():
+        if name.startswith("_") or not isinstance(value, str):
+            continue
+        if GUID_PATTERN.match(value):
+            shapes.setdefault(value.startswith("{"), []).append(name)
+    if len(shapes) < 2:
+        return []
+    with_braces = len(shapes.get(True, [])) >= len(shapes.get(False, []))
+    changed = []
+    for name in shapes.get(not with_braces, []):
+        body = cfg["listIds"][name].strip("{}")
+        cfg["listIds"][name] = ("{%s}" % body) if with_braces else body
+        changed.append(name)
+    return changed
+
+
 def write_error_test_copy(cfg, has_bom, source_path, dest_path):
     """メンバー抽出のフィルターだけを壊した設定の写しを書き出す。
 
@@ -175,6 +260,10 @@ def main():
                              "sharePointUpdateAction の実測値が必要)")
     parser.add_argument("--no-prompt", action="store_true",
                         help="リストGUIDを対話で聞かない(自動実行向け)")
+    parser.add_argument("--diagnose", action="store_true",
+                        help="設定の書式を点検するだけで、書き換えは行わない")
+    parser.add_argument("--normalize-list-ids", action="store_true",
+                        help="listIds のGUIDの書式(中かっこの有無)を多数派へ揃える")
     parser.add_argument("--write-error-test-copy", default="",
                         help="エラー処理の動作確認用に、EQ_EventsのリストGUIDだけを"
                              "存在しない値へ差し替えた写しを、指定したパスへ書き出す"
@@ -188,6 +277,10 @@ def main():
         )
 
     cfg, has_bom = load_config(args.config)
+
+    if args.diagnose:
+        diagnose(cfg, args.config)
+        return
 
     if args.write_error_test_copy:
         write_error_test_copy(cfg, has_bom, args.config, args.write_error_test_copy)
@@ -247,6 +340,14 @@ def main():
     if args.enable_event_close and not features.get("eventClose"):
         features["eventClose"] = True
         changes.append("features.eventClose を true にしました")
+
+    # --- 3.5 リストGUIDの書式揃え -------------------------------------------
+    if args.normalize_list_ids:
+        renamed = normalize_list_ids(cfg)
+        if renamed:
+            changes.append("listIds の書式を多数派へ揃えました: %s" % ", ".join(renamed))
+        else:
+            changes.append("listIds の書式はすでに揃っていました(変更なし)")
 
     # --- 4. SharePoint「項目の更新」アクションの枠 ---------------------------
     if "sharePointUpdateAction" not in cfg:

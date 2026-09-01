@@ -274,6 +274,36 @@ python update_deploy_config_20260901_01.py --received-items-list-id <GUID> --ena
   付けなければ`false`のまま追加される
 - 書き出したあとJSONとして読み直し、壊れていないことを確かめてから終了する
 
+## 「List not found」が出るときの切り分け
+
+フローを開いたときに次のエラーが出て、フローがオフのままになることがある。
+
+```
+Flow save failed with code 'DynamicOperationRequestClientFailure' ...
+operation 'GetTable' failed with status code 'NotFound' ... "List not found"
+```
+
+原因は`listIds`のいずれかがSharePointで解決できないこと。**まず書式を点検する。**
+
+```powershell
+python update_deploy_config_20260901_01.py --diagnose
+```
+
+`table`に入れるリストGUIDは、**環境によって中かっこ付き(`{...}`)で保持されている。**
+「リストの設定」画面のURLから取ると`List=%7B...%7D`(=`{...}`)の形になるため、
+既存の3リストは中かっこ付きで、あとから足した1つだけ中かっこ無し、という
+食い違いが起きうる。この食い違いは**インポートは通り、フローを開いたときに
+初めてNotFoundになる**ため見つけにくい。
+
+揃っていなければ、多数派の書式へ合わせる。
+
+```powershell
+python update_deploy_config_20260901_01.py --normalize-list-ids
+```
+
+`--diagnose`はリストGUIDそのものを表示せず、書式(中かっこの有無・大文字小文字)
+だけを比べる。あわせて列内部名の未実測、機能フラグ、いま誰に届く設定かも表示する。
+
 ## エラー処理の動作確認(誰にもカードを送らずに試す)
 
 `SCOPE_Catch`が実際に`EQ_Received_Items`へ記録するかは、わざと失敗させないと
