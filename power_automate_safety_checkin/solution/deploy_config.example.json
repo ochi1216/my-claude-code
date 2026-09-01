@@ -27,11 +27,24 @@
       "IsActive": "field_4",
       "IsManager": "field_5",
       "EscalationOrder": "field_6"
+    },
+    "EQ_Responses": {
+      "Title": "Title",
+      "EventID": "field_1",
+      "EmployeeID": "field_2",
+      "Email": "field_3",
+      "ResponseCode": "field_4",
+      "SafetyStatus": "field_5",
+      "WorkStatus": "field_6",
+      "RespondedAt": "field_7",
+      "Comment": "field_8",
+      "Revision": "field_9"
     }
   },
   "memberFlagValues": {
     "active": "TRUE",
-    "notManager": "FALSE"
+    "notManager": "FALSE",
+    "isManager": "TRUE"
   },
   "testRecipientOverride": "<検証中の送信先メールアドレス。空文字にすると名簿どおりに送信される>",
   "connectionReferences": {

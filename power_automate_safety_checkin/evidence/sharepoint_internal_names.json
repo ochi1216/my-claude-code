@@ -2,32 +2,204 @@
   "_comment": "Gate D: SharePoint列の内部名・型の実測値(2026-09-01取得)。取得方法は evidence/README.md 参照。リストGUID・サイトURLは社内情報のため記録しない(solution/deploy_config.json 側で管理)。",
   "_finding": "Excelアップロードで作成したリストは、表示名と内部名が一致せず field_1, field_2 ... という連番になる。Titleのみ標準列のため内部名もTitle。フローの item/<列> や $filter では内部名を使う必要がある。",
   "_measured_at": "2026-09-01",
-
   "EQ_Events": {
-    "Title":              { "internalName": "Title",    "type": "Text",   "expectedType": "Text",     "ok": true },
-    "SourceEntryId":      { "internalName": "field_1",  "type": "Number", "expectedType": "Text",     "ok": false, "note": "P1では未使用" },
-    "SiteCode":           { "internalName": "field_2",  "type": "Number", "expectedType": "Text",     "ok": false, "note": "要修正: 'TOKYO'等の文字列が入らない" },
-    "OccurredAt":         { "internalName": "field_3",  "type": "Number", "expectedType": "DateTime", "ok": false, "note": "要修正" },
-    "PublishedAt":        { "internalName": "field_4",  "type": "Number", "expectedType": "DateTime", "ok": false, "note": "P1では未使用" },
-    "Epicenter":          { "internalName": "field_5",  "type": "Number", "expectedType": "Text",     "ok": false, "note": "要修正" },
-    "Magnitude":          { "internalName": "field_6",  "type": "Number", "expectedType": "Number",   "ok": true,  "note": "P1では未使用" },
-    "SiteIntensityCode":  { "internalName": "field_7",  "type": "Number", "expectedType": "Text",     "ok": false, "note": "要修正: '5-'等が入らない" },
-    "SiteIntensityValue": { "internalName": "field_8",  "type": "Number", "expectedType": "Number",   "ok": true },
-    "AlertStatus":        { "internalName": "field_9",  "type": "Text",   "expectedType": "Text",     "ok": true,  "note": "数値型だったのを手動で修正済み" },
-    "StartedBy":          { "internalName": "field_10", "type": "Text",   "expectedType": "Text",     "ok": true,  "note": "数値型だったのを手動で修正済み" },
-    "IsTest":             { "internalName": "field_11", "type": "Number", "expectedType": "Boolean",  "ok": false, "note": "要修正" }
+    "Title": {
+      "internalName": "Title",
+      "type": "Text",
+      "expectedType": "Text",
+      "ok": true
+    },
+    "SourceEntryId": {
+      "internalName": "field_1",
+      "type": "Number",
+      "expectedType": "Text",
+      "ok": false,
+      "note": "P1では未使用"
+    },
+    "SiteCode": {
+      "internalName": "field_2",
+      "type": "Number",
+      "expectedType": "Text",
+      "ok": false,
+      "note": "要修正: 'TOKYO'等の文字列が入らない"
+    },
+    "OccurredAt": {
+      "internalName": "field_3",
+      "type": "Number",
+      "expectedType": "DateTime",
+      "ok": false,
+      "note": "要修正"
+    },
+    "PublishedAt": {
+      "internalName": "field_4",
+      "type": "Number",
+      "expectedType": "DateTime",
+      "ok": false,
+      "note": "P1では未使用"
+    },
+    "Epicenter": {
+      "internalName": "field_5",
+      "type": "Number",
+      "expectedType": "Text",
+      "ok": false,
+      "note": "要修正"
+    },
+    "Magnitude": {
+      "internalName": "field_6",
+      "type": "Number",
+      "expectedType": "Number",
+      "ok": true,
+      "note": "P1では未使用"
+    },
+    "SiteIntensityCode": {
+      "internalName": "field_7",
+      "type": "Number",
+      "expectedType": "Text",
+      "ok": false,
+      "note": "要修正: '5-'等が入らない"
+    },
+    "SiteIntensityValue": {
+      "internalName": "field_8",
+      "type": "Number",
+      "expectedType": "Number",
+      "ok": true
+    },
+    "AlertStatus": {
+      "internalName": "field_9",
+      "type": "Text",
+      "expectedType": "Text",
+      "ok": true,
+      "note": "数値型だったのを手動で修正済み"
+    },
+    "StartedBy": {
+      "internalName": "field_10",
+      "type": "Text",
+      "expectedType": "Text",
+      "ok": true,
+      "note": "数値型だったのを手動で修正済み"
+    },
+    "IsTest": {
+      "internalName": "field_11",
+      "type": "Number",
+      "expectedType": "Boolean",
+      "ok": false,
+      "note": "要修正"
+    }
   },
-
   "EQ_Config_Members": {
-    "Title":           { "internalName": "Title",   "type": "Text",   "expectedType": "Text",    "ok": true, "note": "EmployeeIDを格納" },
-    "DisplayName":     { "internalName": "field_1", "type": "Text",   "expectedType": "Text",    "ok": true },
-    "Email":           { "internalName": "field_2", "type": "Text",   "expectedType": "Text",    "ok": true },
-    "SiteCode":        { "internalName": "field_3", "type": "Text",   "expectedType": "Text",    "ok": true },
-    "IsActive":        { "internalName": "field_4", "type": "Text",   "expectedType": "Boolean", "ok": true, "note": "テキスト型のため、フィルターは数値比較ではなく文字列比較にする" },
-    "IsManager":       { "internalName": "field_5", "type": "Text",   "expectedType": "Boolean", "ok": true, "note": "同上" },
-    "EscalationOrder": { "internalName": "field_6", "type": "Number", "expectedType": "Number",  "ok": true }
+    "Title": {
+      "internalName": "Title",
+      "type": "Text",
+      "expectedType": "Text",
+      "ok": true,
+      "note": "EmployeeIDを格納"
+    },
+    "DisplayName": {
+      "internalName": "field_1",
+      "type": "Text",
+      "expectedType": "Text",
+      "ok": true
+    },
+    "Email": {
+      "internalName": "field_2",
+      "type": "Text",
+      "expectedType": "Text",
+      "ok": true
+    },
+    "SiteCode": {
+      "internalName": "field_3",
+      "type": "Text",
+      "expectedType": "Text",
+      "ok": true
+    },
+    "IsActive": {
+      "internalName": "field_4",
+      "type": "Text",
+      "expectedType": "Boolean",
+      "ok": true,
+      "note": "テキスト型のため、フィルターは数値比較ではなく文字列比較にする"
+    },
+    "IsManager": {
+      "internalName": "field_5",
+      "type": "Text",
+      "expectedType": "Boolean",
+      "ok": true,
+      "note": "同上"
+    },
+    "EscalationOrder": {
+      "internalName": "field_6",
+      "type": "Number",
+      "expectedType": "Number",
+      "ok": true
+    }
   },
-
-  "EQ_Responses":      { "_status": "未取得" },
-  "EQ_Received_Items": { "_status": "未取得" }
+  "EQ_Responses": {
+    "Title": {
+      "internalName": "Title",
+      "type": "Text",
+      "expectedType": "Text",
+      "ok": true,
+      "note": "EventID|EmployeeID をキーとして格納"
+    },
+    "EventID": {
+      "internalName": "field_1",
+      "type": "Text",
+      "expectedType": "Text",
+      "ok": true
+    },
+    "EmployeeID": {
+      "internalName": "field_2",
+      "type": "Text",
+      "expectedType": "Text",
+      "ok": true
+    },
+    "Email": {
+      "internalName": "field_3",
+      "type": "Text",
+      "expectedType": "Text",
+      "ok": true,
+      "note": "カード内のIDではなく responder.email(実際の回答者)を記録する"
+    },
+    "ResponseCode": {
+      "internalName": "field_4",
+      "type": "Number",
+      "expectedType": "Number",
+      "ok": true,
+      "note": "応答は文字列で返るため int() で変換して書き込む"
+    },
+    "SafetyStatus": {
+      "internalName": "field_5",
+      "type": "Text",
+      "expectedType": "Text",
+      "ok": true
+    },
+    "WorkStatus": {
+      "internalName": "field_6",
+      "type": "Text",
+      "expectedType": "Text",
+      "ok": true
+    },
+    "RespondedAt": {
+      "internalName": "field_7",
+      "type": "Text",
+      "expectedType": "DateTime",
+      "ok": true,
+      "note": "テキスト型だが、ISO8601文字列は文字列のままでも時系列順に並ぶため許容"
+    },
+    "Comment": {
+      "internalName": "field_8",
+      "type": "Text",
+      "expectedType": "Text",
+      "ok": true
+    },
+    "Revision": {
+      "internalName": "field_9",
+      "type": "Number",
+      "expectedType": "Number",
+      "ok": true
+    }
+  },
+  "EQ_Received_Items": {
+    "_status": "未取得"
+  }
 }

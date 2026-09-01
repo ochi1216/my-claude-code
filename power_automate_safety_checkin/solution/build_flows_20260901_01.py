@@ -265,6 +265,47 @@ def build_eq06(cfg, cards_dir):
     response_timeout = cfg.get("responseTimeout", "PT1H")
 
     if response_mode == "wait":
+        # 応答JSONの構造は evidence/teams_card_response_sanitized.json の実測値。
+        # data配下がカードの入力値、responder配下が実際に回答した人。
+        resp = "body('TM_Post_CheckIn_Card')"
+        code = "%s?['data']?['responseCode']" % resp
+        # 1=無事/出社可, 2=無事/出社不可, 3=被災/出社可, 4=被災/出社不可。
+        # 並列ループ内では変数を使えない(全イテレーションで共有されて値が混ざる)ため、
+        # 安否・出社可否は式で直接計算する。
+        safety = "if(or(equals(%s,'1'),equals(%s,'2')),'Safe','Affected')" % (code, code)
+        work = "if(or(equals(%s,'1'),equals(%s,'3')),'Available','Unavailable')" % (code, code)
+        comment = "coalesce(%s?['data']?['comment'],'')" % resp
+        employee_name = "items('LOOP_Each_Member')?['%s']" % col(
+            "EQ_Config_Members", "DisplayName"
+        )
+
+        manager_card = load_card(
+            cards_dir,
+            "manager_alert_card.json",
+            {
+                "TestPrefix": "@{if(triggerBody()?['IsTest'], '【訓練】', '')}",
+                "EmployeeName": "@{%s}" % employee_name,
+                "EmployeeID": "@{%s?['data']?['employeeId']}" % resp,
+                "SiteName": "@{variables('varSiteConfig')?['SiteName']}",
+                "SafetyStatus": "@{%s}" % safety,
+                "WorkStatus": "@{%s}" % work,
+                "Comment": "@{%s}" % comment,
+                "EventID": "@{outputs('CMP_EventID')}",
+            },
+        )
+
+        manager_filter = "%s eq '@{triggerBody()?['SiteCode']}' and %s eq '%s' and %s eq '%s'" % (
+            col("EQ_Config_Members", "SiteCode"),
+            col("EQ_Config_Members", "IsActive"),
+            flags["active"],
+            col("EQ_Config_Members", "IsManager"),
+            flags.get("isManager", "TRUE"),
+        )
+        manager_email = "items('LOOP_Notify_Managers')?['%s']" % col(
+            "EQ_Config_Members", "Email"
+        )
+        manager_recipient = override if override else "@%s" % manager_email
+
         loop_actions = {
             "TM_Post_CheckIn_Card": teams_post_card_and_wait(
                 {
@@ -279,13 +320,70 @@ def build_eq06(cfg, cards_dir):
                 {},
                 response_timeout,
             ),
-            # 回答JSONの構造が未実測のため、まず生の応答をそのまま記録して
-            # 実行履歴から読み取れるようにする。構造が確定したら、ここを
-            # 回答の解釈・EQ_Responsesへの保存・上司通知に置き換える。
-            "CMP_Raw_Response": {
-                "runAfter": {"TM_Post_CheckIn_Card": ["Succeeded", "TimedOut"]},
-                "type": "Compose",
-                "inputs": "@body('TM_Post_CheckIn_Card')",
+            "SP_Create_Response": sp_action(
+                "PostItem",
+                {
+                    "dataset": site_url,
+                    "table": lists["EQ_Responses"],
+                    # EventIDと社員IDの組をキーにしておくと、後から集計・突合しやすい
+                    "item/%s" % col("EQ_Responses", "Title"): (
+                        "@concat(%s?['data']?['eventId'],'|',%s?['data']?['employeeId'])"
+                        % (resp, resp)
+                    ),
+                    "item/%s" % col("EQ_Responses", "EventID"): "@%s?['data']?['eventId']" % resp,
+                    "item/%s" % col("EQ_Responses", "EmployeeID"): (
+                        "@%s?['data']?['employeeId']" % resp
+                    ),
+                    # カード内のIDではなく、実際に回答した人のメールを記録する
+                    # (カードのdataは詐称されうるため。応答にはresponderが必ず入る)
+                    "item/%s" % col("EQ_Responses", "Email"): "@%s?['responder']?['email']" % resp,
+                    # 列が数値型のため、文字列で返る responseCode を変換する
+                    "item/%s" % col("EQ_Responses", "ResponseCode"): "@int(%s)" % code,
+                    "item/%s" % col("EQ_Responses", "SafetyStatus"): "@%s" % safety,
+                    "item/%s" % col("EQ_Responses", "WorkStatus"): "@%s" % work,
+                    "item/%s" % col("EQ_Responses", "RespondedAt"): "@%s?['responseTime']" % resp,
+                    # 空欄のInput.Textは応答に現れないため、既定値を用意する
+                    "item/%s" % col("EQ_Responses", "Comment"): "@%s" % comment,
+                    "item/%s" % col("EQ_Responses", "Revision"): 1,
+                },
+                {"TM_Post_CheckIn_Card": ["Succeeded"]},
+            ),
+            "CHK_Affected": {
+                "runAfter": {"SP_Create_Response": ["Succeeded"]},
+                "type": "If",
+                "expression": {"and": [{"equals": ["@%s" % safety, "Affected"]}]},
+                "actions": {
+                    "GET_Managers": sp_action(
+                        "GetItems",
+                        {
+                            "dataset": site_url,
+                            "table": lists["EQ_Config_Members"],
+                            "$filter": manager_filter,
+                            "$orderby": "%s asc" % col(
+                                "EQ_Config_Members", "EscalationOrder"
+                            ),
+                            "$top": 50,
+                        },
+                        {},
+                    ),
+                    "LOOP_Notify_Managers": {
+                        "runAfter": {"GET_Managers": ["Succeeded"]},
+                        "type": "Foreach",
+                        "foreach": "@body('GET_Managers')?['value']",
+                        "actions": {
+                            "TM_Notify_Manager": teams_post_card(
+                                {
+                                    "poster": "Flow bot",
+                                    "location": "Chat with Flow bot",
+                                    "body/recipient": manager_recipient,
+                                    "body/messageBody": manager_card,
+                                },
+                                {},
+                            )
+                        },
+                    },
+                },
+                "else": {"actions": {}},
             },
         }
     else:
