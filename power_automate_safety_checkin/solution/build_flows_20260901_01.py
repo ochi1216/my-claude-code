@@ -222,15 +222,16 @@ def build_eq06(cfg, cards_dir):
         flags["notManager"],
     )
 
-    # 検証段階では、名簿に実在の同僚が入っていても訓練カードが飛ばないようにする。
-    # testRecipientOverride が空でなければ、IsTest=true の実行に限りその宛先へ送る。
-    # 本番運用に移る際はこの設定を空にすること。
+    # 検証段階の誤送信防止。testRecipientOverride が空でない限り、
+    # 個人カードの宛先は名簿ではなく常にこのアドレスになる。
+    #
+    # IsTestの状態や選んだ拠点には依存させない。守りたいのは人為ミス
+    # (IsTestの付け忘れ、拠点の選び間違い)であり、人の操作を条件にすると
+    # そのミス自体で安全弁が外れてしまうため。
+    # 本番運用へ移る際は、この設定を空文字にする(それが唯一の切替操作)。
     member_email = "items('LOOP_Each_Member')?['%s']" % col("EQ_Config_Members", "Email")
     override = cfg.get("testRecipientOverride", "").strip()
-    if override:
-        recipient_expr = "@if(triggerBody()?['IsTest'], '%s', %s)" % (override, member_email)
-    else:
-        recipient_expr = "@%s" % member_email
+    recipient_expr = "'%s'" % override if override else "@%s" % member_email
 
     threshold_actions = {
         "CMP_EventID": {
