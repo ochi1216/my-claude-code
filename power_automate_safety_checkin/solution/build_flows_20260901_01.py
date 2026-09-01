@@ -89,6 +89,31 @@ def teams_post_card(parameters, run_after):
     }
 
 
+def teams_post_card_and_wait(parameters, run_after, timeout):
+    """Teams「アダプティブ カードを投稿して応答を待機する」。
+
+    このテナントのTeamsコネクタには「カードに応答があったとき」トリガーが無く
+    (存在するのは絵文字リアクション用の WebhookMessageReactionTrigger のみ)、
+    投げ切り+応答トリガーの非同期設計が成立しないため、この待機型を使う。
+    18名分を待つ間フローが居座らないよう、呼び出し側でループを並列化し、
+    ここでタイムアウトを設定する。
+    """
+    return {
+        "runAfter": run_after,
+        "type": "OpenApiConnectionWebhook",
+        "inputs": {
+            "host": {
+                "connectionName": "shared_teams",
+                "operationId": "PostCardAndWaitForResponse",
+                "apiId": TEAMS_API_ID,
+            },
+            "parameters": parameters,
+            "authentication": AUTH_BLOCK,
+        },
+        "limit": {"timeout": timeout},
+    }
+
+
 def terminate(status, code=None, message=None):
     """フローを終了するアクション。閾値未満のような正常終了にも使う。"""
     inputs = {"runStatus": status}
@@ -233,6 +258,49 @@ def build_eq06(cfg, cards_dir):
     override = cfg.get("testRecipientOverride", "").strip()
     recipient_expr = "'%s'" % override if override else "@%s" % member_email
 
+    # 回答の受け取り方。このテナントには「カードに応答があったとき」トリガーが
+    # 無いため、既定は待機型(wait)。postOnlyにすると投げ切りになり回答は拾わない。
+    response_mode = cfg.get("responseMode", "wait")
+    loop_concurrency = cfg.get("loopConcurrency", 20)
+    response_timeout = cfg.get("responseTimeout", "PT1H")
+
+    if response_mode == "wait":
+        loop_actions = {
+            "TM_Post_CheckIn_Card": teams_post_card_and_wait(
+                {
+                    "poster": "Flow bot",
+                    "location": "Chat with Flow bot",
+                    "body/body/recipient": recipient_expr,
+                    "body/body/messageBody": checkin_card,
+                    "body/body/updateMessage": "回答を受け付けました。ありがとうございます。",
+                },
+                {},
+                response_timeout,
+            ),
+            # 回答JSONの構造が未実測のため、まず生の応答をそのまま記録して
+            # 実行履歴から読み取れるようにする。構造が確定したら、ここを
+            # 回答の解釈・EQ_Responsesへの保存・上司通知に置き換える。
+            "CMP_Raw_Response": {
+                "runAfter": {
+                    "TM_Post_CheckIn_Card": ["Succeeded", "TimedOut", "Failed"]
+                },
+                "type": "Compose",
+                "inputs": "@body('TM_Post_CheckIn_Card')",
+            },
+        }
+    else:
+        loop_actions = {
+            "TM_Post_CheckIn_Card": teams_post_card(
+                {
+                    "poster": "Flow bot",
+                    "location": "Chat with Flow bot",
+                    "body/recipient": recipient_expr,
+                    "body/messageBody": checkin_card,
+                },
+                {},
+            )
+        }
+
     threshold_actions = {
         "CMP_EventID": {
             "runAfter": {},
@@ -310,19 +378,12 @@ def build_eq06(cfg, cards_dir):
                         "runAfter": {},
                         "type": "Foreach",
                         "foreach": "@body('GET_Active_Members')?['value']",
-                        # 同時実行は初期値1。Gate B確認後に引き上げを検討する
-                        "runtimeConfiguration": {"concurrency": {"repetitions": 1}},
-                        "actions": {
-                            "TM_Post_CheckIn_Card": teams_post_card(
-                                {
-                                    "poster": "Flow bot",
-                                    "location": "Chat with Flow bot",
-                                    "body/recipient": recipient_expr,
-                                    "body/messageBody": checkin_card,
-                                },
-                                {},
-                            )
+                        # 全員分を同時に待つ。直列にすると1人目の回答まで他の人へ
+                        # カードが届かない(レビュー指摘)。上限は50。
+                        "runtimeConfiguration": {
+                            "concurrency": {"repetitions": loop_concurrency}
                         },
+                        "actions": loop_actions,
                     }
                 }
             },

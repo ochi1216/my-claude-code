@@ -39,6 +39,10 @@ Solutionにフローを入れる形式は公開ドキュメントだけでは特
 | Teams カードを投稿(応答を待たない) | `PostCardToConversation` | `OpenApiConnection` |
 | Teams カードを投稿して応答を待機 | `PostCardAndWaitForResponse` | `OpenApiConnectionWebhook` |
 
+Teamsコネクタのトリガー11種類を確認した結果、**カードの回答を受け取るトリガーは
+存在しない**(「チャットでメッセージに応答があったとき」は`WebhookMessageReactionTrigger`で
+絵文字リアクション用)。このため回答は待機型アクションで受ける。
+
 ## セットアップ(初回のみ)
 
 ### 1. 設定ファイルを作る
@@ -105,13 +109,15 @@ pac solution import --environment <ENV_ID> --path .\EQSafetyCheckin.zip
 | フロー | 状態 |
 | --- | --- |
 | `EQ06_Manual_Drill_DEV` | 生成対象 |
-| `EQ04b_On_Response_DEV` | **未実装**。Teamsの「カードに応答があったとき」トリガーの書式が未実測のため |
+| `EQ04b_On_Response_DEV` | **不要になった**。カード応答を受け取るトリガーがテナントに存在しないため、回答の受け取りはEQ06のループ内(`PostCardAndWaitForResponse`)へ統合する |
 | `EQ05_Status_Summary_DEV` | **未実装** |
 
 ## 未確認事項
 
 - 1:1チャットへのカード投稿(`location: "Chat with Flow bot"`, `body/recipient`にメールアドレス)は、
   チャネル投稿と違い実測できていない。初回実行時に要確認。
-- `EQ04b`で使う「アダプティブ カードに応答があったとき」トリガーが、このテナントの
-  Teamsコネクタに存在するかは**未確認**。存在しない場合は、
-  `PostCardAndWaitForResponse`(応答を待つ版)を並列実行する設計への変更を検討する。
+- 回答が返ってきたときのJSONの構造(`body('TM_Post_CheckIn_Card')`の中身)は**未実測**。
+  現在はループ内の`CMP_Raw_Response`で生の応答をそのまま記録しており、実行履歴から
+  読み取って確定させる。確定後、回答の解釈・`EQ_Responses`への保存・被災時の上司通知を
+  実装する。
+- 未回答者がいた場合のタイムアウト時の挙動(ループが失敗扱いになるか)は未確認。
