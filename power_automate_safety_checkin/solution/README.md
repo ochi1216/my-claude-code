@@ -78,8 +78,20 @@ pac solution init --publisher-name NexperiaJP --publisher-prefix njp
 ```powershell
 python build_flows_20260901_02.py --config deploy_config.json --out .\src --cards ..\cards
 pac solution pack --zipfile .\EQSafetyCheckin.zip --folder .\src
-pac solution import --environment <ENV_ID> --path .\EQSafetyCheckin.zip
+pac solution import --path .\EQSafetyCheckin.zip
 ```
+
+`pac auth create`でサインイン済みなら、インポート先は選択中の環境になるため
+`--environment`は要らない。環境を明示したい場合は`pac env list`でIDを確認して渡す。
+
+```powershell
+pac env list
+pac solution import --environment 0a1b2c3d-4e5f-6789-abcd-ef0123456789 --path .\EQSafetyCheckin.zip
+```
+
+**環境IDは`<...>`で囲まない。** PowerShellは`<`をリダイレクト記号として解釈するため、
+`--environment <ENV_ID>`のようにプレースホルダのまま貼ると
+`演算子 '<' は、今後の使用のために予約されています`というエラーになる(実機で発生)。
 
 生成されるフローは有効状態(`StateCode=1`/`StatusCode=2`)でインポートされる。
 手動トリガーのフローは実行ボタンを押さない限り動かないため、有効なままで支障はない
