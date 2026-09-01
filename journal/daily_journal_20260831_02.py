@@ -408,7 +408,6 @@ class PopupWindow:
         self.action_list_canvas = None
         self.action_list_inner = None
         self._popup_width = 300
-        self.collapsed_height = None
         self.expanded_height = None
         self._themed_bg_widgets = []
         self._themed_fg_widgets = []
@@ -1072,37 +1071,30 @@ class PopupWindow:
 
         self._render_action_rows()
 
-        # 実際の高さを測って確定する。
-        # ここまではJournalパネルを開いた状態で組み立ててきたため、まず
-        # その「開いた状態」の高さをそのまま実測し、次にパネルを一旦畳んで
-        # 「畳んだ状態」の高さも実測する。固定の目安値を積み上げて見積もる
+        # 実際の高さを測って確定する。固定の目安値を積み上げて見積もる
         # のではなく実測することで、タグの数やタスクの文字サイズ設定が
-        # 変わっても正しい高さが自動的に求まる
+        # 変わっても正しい高さが自動的に求まる。
+        # ウィンドウの高さは、Journalパネルの開閉状態に関わらず常に
+        # 「開いた状態」の高さ(expanded_height)を使う。タスク特化起動で
+        # Journalパネルを畳んだ場合に空く分は、action_list_canvas側が
+        # fill="both", expand=Trueで自動的に埋めてタスク一覧が広がる
+        # ため、ウィンドウ自体を縮める必要が無い（縮めると「タスク
+        # モードだけ画面が妙に小さい」という見え方になっていた）
+        if not self.journal_expanded:
+            # 高さは開いた状態で測る必要があるため、測定中だけ一時的に開く
+            self._journal_frame.pack(fill="x", before=self.version_label)
         self.window.update_idletasks()
         screen_h = self.window.winfo_screenheight()
         self.expanded_height = min(self.window.winfo_reqheight(), screen_h - 40)
-        self._journal_frame.pack_forget()
-        self.window.update_idletasks()
-        self.collapsed_height = max(
-            200, min(self.window.winfo_reqheight(), screen_h - 100),
-        )
+        if not self.journal_expanded:
+            self._journal_frame.pack_forget()
 
-        # 既定の開閉状態(journal_expanded)をここで反映する。通常起動なら
-        # 開いた状態に戻し、タスク特化起動なら畳んだままにする
-        if self.journal_expanded:
-            self._journal_frame.pack(fill="x", before=self.version_label)
         self._update_journal_toggle_label()
 
-        final_height = self.expanded_height if self.journal_expanded else self.collapsed_height
         x = self.window.winfo_screenwidth() - self._popup_width - 20
-        # 上端(y)は、畳んだ状態の高さではなく「展開した時の高さ」を基準に
-        # 決める。畳んだ状態基準のまま置くと、Journalパネルを開いた時に
-        # 画面下端をはみ出さないよう上端を押し上げる必要が生じ、「開くと
-        # 位置がずれる」原因になっていたため。あらかじめ展開後の高さぶんの
-        # 余白を確保しておくことで、開閉時に上端を動かさずに済むようにする
         y = max(10, screen_h - self.expanded_height - 80)
-        self.window.geometry(f"{self._popup_width}x{final_height}+{x}+{y}")
-        self.window.minsize(int(self._popup_width * 2 / 3), final_height)
+        self.window.geometry(f"{self._popup_width}x{self.expanded_height}+{x}+{y}")
+        self.window.minsize(int(self._popup_width * 2 / 3), self.expanded_height)
 
         self.window.bind("<Escape>", lambda e: self._close())
         # Windowsが Alt キー解放をシステムメニュー呼び出しと誤認識し、
@@ -1157,11 +1149,10 @@ class PopupWindow:
         """
         縦幅を画面いっぱいに広げる／元に戻すトグル（MS To Doの展開ボタンと
         同じ動作）。位置決め・幅維持・画面下端でのクランプは既存の
-        _resize_window()にそのまま委ねる。「元に戻す」際は固定値を覚えて
-        おくのではなく、その時点のJournalパネル開閉状態(journal_expanded)
-        が本来求める高さ（expanded_height / collapsed_height）を都度
-        計算して使う。こうしておけば、展開中にJournalパネルを開閉されても
-        矛盾が起きない（_toggle_journal側でもこのフラグを解除している）。
+        _resize_window()にそのまま委ねる。「元に戻す」際は、Journalパネルの
+        開閉状態に関わらず常にexpanded_height（ウィンドウの標準の高さ）に
+        戻す（ウィンドウの高さ自体はJournalパネルの開閉で変えない方針の
+        ため、開閉状態で場合分けする必要が無い）。
         """
         self._cancel_autoclose(permanent=True)
         self._height_expanded = not self._height_expanded
@@ -1170,8 +1161,7 @@ class PopupWindow:
             self._resize_window(screen_h - 40)
             self.expand_height_btn.config(text="⤡")
         else:
-            base_height = self.expanded_height if self.journal_expanded else self.collapsed_height
-            self._resize_window(base_height)
+            self._resize_window(self.expanded_height)
             self.expand_height_btn.config(text="⤢")
 
     def _update_journal_toggle_label(self) -> None:
@@ -1184,6 +1174,12 @@ class PopupWindow:
         📓 Journalパネル（時間帯プレビュー・選択中バッジ・タグ・ひれぶり・
         LKPT）の開閉を切り替える。通常起動・タスク特化起動のどちらでも
         同じこのメソッドで開閉する（既定の開閉状態が違うだけ）。
+
+        ウィンドウ自体の高さは変えない（常にexpanded_height）。畳んだ時に
+        空く分は、action_list_canvas側がfill="both", expand=Trueで自動的に
+        埋めてタスク一覧が広がる。以前はウィンドウの高さ自体も
+        縮めていたが、「タスクモードだけ画面が妙に小さい」との指摘を受け、
+        通常起動・タスク特化起動のどちらでも同じ高さを保つようにした
         """
         # パネルを開く＝しばらく操作が続くということなので、
         # 自動クローズは恒久的に止める（操作している途中で閉じないように）
@@ -1197,21 +1193,10 @@ class PopupWindow:
 
         self._update_journal_toggle_label()
 
-        # collapsed_height/expanded_heightという絶対値へ飛ばすのではなく、
-        # 「今のウィンドウ高さ」にJournalパネルぶんの差分だけを足し引きする。
-        # 絶対値へ飛ばす実装だと、ユーザーが手動でウィンドウをリサイズして
-        # いても、開閉するたびにその高さが既定値へ戻ってしまう
-        block_height = self.expanded_height - self.collapsed_height
-        current_height = self.window.winfo_height()
-        screen_h = self.window.winfo_screenheight()
         if self.journal_expanded:
             self._journal_frame.pack(fill="x", before=self.version_label)
-            new_height = min(current_height + block_height, screen_h - 40)
-            self._resize_window(new_height)
         else:
             self._journal_frame.pack_forget()
-            new_height = max(self.collapsed_height, current_height - block_height)
-            self._resize_window(new_height)
 
     def _recolor_tag_chip(self, tag_name: str, selected: bool) -> None:
         """
