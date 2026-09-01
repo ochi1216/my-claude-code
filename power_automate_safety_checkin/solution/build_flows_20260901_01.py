@@ -104,7 +104,7 @@ def load_card(cards_dir, filename, bindings):
     投稿前にフロー側の式 @{...} へ差し替えておく必要がある。
     """
     path = os.path.join(cards_dir, filename)
-    with open(path, encoding="utf-8") as fh:
+    with open(path, encoding="utf-8-sig") as fh:
         card_text = fh.read()
 
     def replace(match):
@@ -588,7 +588,7 @@ def main():
             "deploy_config.example.json をコピーして実値を入れてください。" % args.config
         )
 
-    with open(args.config, encoding="utf-8") as fh:
+    with open(args.config, encoding="utf-8-sig") as fh:
         cfg = json.load(fh)
 
     flows = {
