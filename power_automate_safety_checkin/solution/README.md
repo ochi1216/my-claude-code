@@ -60,7 +60,7 @@ Team ID・Channel ID・サイトURL・リストGUIDといった社内情報は�
 | --- | --- |
 | `sharePointSiteUrl` | SharePointサイトのURL |
 | `listIds.*` | SharePointの「リストの設定」画面URLの`List=%7B...%7D`部分、またはGUIで一度SharePointアクションを作ってエクスポートしたJSONの`table`の値 |
-| `connectionReferences.*` | エクスポートしたフローJSONの`connectionReferenceLogicalName`(例: `njp_sharedsharepointonline_d85a5`) |
+| `connectionReferences.*` | エクスポートしたフローJSONの`connectionReferenceLogicalName`(例: `njp_sharedsharepointonline_xxxxx`) |
 | `sites[].teamId` / `channelId` | Teamsアクションを一度GUIで作ってエクスポートしたJSONの`body/recipient/groupId`・`channelId` |
 | `workflowIds.*` | 任意のGUID(新規作成時)。既存フローを更新する場合はそのフローのGUID |
 

@@ -5,6 +5,7 @@
 | Session | Title | Date | Status | Main Files |
 | ------- | ----- | ---- | ------ | ---------- |
 | S01 | 緊急連絡ツールの開発 S01 - 自動送信機能を持たせる | 2026-07-29〜2026-07-31 | 完了 | `CLAUDE.md`, `docs/*.md`, `emergency_alert_tool/*`, `power_automate_safety_checkin/*` |
+| S02 | 緊急連絡ツールの開発 S02 - Power AutomateフローのGUI構築とGate B/D検証 | 2026-09-01 | 完了 | `power_automate_safety_checkin/solution/*`, `power_automate_safety_checkin/evidence/*`, `power_automate_safety_checkin/cards/*`, `power_automate_safety_checkin/docs/*` |
 
 ## S01 - 緊急連絡ツールの開発 S01 - 自動送信機能を持たせる (2026-07-29〜2026-07-31)
 
@@ -107,6 +108,150 @@ Power Automate版へ実装方式を転換している（理由は下記「判断
 ### 次回作業
 
 `docs/NEXT_TASK.md` のS02セクションを参照。
+
+---
+
+## S02 - 緊急連絡ツールの開発 S02 - Power AutomateフローのGUI構築とGate B/D検証 (2026-09-01)
+
+### 概要
+
+Power Automate版PoC（P1: 手動トリガー版）のフロー本体を構築し、DEV環境で動作させた。
+当初の計画は「`docs/FLOW_LOGIC_SPEC.md`の通りにGUIで3フローを組む」だったが、
+セッション途中で**構築方法そのものを転換**している（下記「判断した内容」参照）。
+結果として、P1のフローは2本（EQ06・EQ05）に整理され、両方とも実機で動作確認できた。
+
+### 判断した内容（重要な方針転換）
+
+**1. GUI構築 → JSON生成＋CLIインポートへ転換**
+
+`EQ06_Manual_Drill_DEV`をGUIで組み始めたが、以下の問題に直面した。
+
+- 1フローで30ステップ超のクリック操作が必要
+- 「保存」を押す前に画面を再読み込みしたところ、**作りかけのフローが丸ごと消失**
+- 同じ作業をEQ04b・EQ05でも繰り返す必要がある
+
+ユーザーから「GUIを一切触りたくない」という明確な要望があり、方式を転換した。
+クラウドフローの実体はJSON（Logic AppsのWorkflow Definition Language）であり、
+Dataverse Solutionとしてインポートできる。ただしSolutionへの格納形式は公開情報
+だけでは特定できなかったため、**実テナントに最小フローを作ってエクスポート・
+unpackし、形式を実測で確定させた**。
+
+以降、フローは`solution/build_flows_20260901_01.py`が生成し、
+`pac solution pack` → `pac solution import` の3コマンドで再展開できる。
+
+**2. EQ04b（応答受信フロー）を廃止し、EQ06へ統合**
+
+当初設計は「カードを投げ切り、応答は別フロー（EQ04b）のトリガーで受ける」非同期方式
+だったが、**このテナントのTeamsコネクタのトリガー11種類を全て確認した結果、
+アダプティブカードの応答を受け取るトリガーが存在しない**ことが判明した
+（紛らわしい「チャットでメッセージに応答があったとき」は`WebhookMessageReactionTrigger`＝
+絵文字リアクション用）。
+
+代わりに`PostCardAndWaitForResponse`（応答を待機するアクション）を
+`LOOP_Each_Member`の中で使い、**ループを並列実行**して全員分を同時に待つ方式にした。
+「直列だと1人目の回答まで他メンバーへ届かない」という当初要件は並列実行で満たしている。
+
+**3. 検証中の誤送信防止を導入（実際に事故が起きたため）**
+
+実機テストで、`EQ_Config_Members`に登録されていた**実在の同僚2名へ訓練用の
+安否確認カードが実際に届いてしまった**。しかも当時は個人カードに`【訓練】`表示が
+無く、受け取った側は訓練と判断できない状態だった。
+
+再発防止として、`deploy_config.json`の`testRecipientOverride`を設定している間は、
+**拠点や`IsTest`の値にかかわらず**個人カード・上司通知の宛先が検証者だけに向く
+仕組みを入れた。`IsTest`を条件にしなかったのは、防ぎたいのが人為ミス
+（訓練フラグの付け忘れ、拠点の選び間違い）そのものだからである。
+あわせて架空拠点`NARA`（検証者1名のみ所属）を用意し、実在拠点の名簿に
+触れずに拠点分岐を試せるようにした。個人カードにも`【訓練】`を付けるよう修正した。
+
+### 実作業内容
+
+**SharePoint側**
+
+- 4リストのExcelアップロードを完了（S01からの持ち越し。未着手だった）
+- Excelテンプレートがテーブル形式でないとアップロードできないことが判明し、作り直し
+- `EQ_Responses.xlsx`に`Title`列（重複判定キー）が抜けていた不整合を発見・修正
+- 見本データ無しでアップロードしたため多くの列が**数値型**で作られており、
+  `EQ_Events`の5列（SiteCode/OccurredAt/Epicenter/SiteIntensityCode/IsTest）の型を修正
+
+**Gate B（Teamsカードアクション）— 合格**
+
+- 「チャットやチャネルにカードを投稿する」（`PostCardToConversation`、応答を待たない）が
+  標準コネクタに存在し、非推奨でないことを実測
+- 1:1チャットへの投稿（`location: "Chat with Flow bot"`）も実機で成功
+- 待機型（`PostCardAndWaitForResponse`）の応答JSON構造を実測し、
+  `evidence/teams_card_response_sanitized.json`へ記録。`data`配下に回答値、
+  `responder`配下に**実際に回答した人**が入るため、カード内のIDを詐称されても照合できる
+
+**Gate D（SharePoint列内部名）— 実測完了**
+
+- **Excelアップロードで作ったリストは、内部名が表示名と一致せず`field_1`, `field_2`...
+  という連番になる**ことが判明（`Title`のみ標準列）。`item/<列>`や`$filter`では
+  内部名を使う必要がある
+- 3リスト分の内部名・型を`evidence/sharepoint_internal_names.json`へ記録
+
+**設計上の誤りの発見と修正**
+
+- `outputs('CMP_Site_Config')`のようにSwitchアクション名で結果を参照することは
+  できない（Switchは制御構造で出力を持たない）。変数（`varSiteConfig`/
+  `varIntensityValue`）経由に変更
+- 並列ループ内では変数が全イテレーションで共有されるため使えない。
+  安否・出社可否の判定は式で直接計算する形にした
+- 未回答（タイムアウト）時にループ全体が失敗する事象を実測。待機アクションの後続を
+  `CHK_Responded`という条件1つにまとめることで解決した
+
+**実装したフロー**
+
+- `EQ06_Manual_Drill_DEV`: 閾値判定／イベント記録／チャネル通知／対象者抽出／
+  個人カード送信と回答待機（並列）／回答保存／被災時の上司通知／未回答時の正常終了
+- `EQ05_Status_Summary_DEV`: `AlertStatus=Open`のイベントごとに対象者数・回答数・
+  未回答数・被災者数を集計してチャネルへ投稿
+
+### 変更したファイル
+
+- `power_automate_safety_checkin/solution/build_flows_20260901_01.py`（新規）: フロー定義の生成
+- `power_automate_safety_checkin/solution/deploy_config.example.json`（新規）: 設定テンプレート
+- `power_automate_safety_checkin/solution/README.md`: 方式・実測仕様・本番切替チェックリスト
+- `power_automate_safety_checkin/evidence/`（新規）: Gate B/Dの実測値
+- `power_automate_safety_checkin/cards/manager_alert_card.json`（新規）: 被災報告カード
+- `power_automate_safety_checkin/cards/status_summary_card.json`（新規）: 集計カード
+- `power_automate_safety_checkin/cards/checkin_card.json`: `【訓練】`表示を追加
+- `power_automate_safety_checkin/docs/FLOW_LOGIC_SPEC.md` / `GATE_STATUS.md`: 実測値へ更新
+- `power_automate_safety_checkin/EQ_*.xlsx`（新規）: SharePointアップロード用テンプレート
+- `.gitignore`: `deploy_config.json`・生成物を除外
+
+### 確定した仕様
+
+- 回答の受け取りは**待機型アクション＋並列ループ**（応答トリガーが存在しないため）
+- `EQ_Responses.Email`には、カード内のIDではなく`responder.email`（実際の回答者）を記録
+- 回答の重複防止（Upsert）は不要。待機型では1実行につき1人1回しか回答を受け取れない
+- 未回答はエラーではなく訓練結果の一種として扱い、フローは正常終了する
+- フローはJSON生成＋`pac`CLIインポートで管理する（GUIでは組まない）
+
+### テスト結果
+
+DEV環境（`Nexperia (default)`）で以下を実機確認。
+
+| テスト | 結果 |
+| --- | --- |
+| 閾値未満（震度4） | 成功（`END_Below_Threshold`で正常終了、SharePoint・Teamsとも変化なし） |
+| 閾値以上（震度5弱） | 成功（イベント記録・チャネル投稿・個人カード送信まで） |
+| 回答あり（被災） | 成功（`EQ_Responses`へ`Affected`で記録、上司へ被災報告カード送信） |
+| 未回答（1分タイムアウト） | 成功（フローは正常終了。当初は失敗していたため構造を修正） |
+| EQ05の集計 | 成功（チャネルへ集計カード投稿） |
+
+### 未確認事項
+
+- エラー処理（`SCOPE_Try`/`SCOPE_Catch`→`EQ_Received_Items`）は未実装。
+  `EQ_Received_Items`の列内部名も未取得
+- イベントのクローズ（`AlertStatus`を`Closed`へ更新）は未実装
+- 実在拠点（大分・大阪・東京）での訓練、3名結合テスト、18名訓練は未実施
+- 拠点ごとの実Team/Channel IDは未設定（現在は全拠点とも検証用の同一チャネル）
+- 誤送信した同僚2名へのフォローが必要かはユーザー判断
+
+### 次回作業
+
+`docs/NEXT_TASK.md` のS03セクションを参照。
 
 ---
 

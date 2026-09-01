@@ -1,6 +1,6 @@
 # PROJECT_STATUS.md
 
-最終更新: 2026-07-31 (S01)
+最終更新: 2026-09-01 (S02)
 
 ## Project Overview
 
@@ -78,33 +78,51 @@ my-claude-code/
   管理者役のID命名は `mgr01`, `mgr02`, `admin01`（旧`boss01/02/03`から変更）。
 - スタッフの回答項目: 4択（①無事・出社可能／②無事・出社不可／③被災・出社可能／④被災・出社不可）
 - 回答が送信されたら、即座に管理者（`mgr01`/`mgr02`/`admin01`）へ通知する。
-- アーキテクチャは非同期（カード投げ切り＋応答トリガー分離）。直列ループでの
-  応答待ちは1人目の回答まで他メンバーへの送信が止まるため不採用。
+- アーキテクチャは**待機型＋並列ループ**（S02で変更）。当初は「カード投げ切り＋
+  応答トリガー分離」の非同期設計だったが、**このテナントのTeamsコネクタには
+  アダプティブカードの応答を受け取るトリガーが存在しない**ことがS02で判明したため、
+  `PostCardAndWaitForResponse`（応答を待機するアクション）を`Apply to each`の中で使い、
+  ループを並列実行して全員分を同時に待つ方式に変更した。直列ループを避ける
+  という当初の要件（1人目の回答まで他メンバーへの送信が止まってはいけない）は
+  並列実行で満たしている。
+- フローの構築方法は、Power AutomateのGUIでの手組みではなく、**フロー定義（JSON）を
+  スクリプトで生成し`pac` CLIでインポートする方式**（S02で変更）。
 - 自動地震検知（気象庁XML自動取込）はスコープ外（Gate C不合格見込み）。
   P1は手動トリガーのみ。
 
 ## Current Status
 
-- **Power Automate版（主軸）**: SharePointリスト設計・Flowロジック仕様・Adaptive Card・
-  PowerShell自動化スクリプトまで作成済み。SharePoint（サンドボックスサイト
-  `https://nexperia.sharepoint.com/sites/MyPrivate`）へのリスト作成は、
-  PnP.PowerShellでの完全自動化を試みたが、Entra IDアプリ登録に管理者権限が必要と
-  判明したため断念し、**Excel一括アップロードによる手動作成**に切替えた。
-  4リスト分（`EQ_Config_Members`, `EQ_Received_Items`, `EQ_Events`, `EQ_Responses`）の
-  Excelファイルは作成・送付済みだが、**ユーザーによるSharePointへのアップロードは未完了**
-  （このセッション終了時点で未確認）。
-  Power Automate上でのフロー本体（3フロー）の構築は**未着手**。
+- **Power Automate版（主軸）**: **P1のフロー実装は完了し、DEV環境で実機検証済み**（S02）。
+  - SharePoint 4リストは作成済み・データ投入済み（開発部門の実名簿19名＋検証用2名）。
+  - `EQ06_Manual_Drill_DEV`（手動訓練）と`EQ05_Status_Summary_DEV`（定期集計）の
+    2フローがDEV環境で動作している。当初設計の`EQ04b_On_Response_DEV`は、
+    応答トリガーが存在しないためEQ06へ統合し廃止した。
+  - 検証済みの動作: 閾値判定（未満は正常終了）／`EQ_Events`へのイベント記録／
+    Teamsチャネルへの開始通知カード／対象者の抽出／個人カードの送信と回答待機／
+    `EQ_Responses`への回答保存／被災回答時の上司通知／未回答（タイムアウト）時の
+    正常終了／`EQ05`による集計カードの投稿。
+  - フローは`solution/build_flows_*.py`で生成し、`pac solution pack`→`import`の
+    3コマンドで再展開できる。GUI操作は接続の作成と動作確認のみ。
+- **検証段階の安全弁**: `deploy_config.json`の`testRecipientOverride`が設定されている間、
+  個人カード・上司通知の宛先は名簿の内容にかかわらず検証者だけに向く。
+  実在拠点の名簿に触れずに試せるよう、架空拠点`NARA`（検証者1名のみ所属）も用意した。
+  本番移行時は`testRecipientOverride`を空にする（それが唯一の切替操作）。
 - **Python版（非主軸）**: `emergency_alert_tool/` は実装・自動テスト（21件）ともに完了。
   Windows実機でのdry-run動作確認（トリガー→18名通知→回答→上司通知の一連の流れ）も
   完了。実際のM365テナントへのメール送信はAzure AD管理者同意待ちで未検証。
 
 ## Known Issues
 
-- Power Automate版のGate B（Teamsアダプティブカードアクションの正式名称・応答JSON構造）は
-  未実測。実際にフローを構築し1回実行するまで確定しない。
-- Gate D（SharePoint列内部名）も、リスト作成後の実測が必要。
-- `EQ_Config_Sites`相当の`TeamId`/`ChannelId`（拠点ごとの通知先）は、実際のTeams/
-  チャネルが決まるまでプレースホルダのまま。
+- **エラー処理（`SCOPE_Try`/`SCOPE_Catch`による`EQ_Received_Items`へのログ記録）が未実装。**
+  `EQ_Received_Items`の列内部名も未取得。
+- **イベントのクローズ処理が未実装。** `AlertStatus`は`Open`のまま更新されないため、
+  EQ05が古いイベントを集計し続ける。
+- `TeamId`/`ChannelId`は、検証中のため3拠点＋NARAとも同一のテスト用チャネルを指している。
+  拠点ごとの実チャネルは未設定。
+- 実在拠点（大分・大阪・東京）での訓練、3名結合テスト、18名訓練はいずれも未実施。
+- S02の実機テストで、**実在の同僚2名（東京拠点）へ訓練用の安否確認カードが誤送信された。**
+  以後は`testRecipientOverride`により再発しない仕組みにしてあるが、当該2名への
+  フォローが必要かはユーザー判断。
 - Python版は、Azure ADの`Mail.Send`アプリケーション権限への管理者同意が
   得られていないため、実メール送信は未検証（IT部門への依頼文は作成済み、未送付）。
 - 既存の安否確認サービスの有無について、社内所管部門への確認はまだ行っていない
@@ -115,9 +133,10 @@ my-claude-code/
 
 - `emergency_alert_tool/`: `pytest tests/ -v` で21件全てPASS。実機（Windows、
   dry_runモード）でのE2E確認済み。詳細は同フォルダの`README.md`参照。
-- `power_automate_safety_checkin/`: PowerShellスクリプトはAST構文検証のみ実施
-  （実テナントに対する実行は未検証）。JSON（Adaptive Card・config）は構文検証済み。
-  Power Automateフロー自体はまだ未構築のため、フローの動作テストは未実施。
+- `power_automate_safety_checkin/`: DEV環境（`Nexperia (default)`）で
+  `EQ06_Manual_Drill_DEV`・`EQ05_Status_Summary_DEV`の実機動作を確認済み。
+  実測値は`evidence/`（Teamsカード応答の構造、SharePoint列内部名・型）に記録。
+  再展開の手順は`solution/README.md`を参照。
 
 ## Important Restrictions
 
