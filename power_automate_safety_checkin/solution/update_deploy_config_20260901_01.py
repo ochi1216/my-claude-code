@@ -258,6 +258,10 @@ def main():
     parser.add_argument("--enable-event-close", action="store_true",
                         help="features.eventClose を true にする("
                              "sharePointUpdateAction の実測値が必要)")
+    parser.add_argument("--disable-error-logging", action="store_true",
+                        help="features.errorLogging を false に戻す(原因の切り分け用)")
+    parser.add_argument("--disable-event-close", action="store_true",
+                        help="features.eventClose を false に戻す")
     parser.add_argument("--no-prompt", action="store_true",
                         help="リストGUIDを対話で聞かない(自動実行向け)")
     parser.add_argument("--diagnose", action="store_true",
@@ -340,6 +344,12 @@ def main():
     if args.enable_event_close and not features.get("eventClose"):
         features["eventClose"] = True
         changes.append("features.eventClose を true にしました")
+    if args.disable_error_logging and features.get("errorLogging"):
+        features["errorLogging"] = False
+        changes.append("features.errorLogging を false に戻しました")
+    if args.disable_event_close and features.get("eventClose"):
+        features["eventClose"] = False
+        changes.append("features.eventClose を false に戻しました")
 
     # --- 3.5 リストGUIDの書式揃え -------------------------------------------
     if args.normalize_list_ids:
