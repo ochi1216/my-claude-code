@@ -107,7 +107,7 @@ Teamsコネクタのトリガーは11種類あり、その全てを確認した�
 
 | 項目 | 前提にしていること | 外れた場合に起きること |
 | --- | --- | --- |
-| `Scope`の中に`Terminate`を置けるか | ループ(`Foreach`/`Until`)の中は不可だが、`Scope`の中は可 | インポート時に検証エラー |
+| ~~`Scope`の中に`Terminate`を置けるか~~ | **確認済(2026-09-01)**。エラー処理・クローズ処理を含むSolutionのインポートが成功したため、`Scope`内の`Terminate`と`SCOPE_Catch`の構造、`result('SCOPE_Try')`の式はいずれも検証を通る | — |
 | `result('SCOPE_Try')`の戻り値 | `name` / `status` / `error.code` / `error.message` を持つオブジェクトの配列 | エラー内容が`UNKNOWN` / `(no message)`で記録される(記録自体は残る) |
 | `body('SP_Create_Event')?['ID']` | SharePointの項目作成の応答に、項目IDが`ID`というキーで含まれる | クローズ処理が対象を特定できず失敗 |
 | `EQ_Received_Items`の列の型 | `ProcessingStatus`/`ErrorCode`/`ErrorDetail`が1行テキスト | **実測の結果、3列とも数値型だった。修正するまで記録の書き込みが失敗する** |

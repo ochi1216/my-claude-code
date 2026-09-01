@@ -274,6 +274,44 @@ python update_deploy_config_20260901_01.py --received-items-list-id <GUID> --ena
   付けなければ`false`のまま追加される
 - 書き出したあとJSONとして読み直し、壊れていないことを確かめてから終了する
 
+## エラー処理の動作確認(誰にもカードを送らずに試す)
+
+`SCOPE_Catch`が実際に`EQ_Received_Items`へ記録するかは、わざと失敗させないと
+確かめられない。安全に試すため、**EQ_EventsのリストGUIDだけを存在しない値へ
+差し替えた設定の写し**を作って使う。
+
+`SP_Create_Event`はフローで最初のコネクタ呼び出しであり、ここで落とせば
+**Teamsへの投稿は一度も起きない**(チャネル通知も個人カードもその後ろにある)。
+
+```powershell
+python update_deploy_config_20260901_01.py --write-error-test-copy deploy_config_errortest.json
+python build_flows_20260901_02.py --config deploy_config_errortest.json --out .\src --cards ..\cards
+pac solution pack --zipfile .\EQSafetyCheckin.zip --folder .\src
+pac solution import --path .\EQSafetyCheckin.zip
+```
+
+`--write-error-test-copy`は元の`deploy_config.json`に触らない。
+`features.errorLogging`が有効でないと実行を断る。
+
+この状態でEQ06を1回実行すると、閾値以上の震度を指定した場合に必ず失敗し、
+`EQ_Received_Items`へ`ProcessingStatus=Error`の行が1件増えるはずである。
+フローの実行履歴も赤(失敗)になる(`SCOPE_Catch`末尾の`END_Failed`のため)。
+
+**確認が終わったら、必ず元の設定から生成し直してインポートし直すこと。**
+
+```powershell
+python build_flows_20260901_02.py --config deploy_config.json --out .\src --cards ..\cards
+pac solution pack --zipfile .\EQSafetyCheckin.zip --folder .\src
+pac solution import --path .\EQSafetyCheckin.zip
+```
+
+### 記録されるエラー内容について
+
+`result('SCOPE_Try')`が返すのは`SCOPE_Try`の**直下**のアクションの結果だけで、
+入れ子の奥で失敗したアクション名までは取れない。このため`ErrorDetail`には
+`action=CHK_Threshold_Met / ...`のように、失敗した枝の名前が入る見込み。
+どこまで具体的に取れるかは実機の記録を見てから判断する(**未確認**)。
+
 ## 生成物の検証(テナントに入れる前)
 
 ```powershell

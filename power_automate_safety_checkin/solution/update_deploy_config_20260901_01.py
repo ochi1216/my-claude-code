@@ -21,6 +21,12 @@ listIds.EQ_Received_Items が無い場合は、--received-items-list-id で渡�
     python update_deploy_config_20260901_01.py --received-items-list-id <GUID>
 
 書き換える前に deploy_config.json.bak_<日時> という控えを作る。
+
+エラー処理の動作確認用に、わざと失敗する設定の写しも書き出せる。
+
+    python update_deploy_config_20260901_01.py --write-error-test-copy deploy_config_errortest.json
+
+この場合、元の deploy_config.json には一切触らない。
 """
 
 import argparse
@@ -44,6 +50,11 @@ RECEIVED_ITEMS_COLUMNS = collections.OrderedDict([
 
 GUID_PATTERN = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
                           r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+# 存在しないリストGUID。エラー処理の動作確認で、SP_Create_Event をわざと失敗させる。
+# このアクションはフローの最初のコネクタ呼び出しであり、ここで落とせば Teams への
+# 投稿は一切起きない(誰にもカードが飛ばない)。
+MISSING_LIST_ID = "00000000-0000-0000-0000-000000000000"
 
 
 def load_config(path):
@@ -105,6 +116,39 @@ def ask_list_id():
     return answer.strip()
 
 
+def write_error_test_copy(cfg, has_bom, source_path, dest_path):
+    """EQ_EventsのリストGUIDだけを存在しない値に差し替えた写しを書き出す。
+
+    元の設定には触らない。この写しから生成したフローは、最初のSharePoint
+    アクション(SP_Create_Event)で必ず失敗するため、Teamsへの投稿が一度も
+    起きないまま SCOPE_Catch の動作だけを確かめられる。
+    """
+    if os.path.abspath(dest_path) == os.path.abspath(source_path):
+        raise SystemExit("写しの書き出し先が元のファイルと同じです: %s" % dest_path)
+    if not cfg.get("features", {}).get("errorLogging"):
+        raise SystemExit(
+            "features.errorLogging が有効になっていません。\n"
+            "先に --enable-error-logging を付けて実行してください"
+            "(エラー処理が入っていないフローでは、この確認はできません)。"
+        )
+
+    broken = json.loads(json.dumps(cfg), object_pairs_hook=collections.OrderedDict)
+    broken["listIds"]["EQ_Events"] = MISSING_LIST_ID
+    save_config(dest_path, broken, has_bom)
+    load_config(dest_path)
+
+    print("")
+    print("書き出しました: %s" % dest_path)
+    print("  元の %s は変更していません。" % source_path)
+    print("")
+    print("この写しから生成したフローは、EQ_Events への書き込みで必ず失敗します。")
+    print("Teamsへの投稿はその手前にも後にも起きないため、誰にもカードは届きません。")
+    print("")
+    print("確認のあとは、必ず元の設定から生成し直してインポートし直してください:")
+    print("  python build_flows_20260901_02.py --config %s --out .\\src --cards ..\\cards"
+          % source_path)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default="deploy_config.json", help="書き換える設定ファイル")
@@ -117,6 +161,10 @@ def main():
                              "sharePointUpdateAction の実測値が必要)")
     parser.add_argument("--no-prompt", action="store_true",
                         help="リストGUIDを対話で聞かない(自動実行向け)")
+    parser.add_argument("--write-error-test-copy", default="",
+                        help="エラー処理の動作確認用に、EQ_EventsのリストGUIDだけを"
+                             "存在しない値へ差し替えた写しを、指定したパスへ書き出す"
+                             "(元のファイルは変更しない)")
     args = parser.parse_args()
 
     if not os.path.exists(args.config):
@@ -126,6 +174,11 @@ def main():
         )
 
     cfg, has_bom = load_config(args.config)
+
+    if args.write_error_test_copy:
+        write_error_test_copy(cfg, has_bom, args.config, args.write_error_test_copy)
+        return
+
     changes = []
     warnings = []
 
