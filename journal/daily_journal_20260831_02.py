@@ -25,6 +25,22 @@ v0.42.0での変更点：
 
 v0.41.0までの変更点（LKPT既定OPEN・リサイズ時の幅高さ保持・タスク
 文字サイズ調整）はこのバージョンにすべて引き継いでいる。
+
+このファイル内での追加の修正点：
+- タスク特化起動でウィンドウが通常起動より低くなる不具合を修正。
+  高さの実測処理でJournalパネルの開閉状態によって経路を分岐させて
+  いたのが原因（環境によってwinfo_reqheight()の挙動が食い違っていた）。
+  常にパネルを開いた状態で1本の経路のまま高さを確定し、畳むのは
+  ウィンドウの大きさを確定した後の見た目だけの操作にした。
+- ひれぶり（😄😠😢😌）・📓 Journal・🔮 読み・📊 ダッシュボードの各
+  アイコンに、Windows標準の色つき絵文字フォント（Segoe UI Emoji）を
+  明示的に指定した。以前はYu Gothic UI（絵文字グリフを持たない）を
+  指定していたため、Windowsが自動選択した予備フォントで表示され、
+  環境によって絵文字が意図しない見た目になっていた。
+  文字と絵文字が混在するJournal/🔮件数バッジは、アイコン用ラベルと
+  文字用ラベルに分けて構成し直した（1つのボタンに単一フォントしか
+  指定できないため）。✖・⤢・↺・★・●等、fg=で色を変える単色記号は
+  絵文字ではないため変更していない
 """
 
 import ctypes
@@ -64,6 +80,18 @@ ACCENT_COLOR = "#f4a6b8"
 TEXT_COLOR = "#ffffff"
 ENTRY_BG = "#0f3460"
 PLACEHOLDER_COLOR = "#7c86a8"  # 入力前のプレースホルダ文字色（本文の白と区別する）
+
+# 絵文字アイコン専用のフォント。「Yu Gothic UI」は絵文字グリフを持たない
+# ため、絵文字を含む文字列に指定すると、Windowsが自動的に別のフォント
+# へ差し替えて描画する。この自動差し替え先が環境によって古い/簡素な
+# 絵文字セットになり、色つきの絵文字として意図した見た目にならないこと
+# があったため、絵文字だけを表示するボタン・ラベルには、Windows標準の
+# 色つき絵文字フォントを明示的に指定する。
+# 文字と絵文字が混在する文字列（例:「📓 Journal」）には使わないこと。
+# Segoe UI Emojiは英数字・かな漢字のグリフを持たないため、混在させると
+# 文字の方が表示できなくなる（該当箇所は絵文字用ラベルとテキスト用
+# ラベルを分けて並べている）
+EMOJI_FONT_FAMILY = "Segoe UI Emoji"
 TIME_GAP_WARN_COLOR = "#e0a458"  # 時間帯プレビューで「未記録」が発生する旨を示す警告色
 BUTTON_TEXT_COLOR = "#2b2b40"
 CANCEL_BTN_BG = "#d8d8e6"
@@ -395,6 +423,7 @@ class PopupWindow:
         self.subitem_free_entry = None
         self.journal_expanded = False
         self.journal_toggle_btn = None
+        self.journal_toggle_label = None
         self._journal_frame = None
         self.version_label = None
         self.l_var = tk.StringVar()
@@ -432,6 +461,8 @@ class PopupWindow:
         self.lkpt_tag_var = None         # LKPTに選択中タグを引き継ぐか
         self.lkpt_tag_check = None       # 上記のチェックボックス本体
         self.forecast_btn = None         # 読み（予測）への入口ボタン
+        self.forecast_icon_label = None  # 上記の🔮アイコン部分
+        self.forecast_count_label = None  # 上記の件数バッジ部分
         self.forecast_seed_label = None  # タスク登録直後の「読みにする」導線
         self.emotion_feedback_label = None  # ひれぶりタップ直後の一瞬フィードバック
         self.expand_height_btn = None    # 縦幅を画面いっぱいに広げるトグルボタン
@@ -539,15 +570,34 @@ class PopupWindow:
         # だけが違う。タスク特化起動では、これらを畳むことで
         # 「08:00-08:05」のような時刻表示も含めて隠れ、タスク一覧が
         # 主役になる
-        journal_btn_font = tkfont.Font(family="Yu Gothic UI", size=11, weight="bold")
-        self.journal_toggle_btn = tk.Button(
-            self.window, bg=LKPT_TOGGLE_BG, fg=BUTTON_TEXT_COLOR,
-            activebackground=ACCENT_COLOR, activeforeground=BUTTON_TEXT_COLOR,
-            relief="flat", bd=0, highlightthickness=0, font=journal_btn_font,
-            cursor="hand2", padx=14, pady=7,
-            command=self._toggle_journal,
-        )
+        # 📓とJournal/矢印を1つのボタンでは表示できない（tk.Buttonの
+        # text=は単一フォントのみ対応のため、絵文字専用フォントを指定すると
+        # 一緒に表示する文字の方が描画できなくなる）。そのため、絵文字用の
+        # ラベルと文字用のラベルを並べたFrameをクリック可能なボタンとして
+        # 扱う（タグチップと同じ構成パターン）
+        self.journal_toggle_btn = tk.Frame(self.window, bg=LKPT_TOGGLE_BG, cursor="hand2")
         self.journal_toggle_btn.pack(pady=(12, 6), padx=20, fill="x")
+
+        journal_btn_inner = tk.Frame(self.journal_toggle_btn, bg=LKPT_TOGGLE_BG)
+        journal_btn_inner.pack(pady=7)
+
+        journal_icon_font = tkfont.Font(family=EMOJI_FONT_FAMILY, size=11)
+        journal_icon_label = tk.Label(
+            journal_btn_inner, text="📓", font=journal_icon_font,
+            bg=LKPT_TOGGLE_BG, fg=BUTTON_TEXT_COLOR,
+        )
+        journal_icon_label.pack(side="left", padx=(0, 6))
+
+        journal_btn_font = tkfont.Font(family="Yu Gothic UI", size=11, weight="bold")
+        self.journal_toggle_label = tk.Label(
+            journal_btn_inner, text="Journal", font=journal_btn_font,
+            bg=LKPT_TOGGLE_BG, fg=BUTTON_TEXT_COLOR,
+        )
+        self.journal_toggle_label.pack(side="left")
+
+        for widget in (self.journal_toggle_btn, journal_btn_inner,
+                       journal_icon_label, self.journal_toggle_label):
+            widget.bind("<Button-1>", lambda e: self._toggle_journal())
 
         self._journal_frame = tk.Frame(self.window, bg=BG_COLOR)
         self._register_themed(self._journal_frame)
@@ -733,8 +783,11 @@ class PopupWindow:
         # そのまま1件記録する（LKPTのような「入力→登録」の2段階にしない）
         # 表示は絵文字アイコンにする（漢字1文字の羅列は単調で見劣りするため）。
         # 色付きの縁取りは残し、アイコン＋色の二重の手がかりで感情を区別できる
-        # ようにする。絵文字は書体の太字指定が効かないため通常のウェイトにする
-        emotion_font = tkfont.Font(family="Yu Gothic UI", size=15)
+        # ようにする。絵文字は書体の太字指定が効かないため通常のウェイトにする。
+        # 縁取りの色分けはhighlightbackground側で行っており、fg=colorは
+        # 絵文字自体の色には影響しない（絵文字は自前の色を持つグリフのため）
+        # ので、EMOJI_FONT_FAMILYを指定しても色分けは壊れない
+        emotion_font = tkfont.Font(family=EMOJI_FONT_FAMILY, size=15)
         self.emotion_frame = tk.Frame(self._journal_frame, bg=BG_COLOR)
         self.emotion_frame.pack(pady=(0, 2), padx=15, fill="x")
         self._register_themed(self.emotion_frame)
@@ -858,8 +911,11 @@ class PopupWindow:
 
         # 3つとも同じfont・pady（=同じボタンの箱の大きさ）に統一する。
         # 以前DBだけフォントを大きくして揃えようとしたが、行の高さが一番
-        # 大きいDBに引っ張られてかえってバランスが崩れたため撤回した経緯がある
+        # 大きいDBに引っ張られてかえってバランスが崩れたため撤回した経緯がある。
+        # ✖は色を変える単色記号のためYu Gothic UIのまま、🔮・📊は絵文字なので
+        # EMOJI_FONT_FAMILYを使う
         icon_btn_font = tkfont.Font(family="Yu Gothic UI", size=13)
+        icon_emoji_font = tkfont.Font(family=EMOJI_FONT_FAMILY, size=13)
 
         # 記録済みの内容は取り消さないため「キャンセル」ではなく「閉じる」。
         # TIMEを押した時点で既に書き込まれているので、キャンセルと名乗るのは
@@ -878,25 +934,38 @@ class PopupWindow:
         close_btn.grid(row=0, column=0, sticky="ew", padx=3)
 
         # 読み（予測）の一覧・入力への入口。期日が来た未記入がある間は
-        # 件数を出して、こちらから気づけるようにする
-        self.forecast_btn = tk.Button(
-            self.btn_frame,
-            text="🔮",
-            font=icon_btn_font,
-            bg=FORECAST_BTN_BG,
-            fg=BUTTON_TEXT_COLOR,
-            activebackground=ACCENT_COLOR,
-            relief="flat",
-            pady=4,
-            command=self._open_forecasts,
-        )
+        # 件数を出して、こちらから気づけるようにする。
+        # 🔮と件数の数字を同じテキストで混在させると（例:"🔮3"）、
+        # 絵文字専用フォントを指定した時に数字の方が描画できなくなる
+        # 恐れがあるため、アイコンと件数を別々のラベルに分けて並べる
+        self.forecast_btn = tk.Frame(self.btn_frame, bg=FORECAST_BTN_BG, cursor="hand2")
         self.forecast_btn.grid(row=0, column=1, sticky="ew", padx=3)
+
+        forecast_inner = tk.Frame(self.forecast_btn, bg=FORECAST_BTN_BG)
+        forecast_inner.pack(pady=4)
+
+        self.forecast_icon_label = tk.Label(
+            forecast_inner, text="🔮", font=icon_emoji_font,
+            bg=FORECAST_BTN_BG, fg=BUTTON_TEXT_COLOR,
+        )
+        self.forecast_icon_label.pack(side="left")
+
+        forecast_count_font = tkfont.Font(family="Yu Gothic UI", size=10, weight="bold")
+        self.forecast_count_label = tk.Label(
+            forecast_inner, text="", font=forecast_count_font,
+            bg=FORECAST_BTN_BG, fg=BUTTON_TEXT_COLOR,
+        )
+        self.forecast_count_label.pack(side="left")
+
+        for widget in (self.forecast_btn, forecast_inner,
+                       self.forecast_icon_label, self.forecast_count_label):
+            widget.bind("<Button-1>", lambda e: self._open_forecasts())
         self._update_forecast_button()
 
         dashboard_btn = tk.Button(
             self.btn_frame,
             text="📊",
-            font=icon_btn_font,
+            font=icon_emoji_font,
             bg=DASHBOARD_BTN_BG,
             fg=BUTTON_TEXT_COLOR,
             activebackground=ACCENT_COLOR,
@@ -932,6 +1001,10 @@ class PopupWindow:
         font_ctrl_frame.pack(side="right")
         self._register_themed(font_ctrl_frame)
 
+        # 「Ａ」（全角英字）・「↺」（矢印記号）・現在値の数字はいずれも
+        # 絵文字ではなく、fg=で色を変える単色記号のため、Yu Gothic UIの
+        # ままにする（EMOJI_FONT_FAMILYを指定すると、色つきの固定色
+        # グリフに差し替わってfg=が効かなくなる場合があるため）
         font_ctrl_shrink_font = tkfont.Font(family="Yu Gothic UI", size=8)
         font_ctrl_grow_font = tkfont.Font(family="Yu Gothic UI", size=12)
         font_ctrl_reset_font = tkfont.Font(family="Yu Gothic UI", size=9)
@@ -1074,27 +1147,31 @@ class PopupWindow:
         # 実際の高さを測って確定する。固定の目安値を積み上げて見積もる
         # のではなく実測することで、タグの数やタスクの文字サイズ設定が
         # 変わっても正しい高さが自動的に求まる。
-        # ウィンドウの高さは、Journalパネルの開閉状態に関わらず常に
-        # 「開いた状態」の高さ(expanded_height)を使う。タスク特化起動で
-        # Journalパネルを畳んだ場合に空く分は、action_list_canvas側が
-        # fill="both", expand=Trueで自動的に埋めてタスク一覧が広がる
-        # ため、ウィンドウ自体を縮める必要が無い（縮めると「タスク
-        # モードだけ画面が妙に小さい」という見え方になっていた）
-        if not self.journal_expanded:
-            # 高さは開いた状態で測る必要があるため、測定中だけ一時的に開く
-            self._journal_frame.pack(fill="x", before=self.version_label)
+        #
+        # ここまでJournalパネルは開閉状態に関わらず常にpackされたまま
+        # 組み立てられている（journal_expandedによる分岐はしていない）。
+        # ウィンドウの高さ・位置は、この「開いた状態」を基準に一本の
+        # 経路だけで計算する。以前は「畳んだ状態で立ち上げる場合だけ
+        # 測定中に一時的に開く」という分岐をしていたが、実行環境に
+        # よってwinfo_reqheight()の挙動が微妙に食い違い、タスク特化
+        # 起動だけウィンドウの高さが低くなる不具合が実機で再現した。
+        # 分岐を無くし、両モードで完全に同じ経路を通すことで解消する
         self.window.update_idletasks()
         screen_h = self.window.winfo_screenheight()
         self.expanded_height = min(self.window.winfo_reqheight(), screen_h - 40)
-        if not self.journal_expanded:
-            self._journal_frame.pack_forget()
-
-        self._update_journal_toggle_label()
 
         x = self.window.winfo_screenwidth() - self._popup_width - 20
         y = max(10, screen_h - self.expanded_height - 80)
         self.window.geometry(f"{self._popup_width}x{self.expanded_height}+{x}+{y}")
         self.window.minsize(int(self._popup_width * 2 / 3), self.expanded_height)
+
+        # ウィンドウの大きさ・位置を確定した後で、タスク特化起動の場合は
+        # Journalパネルだけを畳む。ウィンドウ自体はここでは一切変えない
+        # （空いた分はaction_list_canvas側のfill="both", expand=Trueが
+        # 自動的に埋めるため、タスク一覧が広がる形になる）
+        if not self.journal_expanded:
+            self._journal_frame.pack_forget()
+        self._update_journal_toggle_label()
 
         self.window.bind("<Escape>", lambda e: self._close())
         # Windowsが Alt キー解放をシステムメニュー呼び出しと誤認識し、
@@ -1167,7 +1244,7 @@ class PopupWindow:
     def _update_journal_toggle_label(self) -> None:
         """📓 Journalボタンの矢印を、開閉状態に合わせて更新する。"""
         arrow = "▴" if self.journal_expanded else "▾"
-        self.journal_toggle_btn.config(text=f"📓 Journal {arrow}")
+        self.journal_toggle_label.config(text=f"Journal {arrow}")
 
     def _toggle_journal(self) -> None:
         """
@@ -2085,7 +2162,7 @@ class PopupWindow:
         except Exception as e:
             print(f"⚠️ 読みの件数取得に失敗しました: {e}")
             due = 0
-        self.forecast_btn.config(text=f"🔮{due}" if due else "🔮")
+        self.forecast_count_label.config(text=str(due) if due else "")
 
     def _open_forecasts(self) -> None:
         """読み（予測）の一覧を開く。"""
