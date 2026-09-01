@@ -1,0 +1,13 @@
+{
+  "_comment": "エラー処理(SCOPE_Catch)が EQ_Received_Items へ実際に記録した内容。2026-09-01、DEV環境の EQ06_Manual_Drill_DEV で、メンバー抽出の $filter に 存在しない列名を指定して意図的に失敗させたときの実測値。拠点コードは検証用の架空拠点 NARA。",
+  "_measured_at": "2026-09-01",
+  "_how": "update_deploy_config_20260901_01.py --write-error-test-copy で columnInternalNames.EQ_Config_Members.IsActive を存在しない列名に差し替え、GET_Active_Members を実行時に失敗させた。",
+  "record": {
+    "Title": "EQ-20260901-090020-NARA",
+    "ProcessingStatus": "Error",
+    "ErrorCode": "ActionFailed",
+    "ErrorDetail": "action=CHK_Threshold_Met / An action failed. No dependent actions succeeded."
+  },
+  "_finding": "記録は残るが、ErrorDetail は失敗した『枝』の名前(CHK_Threshold_Met)止まりで、実際に失敗したアクション(GET_Active_Members)の名前もコネクタが返したメッセージも入らない。result() はスコープ直下のアクションの結果しか返さないため(公式の仕様どおり)。ErrorCode も 'ActionFailed' という汎用の値になる。",
+  "_implication": "SharePointのリストを見れば『いつ・どの訓練回が失敗したか』は分かるが、『何が原因か』はPower Automateの実行履歴を開かないと分からない。"
+}

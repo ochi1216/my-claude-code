@@ -373,12 +373,22 @@ pac solution pack --zipfile .\EQSafetyCheckin.zip --folder .\src
 pac solution import --path .\EQSafetyCheckin.zip
 ```
 
-### 記録されるエラー内容について
+### 記録されるエラー内容(2026-09-01実測)
 
-`result('SCOPE_Try')`が返すのは`SCOPE_Try`の**直下**のアクションの結果だけで、
-入れ子の奥で失敗したアクション名までは取れない。このため`ErrorDetail`には
-`action=CHK_Threshold_Met / ...`のように、失敗した枝の名前が入る見込み。
-どこまで具体的に取れるかは実機の記録を見てから判断する(**未確認**)。
+| 列 | 値 |
+| --- | --- |
+| Title | `EQ-20260901-090020-NARA`(イベントID) |
+| ProcessingStatus | `Error` |
+| ErrorCode | `ActionFailed` |
+| ErrorDetail | `action=CHK_Threshold_Met / An action failed. No dependent actions succeeded.` |
+
+**記録は残るが、原因までは分からない。** `result()`はスコープ**直下**のアクションの
+結果しか返さないため、実際に失敗したアクション(このときは`GET_Active_Members`)の
+名前も、コネクタが返したメッセージも入らない。`ErrorCode`も`ActionFailed`という
+汎用の値になる。
+
+つまりSharePointのリストからは「いつ・どの訓練回が失敗したか」までは分かるが、
+「何が原因か」はPower Automateの実行履歴を開く必要がある。
 
 ## 生成物の検証(テナントに入れる前)
 
