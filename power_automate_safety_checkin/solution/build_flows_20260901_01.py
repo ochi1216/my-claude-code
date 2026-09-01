@@ -270,7 +270,9 @@ def build_eq06(cfg, cards_dir):
                 {
                     "poster": "Flow bot",
                     "location": "Chat with Flow bot",
-                    "body/body/recipient": recipient_expr,
+                    # 待機型では recipient がオブジェクト扱いになるため、
+                    # 投げ切り版の body/recipient とは異なり /to まで指定する
+                    "body/body/recipient/to": recipient_expr,
                     "body/body/messageBody": checkin_card,
                     "body/body/updateMessage": "回答を受け付けました。ありがとうございます。",
                 },
