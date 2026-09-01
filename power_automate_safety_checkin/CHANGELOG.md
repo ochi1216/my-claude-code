@@ -69,6 +69,7 @@
   なる)。`CHK_Responded`(runAfter=[Succeeded,TimedOut])で受け、その中で
   `actions('TM_Post_CheckIn_Card')?['status']`を見て回答あり/未回答に分岐する。
   `Failed`は受けないため、本物の失敗は引き続きフローの失敗として表に出る。
+  この構造で、タイムアウト後にフローが正常終了することを実機で確認した。
 - `responseTimeout` / `loopConcurrency` / `summaryIntervalMinutes` を設定で
   変えられるようにした。生成対象のフローは`workflowIds`に載っているものだけになる。
 - 検証用の架空拠点`NARA`(検証者1名のみ所属)を導入。実在拠点の名簿に触れずに

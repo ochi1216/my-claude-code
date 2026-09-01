@@ -114,7 +114,6 @@ pac solution import --environment <ENV_ID> --path .\EQSafetyCheckin.zip
 
 ## 未確認事項
 
-- 未回答(タイムアウト)時にループが正常終了するかは**再検証中**。詳細は下記。
 - `EQ05_Status_Summary_DEV`は**実機未検証**。
 - エラー処理(`SCOPE_Try`/`SCOPE_Catch`による`EQ_Received_Items`へのログ記録)は**未実装**。
   `EQ_Received_Items`の列内部名も未取得。
@@ -132,7 +131,8 @@ pac solution import --environment <ENV_ID> --path .\EQSafetyCheckin.zip
 受け皿自体は成功していたが、もう一方がスキップのまま残るとスコープが失敗と判定される。
 
 このため、**待機アクションの後続を`CHK_Responded`という条件1つにまとめ**、
-その中で回答あり/未回答に分岐する構造へ変更した。
+その中で回答あり/未回答に分岐する構造へ変更した。この形で、1分のタイムアウト後に
+フローが正常終了することを実機で確認済み(2026-09-01)。
 
 ```
 TM_Post_CheckIn_Card (待機, limit.timeout)
