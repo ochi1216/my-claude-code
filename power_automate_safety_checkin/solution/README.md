@@ -110,7 +110,7 @@ pac solution import --environment <ENV_ID> --path .\EQSafetyCheckin.zip
 | --- | --- |
 | `EQ06_Manual_Drill_DEV` | 生成対象 |
 | `EQ04b_On_Response_DEV` | **不要になった**。カード応答を受け取るトリガーがテナントに存在しないため、回答の受け取りはEQ06のループ内(`PostCardAndWaitForResponse`)へ統合する |
-| `EQ05_Status_Summary_DEV` | 生成対象(実機未検証)。`workflowIds`に載っているフローだけが生成されるため、不要なら設定から外せばよい |
+| `EQ05_Status_Summary_DEV` | 生成対象・実機動作確認済み(2026-09-01)。`workflowIds`に載っているフローだけが生成されるため、不要なら設定から外せばよい |
 
 ## 未確認事項
 
