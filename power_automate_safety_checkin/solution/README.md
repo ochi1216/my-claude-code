@@ -110,18 +110,29 @@ pac solution import --environment <ENV_ID> --path .\EQSafetyCheckin.zip
 | --- | --- |
 | `EQ06_Manual_Drill_DEV` | 生成対象 |
 | `EQ04b_On_Response_DEV` | **不要になった**。カード応答を受け取るトリガーがテナントに存在しないため、回答の受け取りはEQ06のループ内(`PostCardAndWaitForResponse`)へ統合する |
-| `EQ05_Status_Summary_DEV` | **未実装** |
+| `EQ05_Status_Summary_DEV` | 生成対象(実機未検証)。`workflowIds`に載っているフローだけが生成されるため、不要なら設定から外せばよい |
 
 ## 未確認事項
 
-- 未回答者がいた場合のタイムアウト時の挙動(ループが失敗扱いになるか)は**未確認**。
-  `responseTimeout`(既定`PT1H`)を過ぎたイテレーションがどう扱われるか、
-  実機で確認する必要がある。
-- `EQ05_Status_Summary_DEV`(定期集計)は**未実装**。
+- 未回答(タイムアウト)時にイテレーションが正常終了するかは**未検証**。
+  `CMP_No_Response`(runAfter=TimedOut)で受けてループ全体が失敗しないようにしているが、
+  この受け方で本当に成功扱いになるかは実機で確認が必要。`responseTimeout`を
+  `PT1M`にして、回答せずに放置するテストで確認する。
+- `EQ05_Status_Summary_DEV`は**実機未検証**。
 - エラー処理(`SCOPE_Try`/`SCOPE_Catch`による`EQ_Received_Items`へのログ記録)は**未実装**。
   `EQ_Received_Items`の列内部名も未取得。
 - 実在拠点(OITA/OSAKA/TOKYO)での訓練は**未実施**。現状は架空拠点`NARA`でのみ検証している。
 - 3名結合テスト・18名訓練は未実施。
+
+## EQ05での拠点→通知先の解決
+
+`EQ_Events`には`SiteCode`しか入っていないため、投稿先のTeam/Channelを引く必要がある。
+ループ内でSwitchや変数を使うと並列実行で壊れるため、フロー先頭の`CMP_Site_Map`で
+拠点コードをキーにしたオブジェクトを1つ作り、`outputs('CMP_Site_Map')?[<siteCode>]`
+でキー参照している。
+
+被災者数は式では数えられない(WDLに`filter`関数が無い)ため、
+「配列のフィルター」アクション(`type: Query`)で絞ってから`length()`で数える。
 
 ## 並列ループ内で変数を使わない理由
 

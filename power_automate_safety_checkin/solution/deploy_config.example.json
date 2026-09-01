@@ -47,6 +47,9 @@
     "isManager": "TRUE"
   },
   "testRecipientOverride": "<検証中の送信先メールアドレス。空文字にすると名簿どおりに送信される>",
+  "responseTimeout": "PT1H",
+  "loopConcurrency": 20,
+  "summaryIntervalMinutes": 15,
   "connectionReferences": {
     "sharepoint": "<njp_sharedsharepointonline_xxxxx>",
     "teams": "<njp_sharedteams_xxxxx>"
@@ -75,7 +78,8 @@
     }
   ],
   "workflowIds": {
-    "EQ06_Manual_Drill_DEV": "11111111-2222-3333-4444-555555555555"
+    "EQ06_Manual_Drill_DEV": "11111111-2222-3333-4444-555555555555",
+    "EQ05_Status_Summary_DEV": "22222222-3333-4444-5555-666666666666"
   },
   "solution": {
     "uniqueName": "EQSafetyCheckinSolution",

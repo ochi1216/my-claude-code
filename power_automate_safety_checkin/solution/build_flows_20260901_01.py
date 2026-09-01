@@ -348,6 +348,19 @@ def build_eq06(cfg, cards_dir):
                 },
                 {"TM_Post_CheckIn_Card": ["Succeeded"]},
             ),
+            # タイムアウト(時間内に回答が無かった)は異常ではないので、
+            # ここで受けてイテレーションを正常終了させる。これが無いと
+            # 未回答者が1人いるだけでフロー全体が失敗になる。
+            "CMP_No_Response": {
+                "runAfter": {"TM_Post_CheckIn_Card": ["TimedOut"]},
+                "type": "Compose",
+                "inputs": {
+                    "result": "no response within timeout",
+                    "employeeId": "@items('LOOP_Each_Member')?['%s']"
+                    % col("EQ_Config_Members", "Title"),
+                    "eventId": "@outputs('CMP_EventID')",
+                },
+            },
             "CHK_Affected": {
                 "runAfter": {"SP_Create_Response": ["Succeeded"]},
                 "type": "If",
@@ -625,6 +638,179 @@ def build_eq06(cfg, cards_dir):
     }
 
 
+def build_eq05(cfg, cards_dir):
+    """EQ05_Status_Summary_DEV(未回答者・被災者の定期集計)。
+
+    AlertStatusがOpenのイベントごとに、対象者数・回答数・未回答数・被災者数を
+    数えて拠点のチャネルへ投稿する。EQ06の実行中(回答待ちの間)に、
+    誰がまだ回答していないかを可視化するのが目的。
+    """
+    site_url = cfg["sharePointSiteUrl"]
+    lists = cfg["listIds"]
+    columns = cfg["columnInternalNames"]
+
+    def col(list_name, display_name):
+        try:
+            return columns[list_name][display_name]
+        except KeyError:
+            raise KeyError(
+                "%s の列 '%s' の内部名が deploy_config.json に未定義です"
+                % (list_name, display_name)
+            )
+
+    # 拠点コードから通知先を引くための対応表。ループ内でSwitchや変数を使わずに
+    # 済むよう、先頭で1つのオブジェクトにまとめてキー参照する。
+    site_map = {
+        site["siteCode"]: {
+            "SiteName": site["siteName"],
+            "TeamId": site["teamId"],
+            "ChannelId": site["channelId"],
+        }
+        for site in cfg["sites"]
+    }
+
+    event = "items('LOOP_Each_Open_Event')"
+    event_site = "%s?['%s']" % (event, col("EQ_Events", "SiteCode"))
+    site_entry = "outputs('CMP_Site_Map')?[%s]" % event_site
+
+    answered = "length(body('GET_Event_Responses')?['value'])"
+    total = "length(body('GET_Site_Members')?['value'])"
+
+    summary_card = load_card(
+        cards_dir,
+        "status_summary_card.json",
+        {
+            "SiteName": "@{%s?['SiteName']}" % site_entry,
+            "EventID": "@{%s?['%s']}" % (event, col("EQ_Events", "Title")),
+            "TotalCount": "@{%s}" % total,
+            "AnsweredCount": "@{%s}" % answered,
+            "UnansweredCount": "@{sub(%s,%s)}" % (total, answered),
+            "AffectedCount": "@{length(body('FLT_Affected'))}",
+        },
+    )
+
+    member_filter = "%s eq '@{%s}' and %s eq '%s' and %s eq '%s'" % (
+        col("EQ_Config_Members", "SiteCode"),
+        event_site,
+        col("EQ_Config_Members", "IsActive"),
+        cfg.get("memberFlagValues", {}).get("active", "TRUE"),
+        col("EQ_Config_Members", "IsManager"),
+        cfg.get("memberFlagValues", {}).get("notManager", "FALSE"),
+    )
+
+    definition = {
+        "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+        "contentVersion": "1.0.0.0",
+        "parameters": {
+            "$connections": {"defaultValue": {}, "type": "Object"},
+            "$authentication": {"defaultValue": {}, "type": "SecureObject"},
+        },
+        "triggers": {
+            "Recurrence": {
+                "type": "Recurrence",
+                "recurrence": {
+                    "frequency": "Minute",
+                    "interval": cfg.get("summaryIntervalMinutes", 15),
+                },
+            }
+        },
+        "actions": {
+            "CMP_Site_Map": {"runAfter": {}, "type": "Compose", "inputs": site_map},
+            "GET_Open_Events": sp_action(
+                "GetItems",
+                {
+                    "dataset": site_url,
+                    "table": lists["EQ_Events"],
+                    "$filter": "%s eq 'Open'" % col("EQ_Events", "AlertStatus"),
+                    "$top": 100,
+                },
+                {"CMP_Site_Map": ["Succeeded"]},
+            ),
+            "LOOP_Each_Open_Event": {
+                "runAfter": {"GET_Open_Events": ["Succeeded"]},
+                "type": "Foreach",
+                "foreach": "@body('GET_Open_Events')?['value']",
+                "actions": {
+                    "GET_Site_Members": sp_action(
+                        "GetItems",
+                        {
+                            "dataset": site_url,
+                            "table": lists["EQ_Config_Members"],
+                            "$filter": member_filter,
+                            "$top": 500,
+                        },
+                        {},
+                    ),
+                    "GET_Event_Responses": sp_action(
+                        "GetItems",
+                        {
+                            "dataset": site_url,
+                            "table": lists["EQ_Responses"],
+                            "$filter": "%s eq '@{%s?['%s']}'"
+                            % (
+                                col("EQ_Responses", "EventID"),
+                                event,
+                                col("EQ_Events", "Title"),
+                            ),
+                            "$top": 500,
+                        },
+                        {"GET_Site_Members": ["Succeeded"]},
+                    ),
+                    # 被災者数は「配列のフィルター」で絞ってから件数を数える
+                    # (式には filter 関数が無いため)
+                    "FLT_Affected": {
+                        "runAfter": {"GET_Event_Responses": ["Succeeded"]},
+                        "type": "Query",
+                        "inputs": {
+                            "from": "@body('GET_Event_Responses')?['value']",
+                            "where": "@equals(item()?['%s'],'Affected')"
+                            % col("EQ_Responses", "SafetyStatus"),
+                        },
+                    },
+                    "TM_Post_Summary": teams_post_card(
+                        {
+                            "poster": "Flow bot",
+                            "location": "Channel",
+                            "body/recipient/groupId": "@%s?['TeamId']" % site_entry,
+                            "body/recipient/channelId": "@%s?['ChannelId']" % site_entry,
+                            "body/messageBody": summary_card,
+                        },
+                        {"FLT_Affected": ["Succeeded"]},
+                    ),
+                },
+            },
+        },
+    }
+
+    return {
+        "properties": {
+            "connectionReferences": {
+                "shared_sharepointonline": {
+                    "runtimeSource": "invoker",
+                    "connection": {
+                        "connectionReferenceLogicalName": cfg["connectionReferences"][
+                            "sharepoint"
+                        ]
+                    },
+                    "api": {"name": "shared_sharepointonline"},
+                },
+                "shared_teams": {
+                    "runtimeSource": "invoker",
+                    "connection": {
+                        "connectionReferenceLogicalName": cfg["connectionReferences"][
+                            "teams"
+                        ]
+                    },
+                    "api": {"name": "shared_teams"},
+                },
+            },
+            "definition": definition,
+            "templateName": None,
+        },
+        "schemaVersion": "1.0.0.0",
+    }
+
+
 WORKFLOW_METADATA_TEMPLATE = """<?xml version="1.0" encoding="utf-8"?>
 <Workflow WorkflowId="{{{guid_lower}}}" Name="{name}" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <JsonFileName>/Workflows/{name}-{guid_upper}.json</JsonFileName>
@@ -784,11 +970,15 @@ def main():
     with open(args.config, encoding="utf-8-sig") as fh:
         cfg = json.load(fh)
 
+    builders = {
+        "EQ06_Manual_Drill_DEV": build_eq06,
+        "EQ05_Status_Summary_DEV": build_eq05,
+    }
+    # workflowIds に載っているフローだけを生成する(段階的に増やせるように)
     flows = {
-        "EQ06_Manual_Drill_DEV": (
-            cfg["workflowIds"]["EQ06_Manual_Drill_DEV"],
-            build_eq06(cfg, args.cards),
-        )
+        name: (cfg["workflowIds"][name], builder(cfg, args.cards))
+        for name, builder in builders.items()
+        if name in cfg["workflowIds"]
     }
 
     write_solution(args.out, cfg, flows)
