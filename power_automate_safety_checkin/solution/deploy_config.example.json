@@ -1,0 +1,51 @@
+{
+  "_comment": "このファイルをコピーして deploy_config.json を作り、実値を入れる。deploy_config.json は .gitignore で除外されるためコミットされない（CLAUDE.md: Tenant ID・Team ID・Channel ID・サイトIDをコミットしない）。値は pac CLI で取得できる（取得方法は solution/README.md 参照）。",
+
+  "sharePointSiteUrl": "https://<tenant>.sharepoint.com/sites/<SiteName>",
+
+  "listIds": {
+    "EQ_Events": "<EQ_EVENTS_LIST_GUID>",
+    "EQ_Config_Members": "<EQ_CONFIG_MEMBERS_LIST_GUID>",
+    "EQ_Responses": "<EQ_RESPONSES_LIST_GUID>",
+    "EQ_Received_Items": "<EQ_RECEIVED_ITEMS_LIST_GUID>"
+  },
+
+  "connectionReferences": {
+    "sharepoint": "<njp_sharedsharepointonline_xxxxx>",
+    "teams": "<njp_sharedteams_xxxxx>"
+  },
+
+  "sites": [
+    {
+      "siteCode": "OITA",
+      "siteName": "Japan Oita Site",
+      "thresholdValue": 50,
+      "teamId": "<OITA_TEAM_ID>",
+      "channelId": "<OITA_CHANNEL_ID>"
+    },
+    {
+      "siteCode": "OSAKA",
+      "siteName": "Japan Osaka Site",
+      "thresholdValue": 50,
+      "teamId": "<OSAKA_TEAM_ID>",
+      "channelId": "<OSAKA_CHANNEL_ID>"
+    },
+    {
+      "siteCode": "TOKYO",
+      "siteName": "Japan Tokyo Site",
+      "thresholdValue": 50,
+      "teamId": "<TOKYO_TEAM_ID>",
+      "channelId": "<TOKYO_CHANNEL_ID>"
+    }
+  ],
+
+  "workflowIds": {
+    "EQ06_Manual_Drill_DEV": "11111111-2222-3333-4444-555555555555"
+  },
+
+  "solution": {
+    "uniqueName": "EQSafetyCheckinSolution",
+    "publisherUniqueName": "NexperiaJP",
+    "publisherPrefix": "njp"
+  }
+}

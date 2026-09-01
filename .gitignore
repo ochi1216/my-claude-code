@@ -15,3 +15,10 @@ emergency_alert_tool/*.db
 # Power Automate版: pac CLIの作業用一時フォルダ、実メンバー情報
 power_automate_safety_checkin/.pac-work/
 power_automate_safety_checkin/config/members.json
+
+# Power Automate安否確認PoC: デプロイ用の実値設定と生成物。
+# Team ID・Channel ID・SharePointサイトURL・リストGUIDを含むため、
+# リポジトリには含めない（deploy_config.example.json のみコミット）。
+power_automate_safety_checkin/solution/deploy_config.json
+power_automate_safety_checkin/solution/src/
+power_automate_safety_checkin/solution/*.zip
