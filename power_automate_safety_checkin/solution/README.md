@@ -76,9 +76,9 @@ pac solution pack --zipfile .\EQSafetyCheckin.zip --folder .\src
 pac solution import --environment <ENV_ID> --path .\EQSafetyCheckin.zip
 ```
 
-インポート後、Power Automateの「ソリューション」→ 該当Solution からフローを開き、
-**「オンにする」**(有効化)を押す。生成されるフローは`StateCode=0`(下書き)のため、
-意図せず動き出すことはない。
+生成されるフローは有効状態(`StateCode=1`/`StatusCode=2`)でインポートされる。
+手動トリガーのフローは実行ボタンを押さない限り動かないため、有効なままで支障はない
+（下書きで入れると再インポートのたびに「オンにする」を押す必要があり、手間が増える）。
 
 ## 生成されるフロー
 

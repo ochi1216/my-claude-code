@@ -467,8 +467,8 @@ WORKFLOW_METADATA_TEMPLATE = """<?xml version="1.0" encoding="utf-8"?>
   <TriggerOnDelete>0</TriggerOnDelete>
   <AsyncAutodelete>0</AsyncAutodelete>
   <SyncWorkflowLogOnFailure>0</SyncWorkflowLogOnFailure>
-  <StateCode>0</StateCode>
-  <StatusCode>1</StatusCode>
+  <StateCode>1</StateCode>
+  <StatusCode>2</StatusCode>
   <RunAs>1</RunAs>
   <IsTransacted>1</IsTransacted>
   <IntroducedVersion>1.0</IntroducedVersion>
