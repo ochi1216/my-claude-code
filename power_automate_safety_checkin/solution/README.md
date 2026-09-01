@@ -114,12 +114,14 @@ pac solution import --environment <ENV_ID> --path .\EQSafetyCheckin.zip
 
 ## 未確認事項
 
-- 1:1チャットへのカード投稿(`location: "Chat with Flow bot"`, `body/recipient`にメールアドレス)は、
-  チャネル投稿と違い実測できていない。初回実行時に要確認。
 - 未回答者がいた場合のタイムアウト時の挙動(ループが失敗扱いになるか)は**未確認**。
-- 被災時の上司通知は**未検証**。`EQ_Config_Members`に`IsManager=TRUE`の行が
-  必要で、現状の名簿に上司が登録されているかは未確認。
-- `EQ05_Status_Summary_DEV`(定期集計)は未実装。
+  `responseTimeout`(既定`PT1H`)を過ぎたイテレーションがどう扱われるか、
+  実機で確認する必要がある。
+- `EQ05_Status_Summary_DEV`(定期集計)は**未実装**。
+- エラー処理(`SCOPE_Try`/`SCOPE_Catch`による`EQ_Received_Items`へのログ記録)は**未実装**。
+  `EQ_Received_Items`の列内部名も未取得。
+- 実在拠点(OITA/OSAKA/TOKYO)での訓練は**未実施**。現状は架空拠点`NARA`でのみ検証している。
+- 3名結合テスト・18名訓練は未実施。
 
 ## 並列ループ内で変数を使わない理由
 
