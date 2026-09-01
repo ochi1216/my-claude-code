@@ -8,7 +8,7 @@ Channel ID等の生の識別子はコミットしない(`GATE_STATUS.md`の完�
 
 | ファイル | 内容 | 取得元 |
 | --- | --- | --- |
-| `teams_wait_output_sanitized.json` | Gate B: `TRG_On_Adaptive_Card_Response`の実行履歴で得られる出力JSON(個人情報をマスクしたもの) | `EQ04b_On_Response_DEV`の実行履歴 → 該当ステップの「入力」「出力」 |
+| `teams_card_response_sanitized.json` | Gate B: `PostCardAndWaitForResponse`が返す応答JSON(個人情報をマスクしたもの) | `EQ06_Manual_Drill_DEV`の実行履歴 → `LOOP_Each_Member` → `CMP_Raw_Response`の出力 |
 | `sharepoint_internal_names.json` | Gate D: 4リストの列内部名(表示名 → 内部名の対応表) | SharePointの「リストの設定」→ 各列 → URLの`Field=`部分 |
 
 ## サニタイズ方法(Gate B)
@@ -31,5 +31,15 @@ Channel ID等の生の識別子はコミットしない(`GATE_STATUS.md`の完�
 
 ## 現在の状態
 
-**未取得**(S02時点)。`EQ06_Manual_Drill_DEV`実行後にこのREADMEの下へ
-実際のファイルを追加すること。
+| ファイル | 状態 |
+| --- | --- |
+| `teams_card_response_sanitized.json` | 取得済み(2026-09-01) |
+| `sharepoint_internal_names.json` | `EQ_Events`・`EQ_Config_Members`は取得済み。`EQ_Responses`・`EQ_Received_Items`は未取得 |
+
+### 列内部名の取得方法
+
+ブラウザ(SharePointにログイン済み)で以下を開くと、表示名・内部名・型の対応が一度に得られる。
+
+```
+https://<サイトURL>/_api/web/lists/getbytitle('<リスト名>')/fields?$select=InternalName,Title,TypeAsString&$filter=Hidden eq false and ReadOnlyField eq false
+```
