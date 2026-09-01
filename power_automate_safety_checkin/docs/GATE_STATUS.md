@@ -103,6 +103,20 @@ Teamsコネクタのトリガーは11種類あり、その全てを確認した�
 **動作は未検証**である。生成したフロー定義(JSON)の構造検証のみ
 `solution/verify_flows_20260901_01.py`で実施済み(107項目すべて合格)。
 
+### 存在しないリストGUIDは実行時ではなく保存時に弾かれる(2026-09-01実測)
+
+エラー処理の動作確認のため`EQ_Events`のリストGUIDを存在しない値にしてインポートしたところ、
+実行前にデザイナーの保存・検証で`GetTable`が`NotFound`となり、**フローがオフになった**。
+
+```
+Flow save failed with code 'DynamicOperationRequestClientFailure' ...
+operation 'GetTable' failed with status code 'NotFound' ... "List not found"
+```
+
+リストGUIDは保存時に解決されるため、この壊し方では`SCOPE_Catch`まで到達しない。
+`$filter`はSharePointがサーバ側で評価する文字列で保存時に検証されないため、
+フィルターに使う列の内部名を存在しないものへ差し替える方式に変更した。
+
 実機で確認すべき、公開情報からは確定できなかった点:
 
 | 項目 | 前提にしていること | 外れた場合に起きること |

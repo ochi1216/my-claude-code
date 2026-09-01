@@ -277,11 +277,28 @@ python update_deploy_config_20260901_01.py --received-items-list-id <GUID> --ena
 ## エラー処理の動作確認(誰にもカードを送らずに試す)
 
 `SCOPE_Catch`が実際に`EQ_Received_Items`へ記録するかは、わざと失敗させないと
-確かめられない。安全に試すため、**EQ_EventsのリストGUIDだけを存在しない値へ
+確かめられない。**メンバー抽出の`$filter`に使う列の内部名だけを、存在しない名前へ
 差し替えた設定の写し**を作って使う。
 
-`SP_Create_Event`はフローで最初のコネクタ呼び出しであり、ここで落とせば
-**Teamsへの投稿は一度も起きない**(チャネル通知も個人カードもその後ろにある)。
+対象者を取得する`GET_Active_Members`が実行時に400(column does not exist)で失敗し、
+`SCOPE_Catch`へ入る。**個人宛のカードは1通も送られない**(送信処理`LOOP_Each_Member`は
+失敗箇所より後ろにあるため)。ただし手前の処理は動くので、`EQ_Events`に1行でき、
+拠点のチャネルへ開始通知カードが1件投稿される。
+
+### なぜリストGUIDを壊す方法ではないのか(2026-09-01 実機で判明)
+
+当初は`EQ_Events`のリストGUIDを存在しない値にしていたが、**それでは実行時ではなく
+デザイナーの保存・検証の時点で弾かれ、フローがオフになってしまった。**
+
+```
+Flow save failed with code 'DynamicOperationRequestClientFailure' and message
+'The dynamic operation request to API 'sharepointonline' operation 'GetTable'
+failed with status code 'NotFound' ... "message": "List not found"'
+```
+
+リストGUIDは保存時に解決されるため、実行まで到達しない。一方`$filter`は
+SharePointがサーバ側で評価する単なる文字列で、保存時には検証されない。
+このため列の内部名を差し替える方式にした。
 
 ```powershell
 python update_deploy_config_20260901_01.py --write-error-test-copy deploy_config_errortest.json
@@ -293,11 +310,16 @@ pac solution import --path .\EQSafetyCheckin.zip
 `--write-error-test-copy`は元の`deploy_config.json`に触らない。
 `features.errorLogging`が有効でないと実行を断る。
 
-この状態でEQ06を1回実行すると、閾値以上の震度を指定した場合に必ず失敗し、
+この状態でEQ06を1回実行すると(閾値以上の震度を指定すること)、
 `EQ_Received_Items`へ`ProcessingStatus=Error`の行が1件増えるはずである。
 フローの実行履歴も赤(失敗)になる(`SCOPE_Catch`末尾の`END_Failed`のため)。
 
+`features.eventClose`が無効の間は、このとき作られた`EQ_Events`の行が`Open`のまま
+残る。`EQ05`をオンにしているとその回の集計が投稿され続けるため、確認後に手動で
+`Closed`にするか、`EQ05`をオフにしておく。
+
 **確認が終わったら、必ず元の設定から生成し直してインポートし直すこと。**
+インポート後にフローが「オフ」になっていたら「オンにする」を押す。
 
 ```powershell
 python build_flows_20260901_02.py --config deploy_config.json --out .\src --cards ..\cards

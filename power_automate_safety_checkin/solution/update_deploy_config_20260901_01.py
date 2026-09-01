@@ -51,10 +51,14 @@ RECEIVED_ITEMS_COLUMNS = collections.OrderedDict([
 GUID_PATTERN = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
                           r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
-# 存在しないリストGUID。エラー処理の動作確認で、SP_Create_Event をわざと失敗させる。
-# このアクションはフローの最初のコネクタ呼び出しであり、ここで落とせば Teams への
-# 投稿は一切起きない(誰にもカードが飛ばない)。
-MISSING_LIST_ID = "00000000-0000-0000-0000-000000000000"
+# エラー処理の動作確認で、GET_Active_Members をわざと失敗させるための列内部名。
+#
+# 当初は EQ_Events のリストGUIDを存在しない値にしていたが、それでは実行時ではなく
+# デザイナーの保存・検証の時点で GetTable が NotFound となって弾かれ、フローが
+# オフになってしまった(2026-09-01 実機で判明)。$filter は SharePoint がサーバ側で
+# 評価する単なる文字列で保存時には検証されないため、フィルターに使う列の内部名を
+# 差し替える方式にした。実行時に 400 (column does not exist) で失敗する。
+BROKEN_COLUMN_NAME = "field_no_such_column_for_error_test"
 
 
 def load_config(path):
@@ -117,11 +121,14 @@ def ask_list_id():
 
 
 def write_error_test_copy(cfg, has_bom, source_path, dest_path):
-    """EQ_EventsのリストGUIDだけを存在しない値に差し替えた写しを書き出す。
+    """メンバー抽出のフィルターだけを壊した設定の写しを書き出す。
 
-    元の設定には触らない。この写しから生成したフローは、最初のSharePoint
-    アクション(SP_Create_Event)で必ず失敗するため、Teamsへの投稿が一度も
-    起きないまま SCOPE_Catch の動作だけを確かめられる。
+    元の設定には触らない。この写しから生成したフローは、対象者を取得する
+    GET_Active_Members で必ず失敗し、SCOPE_Catch へ入る。
+
+    個人カードの送信(LOOP_Each_Member)はこの後ろにあるため、**個人宛のカードは
+    1通も送られない**。ただし、その手前にある処理は動くので、
+    EQ_Events に1行できて、拠点のチャネルへ開始通知が1件投稿される。
     """
     if os.path.abspath(dest_path) == os.path.abspath(source_path):
         raise SystemExit("写しの書き出し先が元のファイルと同じです: %s" % dest_path)
@@ -133,7 +140,7 @@ def write_error_test_copy(cfg, has_bom, source_path, dest_path):
         )
 
     broken = json.loads(json.dumps(cfg), object_pairs_hook=collections.OrderedDict)
-    broken["listIds"]["EQ_Events"] = MISSING_LIST_ID
+    broken["columnInternalNames"]["EQ_Config_Members"]["IsActive"] = BROKEN_COLUMN_NAME
     save_config(dest_path, broken, has_bom)
     load_config(dest_path)
 
@@ -141,8 +148,15 @@ def write_error_test_copy(cfg, has_bom, source_path, dest_path):
     print("書き出しました: %s" % dest_path)
     print("  元の %s は変更していません。" % source_path)
     print("")
-    print("この写しから生成したフローは、EQ_Events への書き込みで必ず失敗します。")
-    print("Teamsへの投稿はその手前にも後にも起きないため、誰にもカードは届きません。")
+    print("この写しから生成したフローは、対象者を取得する GET_Active_Members で")
+    print("必ず失敗し、SCOPE_Catch へ入ります。")
+    print("")
+    print("実行すると起きること:")
+    print("  - EQ_Events に1行できる(AlertStatus は Open のまま残る)")
+    print("  - 拠点のチャネルへ開始通知カードが1件投稿される")
+    print("  - 個人宛のカードは1通も送られない(送信処理は失敗箇所より後ろにあるため)")
+    print("  - EQ_Received_Items に ProcessingStatus=Error の行が1件増える")
+    print("  - フローの実行履歴は赤(失敗)になる")
     print("")
     print("確認のあとは、必ず元の設定から生成し直してインポートし直してください:")
     print("  python build_flows_20260901_02.py --config %s --out .\\src --cards ..\\cards"
