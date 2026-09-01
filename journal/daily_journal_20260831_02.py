@@ -35,6 +35,18 @@ v0.41.0までの変更点（LKPT既定OPEN・リサイズ時の幅高さ保持�
 - 絵文字専用フォント(Segoe UI Emoji)への変更を試みたが、実機で
   ボタンサイズが崩れる不具合が出たため撤回した。ボタン類は元の
   Yu Gothic UI・単一tk.Button構成に戻している
+- ひれぶり（喜怒哀楽）のアイコンを、絵文字文字列からassets/配下の
+  色つきPNG画像に変更した。Windows上のTcl/Tkは絵文字グリフを色つきで
+  描画できない（emoji_font_preview.pyで実機確認済み。フォントを
+  変えても白黒の輪郭線にしかならない）という制約への対応。
+  画像の読み込みに失敗した場合は、従来通り絵文字文字列表示に
+  自動でフォールバックする
+- タスク一覧の並び順（↓登録が古い順/↑登録が新しい順）を、見出しの
+  文字サイズ調整ボタンの左に置いたトグルボタンで切り替えられるように
+  した。★優先で先頭に来る仕様はそのまま維持し、その中の並ぶ向きだけを
+  切り替える。並び順・文字サイズとも、storage.pyに追加した
+  Settingsシートに変更のたびに書き出し、アプリを再起動しても前回の
+  設定を引き継ぐようにした（storage.py v0.12.0が必要）
 """
 
 import ctypes
@@ -47,6 +59,8 @@ from datetime import datetime, timedelta
 from tkinter import font as tkfont
 
 from storage import (
+    ACTION_SORT_ORDER_ASC,
+    ACTION_SORT_ORDER_DESC,
     ACTION_STATUS_PENDING,
     EMOTION_LABELS,
     MAX_TIMELOG_GAP_HOURS,
@@ -57,12 +71,16 @@ from storage import (
     append_time_log,
     complete_action,
     delete_time_log_row,
+    get_action_font_size,
+    get_action_sort_order,
     get_actions,
     get_last_other_comment,
     get_sub_item_master,
     get_tag_master,
     peek_next_time_range_v2,
+    set_action_font_size,
     set_action_priority,
+    set_action_sort_order,
     update_time_log_row,
 )
 
@@ -113,6 +131,18 @@ EMOTION_ICONS = {
     "怒": "😠",
     "哀": "😢",
     "楽": "😌",
+}
+
+# Windows上のTkinterは、Yu Gothic UI等の文字用フォントに絵文字を混ぜても
+# 色つきで描画できない（フォント側でなくTcl/Tkの描画方式自体の制約。
+# emoji_font_preview.pyでの実機確認により、フォントを変えても白黒の
+# 輪郭線にしかならないことを確認済み）。そのため、ひれぶりのアイコンは
+# フォント文字ではなく、assets/にある色つきのPNG画像を表示する
+EMOTION_ICON_FILES = {
+    "喜": "emotion_ki.png",
+    "怒": "emotion_do.png",
+    "哀": "emotion_ai.png",
+    "楽": "emotion_raku.png",
 }
 
 # L/K/P/Tが何を意味するか毎回忘れてしまう問題への対応。
@@ -289,6 +319,12 @@ FILE_VERSION_LABEL = (
     else _FILE_STEM
 )
 
+# ひれぶりアイコン(PNG)の置き場所。このファイル自身と同じフォルダの
+# assets/ を参照する（run_latest.py経由でも__file__は実ファイルパスを
+# 指すため、カレントディレクトリに関わらず正しく解決できる）
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ASSETS_DIR = os.path.join(_SCRIPT_DIR, "assets")
+
 _trigger_queue = queue.Queue()
 
 # ============================================================
@@ -422,6 +458,12 @@ class PopupWindow:
         self._themed_bg_widgets = []
         self._themed_fg_widgets = []
 
+        # ひれぶりアイコンの画像（PhotoImageはガベージコレクトされないよう
+        # 参照を保持し続ける必要があるため、インスタンス変数として持つ）。
+        # 読み込みに失敗した場合は空のままにし、呼び出し側で絵文字文字列
+        # へフォールバックする
+        self._emotion_images = self._load_emotion_images()
+
         # 直前に書き込んだTimeLog行を覚えておくための一式。
         # PopupWindowはアプリ起動中ずっと同じインスタンスが使われるため、
         # これらをshow()でリセットしないことで「一度閉じた後に開き直しても
@@ -450,12 +492,40 @@ class PopupWindow:
         self.time_preview_dur_label = None     # 上記の所要時間（極小）
         self.time_preview_comment_label = None  # バッジ下の短い説明文
 
-        # タスク一覧の文字サイズ（見出し右端のA－/A＋/↺で調整）。
-        # timelog_*と同じ理由でshow()ではリセットしない。一度好みのサイズに
-        # 合わせたら、閉じて開き直すたびに既定へ戻ってしまっては
-        # 調整した意味が無いため
-        self.action_font_size = ACTION_FONT_SIZE_DEFAULT
+        # タスク一覧の文字サイズ（見出し右端のA－/A＋/↺で調整）と並び順
+        # （↓昇順/↑降順）。timelog_*と同じ理由でshow()ではリセットしない
+        # （一度好みに合わせたら、閉じて開き直すたびに既定へ戻ってしまっては
+        # 調整した意味が無いため）。さらに、アプリを再起動しても前回の設定を
+        # 覚えていてほしいという要望に応え、Settingsシートから読み込んだ値を
+        # 初期値にする（インスタンス生成時＝アプリ起動時に一度だけ読む）
+        try:
+            self.action_font_size = get_action_font_size(default=ACTION_FONT_SIZE_DEFAULT)
+        except Exception as e:
+            print(f"⚠️ タスク文字サイズの設定読み込みに失敗しました: {e}")
+            self.action_font_size = ACTION_FONT_SIZE_DEFAULT
+        try:
+            self.action_sort_order = get_action_sort_order(default=ACTION_SORT_ORDER_ASC)
+        except Exception as e:
+            print(f"⚠️ タスク並び順の設定読み込みに失敗しました: {e}")
+            self.action_sort_order = ACTION_SORT_ORDER_ASC
         self.action_font_size_label = None  # 現在のサイズを示す数値ラベル
+        self.action_sort_btn = None         # 並び順トグルボタン（↓/↑）
+
+    def _load_emotion_images(self) -> dict:
+        """
+        ひれぶりアイコンのPNGを読み込む。1つでも読み込みに失敗したら
+        絵文字文字列表示にフォールバックできるよう、空の辞書を返す
+        （中途半端に一部だけ画像・一部だけ文字、という混在は避ける）。
+        """
+        images = {}
+        try:
+            for emotion, filename in EMOTION_ICON_FILES.items():
+                path = os.path.join(ASSETS_DIR, filename)
+                images[emotion] = tk.PhotoImage(file=path)
+        except Exception as e:
+            print(f"⚠️ ひれぶりアイコン画像の読み込みに失敗しました（絵文字表示にフォールバックします）: {e}")
+            return {}
+        return images
 
     def _register_themed(self, widget, bg: bool = True, fg: bool = False) -> None:
         """タグ選択時の背景/文字色切替に追従させるウィジェットを登録する。"""
@@ -743,22 +813,35 @@ class PopupWindow:
         # そのまま1件記録する（LKPTのような「入力→登録」の2段階にしない）
         # 表示は絵文字アイコンにする（漢字1文字の羅列は単調で見劣りするため）。
         # 色付きの縁取りは残し、アイコン＋色の二重の手がかりで感情を区別できる
-        # ようにする。絵文字は書体の太字指定が効かないため通常のウェイトにする
+        # ようにする。絵文字は書体の太字指定が効かないため通常のウェイトにする。
+        #
+        # Windows上のTcl/Tkは絵文字グリフを色つきで描画できない（フォントを
+        # 変えても白黒の輪郭線にしかならないことをemoji_font_preview.pyで
+        # 実機確認済み）ため、assets/の色つきPNG画像(self._emotion_images)が
+        # 読み込めていればそちらを使い、失敗していた場合だけ絵文字文字列に
+        # フォールバックする
         emotion_font = tkfont.Font(family="Yu Gothic UI", size=15)
         self.emotion_frame = tk.Frame(self._journal_frame, bg=BG_COLOR)
         self.emotion_frame.pack(pady=(0, 2), padx=15, fill="x")
         self._register_themed(self.emotion_frame)
         for emotion in EMOTION_LABELS:
             color = EMOTION_BUTTON_COLORS[emotion]
-            icon = EMOTION_ICONS[emotion]
+            image = self._emotion_images.get(emotion)
+            btn_kwargs = (
+                {"image": image} if image is not None
+                else {"text": EMOTION_ICONS[emotion], "font": emotion_font, "fg": color}
+            )
             btn = tk.Button(
-                self.emotion_frame, text=icon, font=emotion_font,
-                bg=BG_COLOR, fg=color, activebackground=BG_COLOR,
+                self.emotion_frame,
+                bg=BG_COLOR, activebackground=BG_COLOR,
                 activeforeground=color, relief="flat", bd=0, cursor="hand2",
                 highlightthickness=1, highlightbackground=color,
                 highlightcolor=color, padx=4, pady=2,
                 command=lambda em=emotion: self._on_emotion_tapped(em),
+                **btn_kwargs,
             )
+            if image is not None:
+                btn.image = image  # ガベージコレクト対策の参照保持
             btn.pack(side="left", expand=True, fill="x", padx=3)
 
         self.emotion_feedback_label = tk.Label(
@@ -945,6 +1028,20 @@ class PopupWindow:
         font_ctrl_shrink_font = tkfont.Font(family="Yu Gothic UI", size=8)
         font_ctrl_grow_font = tkfont.Font(family="Yu Gothic UI", size=12)
         font_ctrl_reset_font = tkfont.Font(family="Yu Gothic UI", size=9)
+
+        # 並び順トグル（↓昇順=登録が古い順／↑降順=登録が新しい順）。
+        # ★優先の並びはそのまま維持し、その中の並ぶ向きだけを切り替える。
+        # 文字サイズ調整ボタン群とは関心事が別なので、少し間隔を空けて
+        # 左側（「タスク」見出し寄り）に置く
+        self.action_sort_btn = tk.Button(
+            font_ctrl_frame, text="", font=font_ctrl_reset_font,
+            bg=BG_COLOR, fg=PLACEHOLDER_COLOR, activebackground=BG_COLOR,
+            activeforeground=ACCENT_COLOR, relief="flat", bd=0, cursor="hand2",
+            padx=4, pady=0, command=self._toggle_action_sort_order,
+        )
+        self.action_sort_btn.pack(side="left", padx=(0, 8))
+        self._register_themed(self.action_sort_btn, bg=True)
+        self._update_action_sort_button()
 
         action_font_shrink_btn = tk.Button(
             font_ctrl_frame, text="Ａ", font=font_ctrl_shrink_font,
@@ -1740,8 +1837,11 @@ class PopupWindow:
 
     def _fetch_pending_actions(self) -> list:
         """
-        未着手アクションの一覧を、★優先を先頭・その中は登録順（古い順）で
-        取得する（取得失敗時は空リストを返す）。
+        未着手アクションの一覧を、★優先を先頭・その中は登録順で取得する
+        （取得失敗時は空リストを返す）。★優先内の並ぶ向き（登録が古い順/
+        新しい順）は、self.action_sort_orderで切り替えられる。
+        sort()は安定ソートのため、先に登録順で並べてから★優先で並べ直す
+        ことで、★グループ内・非★グループ内それぞれで登録順が保たれる
         """
         try:
             pending = [
@@ -1750,7 +1850,9 @@ class PopupWindow:
         except Exception as e:
             print(f"⚠️ 未着手アクション一覧の取得に失敗しました: {e}")
             return []
-        pending.sort(key=lambda a: (not a["starred"], a["created_at"]))
+        reverse = (self.action_sort_order == ACTION_SORT_ORDER_DESC)
+        pending.sort(key=lambda a: a["created_at"], reverse=reverse)
+        pending.sort(key=lambda a: not a["starred"])
         return pending
 
     def _on_action_list_mousewheel(self, event) -> None:
@@ -1768,6 +1870,17 @@ class PopupWindow:
         if self.action_font_size_label is not None:
             self.action_font_size_label.config(text=str(self.action_font_size))
 
+    def _persist_action_font_size(self) -> None:
+        """
+        タスク一覧の文字サイズをSettingsシートへ書き出す。
+        アプリを再起動しても前回の設定を覚えていてほしいという要望への
+        対応（timelog_*と同じ「即座に書き込む」方針に合わせる）。
+        """
+        try:
+            set_action_font_size(self.action_font_size)
+        except Exception as e:
+            print(f"⚠️ タスク文字サイズの設定保存に失敗しました: {e}")
+
     def _increase_action_font_size(self) -> None:
         """タスク一覧の文字を1段階大きくする。"""
         self._cancel_autoclose(permanent=True)
@@ -1776,6 +1889,7 @@ class PopupWindow:
         )
         self._update_action_font_size_label()
         self._render_action_rows()
+        self._persist_action_font_size()
 
     def _decrease_action_font_size(self) -> None:
         """タスク一覧の文字を1段階小さくする。"""
@@ -1785,6 +1899,7 @@ class PopupWindow:
         )
         self._update_action_font_size_label()
         self._render_action_rows()
+        self._persist_action_font_size()
 
     def _reset_action_font_size(self) -> None:
         """タスク一覧の文字サイズを既定値に戻す。"""
@@ -1792,6 +1907,35 @@ class PopupWindow:
         self.action_font_size = ACTION_FONT_SIZE_DEFAULT
         self._update_action_font_size_label()
         self._render_action_rows()
+        self._persist_action_font_size()
+
+    def _update_action_sort_button(self) -> None:
+        """並び順トグルボタンの矢印・ツールチップ相当の表示を今の設定に合わせる。"""
+        if self.action_sort_btn is None:
+            return
+        if self.action_sort_order == ACTION_SORT_ORDER_DESC:
+            self.action_sort_btn.config(text="↑")
+        else:
+            self.action_sort_btn.config(text="↓")
+
+    def _toggle_action_sort_order(self) -> None:
+        """
+        タスク一覧の並び順（登録順の昇順/降順）を切り替える。
+        ★優先で先頭に来る仕様はそのまま維持し、その中で並ぶ向きだけを
+        切り替える（_fetch_pending_actions()を参照）。
+        """
+        self._cancel_autoclose(permanent=True)
+        self.action_sort_order = (
+            ACTION_SORT_ORDER_ASC if self.action_sort_order == ACTION_SORT_ORDER_DESC
+            else ACTION_SORT_ORDER_DESC
+        )
+        self._update_action_sort_button()
+        self.pending_actions = self._fetch_pending_actions()
+        self._render_action_rows()
+        try:
+            set_action_sort_order(self.action_sort_order)
+        except Exception as e:
+            print(f"⚠️ タスク並び順の設定保存に失敗しました: {e}")
 
     def _render_action_rows(self) -> None:
         """

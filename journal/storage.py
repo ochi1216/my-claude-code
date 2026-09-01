@@ -2,7 +2,14 @@
 """
 storage.py
 学びジャーナル - Excel(SharePoint同期フォルダ)読み書きモジュール
-Version: 0.11.0
+Version: 0.12.0
+
+v0.12.0での変更点：
+タスク一覧の文字サイズ・並び順など、UIの好みをアプリの再起動後も
+維持できるようにするための「Settings」シート（汎用キーバリュー）を追加。
+get_setting()/set_setting()と、その型付きラッパーget_action_font_size()/
+set_action_font_size()/get_action_sort_order()/set_action_sort_order()を
+追加した。既存のシート・関数には変更を加えていない
 """
 
 import os
@@ -26,6 +33,7 @@ TIMELOG_SHEET = "TimeLog"
 SUBITEM_SHEET = "SubItemMaster"
 ACTIONS_SHEET = "Actions"
 HIREBI_SHEET = "Hirebi"
+SETTINGS_SHEET = "Settings"
 
 ENTRIES_HEADER = ["日付", "タグ", "L", "K", "P", "T"]
 TAGMASTER_HEADER = ["タグ名", "色コード"]
@@ -41,6 +49,15 @@ EMOTION_LABELS = ["喜", "怒", "哀", "楽"]
 ACTIONS_HEADER = ["作成日時", "タグ", "内容", "由来", "ステータス", "完了日時", "優先"]
 ACTION_STATUS_PENDING = "未着手"
 ACTION_STATUS_DONE = "完了"
+
+# タスク一覧の文字サイズ・並び順など、UIの好みをアプリの再起動後も
+# 覚えておくための汎用キーバリュー設定シート。ポップアップを閉じている
+# 間の状態は覚えられないため、ここに書き出して次回起動時に読み込む
+SETTINGS_HEADER = ["キー", "値"]
+ACTION_FONT_SIZE_KEY = "action_font_size"
+ACTION_SORT_ORDER_KEY = "action_sort_order"
+ACTION_SORT_ORDER_ASC = "asc"   # 登録が古い順（先頭が一番古い）
+ACTION_SORT_ORDER_DESC = "desc"  # 登録が新しい順（先頭が一番新しい）
 
 # 前回チェックポイントから長時間経過していた場合の安全弁（この時間で打ち切る）
 MAX_TIMELOG_GAP_HOURS = 2
@@ -201,6 +218,17 @@ def _ensure_hirebi_sheet(wb) -> None:
         ws = wb.create_sheet(HIREBI_SHEET)
         ws.append(HIREBI_HEADER)
         print(f"🔧 既存ブックに'{HIREBI_SHEET}'シートを追加しました。")
+
+
+def _ensure_settings_sheet(wb) -> None:
+    """
+    Settingsシートが無ければ作成する（既存のjournal_data.xlsxには
+    自動で追加されないため、書き込み前にこの関数で自己修復する）。
+    """
+    if SETTINGS_SHEET not in wb.sheetnames:
+        ws = wb.create_sheet(SETTINGS_SHEET)
+        ws.append(SETTINGS_HEADER)
+        print(f"🔧 既存ブックに'{SETTINGS_SHEET}'シートを追加しました。")
 
 
 def _ensure_entries_sheet(wb) -> None:
@@ -1076,6 +1104,80 @@ def set_action_priority(row: int, starred: bool, path: str = EXCEL_PATH) -> bool
         mark = "★" if starred else "☆"
         print(f"{mark} アクションの優先度を更新しました（行{row}）")
     return success
+
+
+def get_setting(key: str, default=None, path: str = EXCEL_PATH):
+    """
+    Settingsシートから指定キーの値を読む。キーが無ければdefaultを返す。
+    タスク一覧の文字サイズ・並び順など、UIの好みをアプリの再起動後も
+    維持するための汎用の読み出し口（型ごとの既定値・検証は呼び出し側の
+    get_action_font_size()等で行う）。
+    """
+    ensure_workbook_exists(path)
+    wb = _load_with_retry(path)
+    if SETTINGS_SHEET not in wb.sheetnames:
+        return default
+    ws = wb[SETTINGS_SHEET]
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if row and row[0] == key:
+            return row[1] if len(row) > 1 else default
+    return default
+
+
+def set_setting(key: str, value, path: str = EXCEL_PATH) -> bool:
+    """
+    Settingsシートに指定キーの値を書く（既存キーは上書き、無ければ追加）。
+    """
+    ensure_workbook_exists(path)
+    wb = _load_with_retry(path)
+    _ensure_settings_sheet(wb)
+    ws = wb[SETTINGS_SHEET]
+    for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        if row and row[0] == key:
+            ws.cell(row=row_idx, column=2, value=value)
+            break
+    else:
+        ws.append([key, value])
+
+    success = _save_with_retry(wb, path)
+    if success:
+        print(f"⚙️ 設定を保存しました: {key} = {value}")
+    return success
+
+
+def get_action_font_size(default: int = 10, path: str = EXCEL_PATH) -> int:
+    """
+    タスク一覧の文字サイズ設定を読む。未設定・値が壊れている場合はdefaultを
+    返す（defaultは呼び出し側のACTION_FONT_SIZE_DEFAULTを渡す想定）。
+    """
+    value = get_setting(ACTION_FONT_SIZE_KEY, default, path)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def set_action_font_size(size: int, path: str = EXCEL_PATH) -> bool:
+    """タスク一覧の文字サイズ設定を保存する。"""
+    return set_setting(ACTION_FONT_SIZE_KEY, int(size), path)
+
+
+def get_action_sort_order(default: str = ACTION_SORT_ORDER_ASC, path: str = EXCEL_PATH) -> str:
+    """
+    タスク一覧の並び順設定（ACTION_SORT_ORDER_ASC/DESC）を読む。
+    未設定・値が不正な場合はdefaultを返す。
+    """
+    value = get_setting(ACTION_SORT_ORDER_KEY, default, path)
+    if value in (ACTION_SORT_ORDER_ASC, ACTION_SORT_ORDER_DESC):
+        return value
+    return default
+
+
+def set_action_sort_order(order: str, path: str = EXCEL_PATH) -> bool:
+    """タスク一覧の並び順設定を保存する。"""
+    if order not in (ACTION_SORT_ORDER_ASC, ACTION_SORT_ORDER_DESC):
+        raise ValueError(f"不正な並び順です: {order!r}")
+    return set_setting(ACTION_SORT_ORDER_KEY, order, path)
 
 
 def add_tag(tag_name: str, color_code: str, path: str = EXCEL_PATH) -> bool:
