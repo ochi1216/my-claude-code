@@ -33,6 +33,7 @@
     "active": "TRUE",
     "notManager": "FALSE"
   },
+  "testRecipientOverride": "<検証中の送信先メールアドレス。空文字にすると名簿どおりに送信される>",
   "connectionReferences": {
     "sharepoint": "<njp_sharedsharepointonline_xxxxx>",
     "teams": "<njp_sharedteams_xxxxx>"

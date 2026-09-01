@@ -222,6 +222,16 @@ def build_eq06(cfg, cards_dir):
         flags["notManager"],
     )
 
+    # 検証段階では、名簿に実在の同僚が入っていても訓練カードが飛ばないようにする。
+    # testRecipientOverride が空でなければ、IsTest=true の実行に限りその宛先へ送る。
+    # 本番運用に移る際はこの設定を空にすること。
+    member_email = "items('LOOP_Each_Member')?['%s']" % col("EQ_Config_Members", "Email")
+    override = cfg.get("testRecipientOverride", "").strip()
+    if override:
+        recipient_expr = "@if(triggerBody()?['IsTest'], '%s', %s)" % (override, member_email)
+    else:
+        recipient_expr = "@%s" % member_email
+
     threshold_actions = {
         "CMP_EventID": {
             "runAfter": {},
@@ -306,7 +316,7 @@ def build_eq06(cfg, cards_dir):
                                 {
                                     "poster": "Flow bot",
                                     "location": "Chat with Flow bot",
-                                    "body/recipient": "@items('LOOP_Each_Member')?['%s']" % col("EQ_Config_Members", "Email"),
+                                    "body/recipient": recipient_expr,
                                     "body/messageBody": checkin_card,
                                 },
                                 {},
