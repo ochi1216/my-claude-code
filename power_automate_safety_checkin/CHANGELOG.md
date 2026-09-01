@@ -4,6 +4,8 @@
 
 ## [20260901_03] - 2026-09-01
 
+**追加ファイル:** `solution/update_deploy_config_20260901_01.py`
+
 **変更ファイル:** `solution/build_flows_20260901_02.py`,
 `solution/verify_flows_20260901_01.py`, `solution/deploy_config.example.json`,
 `solution/README.md`, `docs/GATE_STATUS.md`,
@@ -22,6 +24,11 @@
 - **`ProcessingStatus`/`ErrorCode`/`ErrorDetail`が数値型で作られていた。**
   `EQ_Events`で起きたのと同じ、見本データ無しのExcelによる型の誤検出。
   1行テキストへ直すまでエラー記録の書き込みは失敗する(SharePoint側での手作業が必要)。
+- **`deploy_config.json`への設定追加を自動化するスクリプトを追加した。**
+  このファイルはGit管理外のため新しい設定項目が自動では入らず、手で足すと
+  カンマの付け忘れで壊しやすい。すでにある値は書き換えず、書き換え前に控えを作り、
+  書き出したあとJSONとして読み直して壊れていないことを確認する。
+  リストGUIDは社内情報のためスクリプトには書かず、引数か対話で受け取る。
 - 検証スクリプトに、実測した列構成での確認を追加した(`ErrorDetail`へ書くこと、
   存在しない列へ書きにいかないこと、`CreatedAt`を設定した場合は書くこと、
   `ErrorDetail`だけ未実測でも生成が止まること)。107項目→117項目。

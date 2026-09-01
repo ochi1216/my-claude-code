@@ -244,6 +244,24 @@ https://<サイトURL>/_api/web/lists/getbytitle('EQ_Received_Items')/fields?$se
 
 `field_1`〜`field_3`(`SourceUpdatedAt`/`SourceLink`/`InformationType`)はP1では使わない。
 
+## deploy_config.json への設定の追加
+
+`deploy_config.json`はGit管理外のため、新しい設定項目が増えても自動では入らない。
+手で足すとカンマの付け忘れで壊しやすいので、追記用のスクリプトを用意している。
+
+```powershell
+python update_deploy_config_20260901_01.py --received-items-list-id <GUID> --enable-error-logging
+```
+
+- 追加されるのは`columnInternalNames.EQ_Received_Items`・`features`・
+  `sharePointUpdateAction`の3つ。**すでにある値は書き換えない**(何度実行してもよい)
+- 書き換える前に`deploy_config.json.bak_<日時>`という控えを作る
+- リストGUIDは社内情報のためスクリプトには書いていない。`--received-items-list-id`で
+  渡すか、引数なしで実行して問い合わせに答える(すでに設定済みなら不要)
+- `--enable-error-logging` / `--enable-event-close` で機能フラグを`true`にできる。
+  付けなければ`false`のまま追加される
+- 書き出したあとJSONとして読み直し、壊れていないことを確かめてから終了する
+
 ## 生成物の検証(テナントに入れる前)
 
 ```powershell
