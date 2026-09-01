@@ -332,6 +332,10 @@ def main():
         ("EQ_Received_Items のリストIDが未実測",
          lambda c: c["listIds"].update(
              {"EQ_Received_Items": "<EQ_RECEIVED_ITEMS_LIST_GUID>"})),
+        # 全ゼロは書式としては正しいGUIDに見えるが、実在しないリストを指す
+        ("EQ_Received_Items のリストIDが全ゼロ",
+         lambda c: c["listIds"].update(
+             {"EQ_Received_Items": "00000000-0000-0000-0000-000000000000"})),
         ("SharePoint更新アクションが未実測",
          lambda c: c.update({"sharePointUpdateAction": {
              "operationId": "<未実測>", "idParameter": "<未実測>"}})),

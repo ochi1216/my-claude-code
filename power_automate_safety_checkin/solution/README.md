@@ -283,11 +283,27 @@ Flow save failed with code 'DynamicOperationRequestClientFailure' ...
 operation 'GetTable' failed with status code 'NotFound' ... "List not found"
 ```
 
-原因は`listIds`のいずれかがSharePointで解決できないこと。**まず書式を点検する。**
+原因は`listIds`のいずれかがSharePointで解決できないこと。**まず点検する。**
 
 ```powershell
 python update_deploy_config_20260901_01.py --diagnose
 ```
+
+### 実際に起きた原因: 全ゼロのGUID(2026-09-01)
+
+`listIds.EQ_Received_Items`に`00000000-0000-0000-0000-000000000000`が入っていた。
+検証用の値が正規の設定へ入り込んだもの(どの操作で入ったかは**未確認**)。
+
+**全ゼロは書式としては正しいGUIDに見えるため気づきにくい。** 生成もインポートも成功し、
+フローを開いた時点で初めて`List not found`になり、フローがオフのまま戻せなくなる。
+
+このため以下を入れた。
+
+- `is_measured()`(生成側)が全ゼロを「未実測」として弾く。生成の時点で止まる
+- `--diagnose`が全ゼロを明示的に警告する(書式の比較だけでは異常に見えない)
+- `--received-items-list-id`が全ゼロを受け付けない。また、すでに全ゼロが入っている
+  場合は「未設定」と同じ扱いにして、実値で上書きできる
+- `--diagnose`が、複数のリストに同じGUIDが入っていないかも見る
 
 `table`に入れるリストGUIDは、**環境によって中かっこ付き(`{...}`)で保持されている。**
 「リストの設定」画面のURLから取ると`List=%7B...%7D`(=`{...}`)の形になるため、

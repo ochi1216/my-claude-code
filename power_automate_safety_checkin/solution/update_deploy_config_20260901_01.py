@@ -61,6 +61,21 @@ GUID_PATTERN = re.compile(r"^\{?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
 BROKEN_COLUMN_NAME = "field_no_such_column_for_error_test"
 
 
+def is_placeholder_list_id(value):
+    """そのリストGUIDが「まだ実値が入っていない」ものかどうか。
+
+    全ゼロは書式としては正しいGUIDに見えるが、実在しないリストを指す。
+    検証用の値が正規の設定へ入り込んだまま気づかない事故が起きたため、
+    未設定・プレースホルダと同じ扱いにして上書きできるようにする。
+    """
+    if not isinstance(value, str) or not value.strip():
+        return True
+    value = value.strip()
+    if value.startswith("<"):
+        return True
+    return value.strip("{}").strip("0-") == ""
+
+
 def load_config(path):
     """設定を読み込む。キーの順番とBOMの有無は元のまま保つ。"""
     with io.open(path, "rb") as fh:
@@ -128,8 +143,12 @@ def describe_guid_format(value):
         return "プレースホルダのまま"
     if not GUID_PATTERN.match(value):
         return "GUIDの形式ではない(長さ %d)" % len(value)
-    braces = "中かっこあり" if value.startswith("{") else "中かっこなし"
     body = value.strip("{}")
+    if body.strip("0-") == "":
+        # 検証用に差し替えた全ゼロが残っていると、書式は正しく見えるのに
+        # 実行・保存の時点で List not found になる
+        return "*** 全ゼロ(存在しないリスト。検証用の値が残っています) ***"
+    braces = "中かっこあり" if value.startswith("{") else "中かっこなし"
     if body.lower() == body:
         case = "小文字"
     elif body.upper() == body:
@@ -157,6 +176,24 @@ def diagnose(cfg, path):
         shape = describe_guid_format(value if isinstance(value, str) else "")
         formats.setdefault(shape, []).append(name)
         print("  %-20s : %s" % (name, shape))
+
+    bad = [name for shape, names in formats.items() if "***" in shape for name in names]
+    if bad:
+        print("")
+        print("!! 存在しないリストGUIDが入っています: %s" % ", ".join(bad))
+        print("   正しいGUIDへ直すまで、フローを開いた時点で List not found になります。")
+
+    values = [(n, v) for n, v in cfg.get("listIds", {}).items()
+              if not n.startswith("_") and isinstance(v, str) and GUID_PATTERN.match(v)]
+    seen = {}
+    for name, value in values:
+        seen.setdefault(value.strip("{}").lower(), []).append(name)
+    duplicates = [names for names in seen.values() if len(names) > 1]
+    if duplicates:
+        print("")
+        print("!! 同じGUIDが複数のリストに設定されています:")
+        for names in duplicates:
+            print("   %s" % ", ".join(names))
 
     print("")
     if len(formats) > 1:
@@ -311,7 +348,11 @@ def main():
     # --- 2. リストGUID -------------------------------------------------------
     list_ids = cfg.setdefault("listIds", collections.OrderedDict())
     current = list_ids.get("EQ_Received_Items", "")
-    if not current or current.startswith("<"):
+    if is_placeholder_list_id(current):
+        if current and not current.startswith("<"):
+            warnings.append(
+                "listIds.EQ_Received_Items に存在しないGUID(全ゼロ)が入っていました。"
+            )
         list_id = args.received_items_list_id.strip()
         if not list_id and not args.no_prompt and sys.stdin.isatty():
             list_id = ask_list_id()
@@ -320,6 +361,11 @@ def main():
                 raise SystemExit(
                     "リストGUIDの形式が違います: %r\n"
                     "8-4-4-4-12 桁の16進数(ハイフン区切り)で指定してください。" % list_id
+                )
+            if is_placeholder_list_id(list_id):
+                raise SystemExit(
+                    "全ゼロのGUIDは実在しないリストを指すため設定できません。\n"
+                    "SharePointの実際のリストGUIDを指定してください。"
                 )
             list_ids["EQ_Received_Items"] = list_id.lower()
             changes.append("listIds.EQ_Received_Items を設定しました")

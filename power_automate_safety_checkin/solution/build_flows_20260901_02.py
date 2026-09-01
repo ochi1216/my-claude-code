@@ -149,8 +149,14 @@ def is_measured(value):
     deploy_config.example.json のプレースホルダは <...> の形で書いてあるため、
     それが残っている値・空文字は「未実測」として扱う。推測値でフローを生成すると
     インポートは通ってしまい、実行時に初めて失敗するため原因が分かりにくい。
+
+    全ゼロのGUIDも弾く。書式としては正しく見えるが実在しないリストを指し、
+    インポートは成功したうえでフローを開いた時点で List not found になるため、
+    原因にたどり着くまでに時間がかかる(実機で発生)。
     """
-    return isinstance(value, str) and value.strip() != "" and "<" not in value
+    if not (isinstance(value, str) and value.strip() != "" and "<" not in value):
+        return False
+    return value.strip().strip("{}").strip("0-") != ""
 
 
 def read_features(cfg):
