@@ -100,6 +100,32 @@ Teamsコネクタのトリガーは11種類あり、その全てを確認した�
 
 自動地震検知(Gate C相当)は、P1完成後にP2として別途着手する。
 
+## invoker接続参照は自動実行フローで使えない(2026-09-02実機で判明)
+
+`EQ05_Status_Summary_DEV`(15分ごとの自動実行、Recurrenceトリガー)をインポート後に
+オンにしようとしたところ、以下のエラーで保存が拒否された。
+
+```
+Flow save failed with code 'InvokerConnectionNotAllowed' and message
+'Connection references with runtime source as 'Invoker' are not allowed.
+Only flows with trigger of type 'Request' support invoker connection references.'
+```
+
+`connectionReferences`の`runtimeSource`に`invoker`(実行した人の接続を使う)を
+指定していたが、これは**Requestトリガー(手動ボタン)のフローでしか使えない**制約
+だった。`EQ06_Manual_Drill_DEV`(手動ボタン)は問題なく通っていたため、
+これまで気づかなかった。
+
+**対処**: 自動実行するフロー(`EQ05`)だけ、`runtimeSource`を`tenant`
+(あらかじめ保存された接続を固定で使う)へ変更した。`EQ06`は`invoker`のまま。
+
+なお、`EQ05`は2026-09-01時点で一度動作確認済みだったにもかかわらず、今回
+オンにし直そうとした際に初めてこのエラーが出た。過去に通っていた理由は
+未確認(プラットフォーム側の挙動差の可能性がある)。`tenant`への変更は
+Power Automateの公式なドキュメント的知見に基づく対処であり、SharePoint内部名や
+operationIdのように実測で確定させたわけではない点に注意(この後の実機確認で
+検証する)。
+
 ## 見送った改善(P1のスコープ外。必要になったら着手する)
 
 ### エラー内容をアクション単位まで具体化する

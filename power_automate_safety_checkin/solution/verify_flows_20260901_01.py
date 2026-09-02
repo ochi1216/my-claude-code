@@ -118,6 +118,43 @@ def list_files(root):
     return found
 
 
+# 20260901_02で入れた、機能フラグと無関係な独立したバグ修正。
+# EQ05(Recurrenceトリガー=自動実行)がconnectionReferencesにruntimeSource=invokerを
+# 使っていたため、実機で「InvokerConnectionNotAllowed」(Requestトリガーの
+# フローでしかinvokerは使えない)となり、フローを保存・オンにできなかった
+# (2026-09-02実機で判明)。EQ06(手動ボタン=Requestトリガー)は影響を受けない。
+#
+# 20260901_01は歴史的なコミット済みリビジョンのため書き換えない(CLAUDE.mdの
+# バージョン管理ルール)。かわりに、比較の直前に20260901_01の生成物へ
+# この既知の修正だけを模擬的に当ててから比較する。
+KNOWN_FIXES_OVER_20260901_01 = [
+    (
+        "EQ05_Status_Summary_DEV",
+        b'"runtimeSource": "invoker"',
+        b'"runtimeSource": "tenant"',
+    ),
+]
+
+
+def apply_known_fixes(out_dir):
+    """20260901_01の生成物へ、20260901_02で入れた既知のバグ修正を模擬的に適用する。"""
+    import glob
+    import os as _os
+
+    for flow_name, old_bytes, new_bytes in KNOWN_FIXES_OVER_20260901_01:
+        pattern = _os.path.join(out_dir, "Workflows", "%s-*.json" % flow_name)
+        matches = glob.glob(pattern)
+        if not matches:
+            continue
+        for path in matches:
+            if not path.endswith(".data.xml"):
+                with open(path, "rb") as fh:
+                    content = fh.read()
+                content = content.replace(old_bytes, new_bytes)
+                with open(path, "wb") as fh:
+                    fh.write(content)
+
+
 def compare_trees(old_dir, new_dir):
     """2つのディレクトリを再帰的に比較し、違いを1行ずつ並べて返す。
 
@@ -286,8 +323,10 @@ def main():
         old_dir, new_dir = os.path.join(tmp, "v01"), os.path.join(tmp, "v02")
         generate(mod01, copy.deepcopy(BASE_CONFIG), old_dir)
         generate(mod02, config_with(errorLogging=False, eventClose=False), new_dir)
+        apply_known_fixes(old_dir)
         differences = compare_trees(old_dir, new_dir)
-        check(not differences, "機能オフの生成物が 20260901_01 と一致",
+        check(not differences,
+              "機能オフの生成物が 20260901_01 と一致(既知の修正を除く)",
               " / ".join(differences[:5]))
     finally:
         shutil.rmtree(tmp)

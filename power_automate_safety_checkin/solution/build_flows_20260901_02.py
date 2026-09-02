@@ -1119,7 +1119,7 @@ def build_eq05(cfg, cards_dir):
         "properties": {
             "connectionReferences": {
                 "shared_sharepointonline": {
-                    "runtimeSource": "invoker",
+                    "runtimeSource": "tenant",
                     "connection": {
                         "connectionReferenceLogicalName": cfg["connectionReferences"][
                             "sharepoint"
@@ -1128,7 +1128,7 @@ def build_eq05(cfg, cards_dir):
                     "api": {"name": "shared_sharepointonline"},
                 },
                 "shared_teams": {
-                    "runtimeSource": "invoker",
+                    "runtimeSource": "tenant",
                     "connection": {
                         "connectionReferenceLogicalName": cfg["connectionReferences"][
                             "teams"

@@ -2,6 +2,23 @@
 
 このフォルダ内の変更履歴。
 
+## [20260901_05] - 2026-09-02
+
+**変更ファイル:** `solution/build_flows_20260901_02.py`, `solution/verify_flows_20260901_01.py`,
+`docs/GATE_STATUS.md`
+
+- **`EQ05_Status_Summary_DEV`が実機で`InvokerConnectionNotAllowed`によりオンにできなかった
+  問題を修正した。** `connectionReferences`の`runtimeSource`を`invoker`(実行した人の接続を
+  使う)にしていたが、これは`EQ06`のようなRequestトリガー(手動ボタン)のフローでしか
+  使えない制約があると実機で判明した。`EQ05`はRecurrenceトリガー(15分ごとの自動実行)の
+  ため、あらかじめ保存された接続を固定で使う`tenant`へ変更した。`EQ06`は`invoker`のまま。
+  - この修正は機能フラグ(`errorLogging`/`eventClose`)と無関係で、`EQ05`の生成物全体に
+    影響する独立したバグ修正。検証スクリプトの回帰確認も、この既知の修正を
+    20260901_01の生成物へあらかじめ適用してから比較する形に更新した。
+  - `EQ05`は2026-09-01時点で一度動作確認済みだったが、今回オンにし直そうとした際に
+    初めてこのエラーが出た。以前通っていた理由は未確認。
+- 検証は118項目すべて合格を維持。
+
 ## [20260901_04] - 2026-09-02
 
 **変更ファイル:** `solution/update_deploy_config_20260901_01.py`, `solution/README.md`,
