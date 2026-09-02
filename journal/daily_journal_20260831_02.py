@@ -2296,7 +2296,15 @@ class PopupWindow:
         except Exception as e:
             print(f"⚠️ 読みの件数取得に失敗しました: {e}")
             due = 0
-        self.forecast_btn.config(text=f"🔮{due}" if due else "🔮")
+        if self._btn_images.get("forecast") is not None:
+            # 画像使用時：アイコン自体は既にimage=で表示済みのため、
+            # 絵文字文字列は混ぜず、件数の数字だけをcompound="right"で
+            # アイコンの右に添える。以前はここで無条件に"🔮"を含む文字列を
+            # 設定していたため、画像の上にフォールバック描画された絵文字が
+            # 重なって表示され、ボタンの大きさも崩れる不具合があった
+            self.forecast_btn.config(text=str(due) if due else "")
+        else:
+            self.forecast_btn.config(text=f"🔮{due}" if due else "🔮")
 
     def _open_forecasts(self) -> None:
         """読み（予測）の一覧を開く。"""
