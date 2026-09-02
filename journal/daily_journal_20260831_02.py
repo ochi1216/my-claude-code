@@ -57,6 +57,12 @@ v0.41.0までの変更点（LKPT既定OPEN・リサイズ時の幅高さ保持�
 - 並び順トグルの矢印が「今の状態」なのか「押すとどうなるか」なのか
   紛らわしいという指摘を受け、ホバー時のツールチップで両方を文章で
   説明するようにした（LKPTのL/K/P/Tラベルと同じ_Tooltipの仕組みを流用）
+- 🔮読みボタンを画像化した際に_update_forecast_button()の中身を直し
+  忘れており、画像の上に旧来の絵文字文字列がフォールバック描画で
+  重なって表示され、ボタンの大きさも崩れる不具合を修正。画像使用時は
+  件数の数字だけをtextに設定するようにした
+- ポップアップの出現位置を、画面右下基準から右上基準に変更した
+  （以前は毎回画面下寄りに出現していたという指摘への対応）
 """
 
 import ctypes
@@ -1237,8 +1243,10 @@ class PopupWindow:
         screen_h = self.window.winfo_screenheight()
         self.expanded_height = min(self.window.winfo_reqheight(), screen_h - 40)
 
+        # 画面の右上を基準に出現させる（以前は右下基準だったため、画面が
+        # 低い解像度でなくても毎回低い位置に出てしまうという指摘があった）
         x = self.window.winfo_screenwidth() - self._popup_width - 20
-        y = max(10, screen_h - self.expanded_height - 80)
+        y = 10
         self.window.geometry(f"{self._popup_width}x{self.expanded_height}+{x}+{y}")
         self.window.minsize(int(self._popup_width * 2 / 3), self.expanded_height)
 
