@@ -38,7 +38,7 @@ Solutionにフローを入れる形式は公開ドキュメントだけでは特
 | SharePoint 複数の項目の取得 | `GetItems` | `OpenApiConnection` |
 | Teams カードを投稿(応答を待たない) | `PostCardToConversation` | `OpenApiConnection` |
 | Teams カードを投稿して応答を待機 | `PostCardAndWaitForResponse` | `OpenApiConnectionWebhook` |
-| SharePoint 項目の更新 | **未実測** | 未実測 |
+| SharePoint 項目の更新 | `PatchItem`(idパラメータは`id`) | `OpenApiConnection` |
 
 Teamsコネクタのトリガー11種類を確認した結果、**カードの回答を受け取るトリガーは
 存在しない**(「チャットでメッセージに応答があったとき」は`WebhookMessageReactionTrigger`で
@@ -215,6 +215,10 @@ Teams投稿の失敗など)である。
 "host": { "connectionName": "shared_sharepointonline", "operationId": "????" },
 "parameters": { "dataset": "...", "table": "...", "??": 1, "item/Title": "..." }
 ```
+
+**実測済み(2026-09-02)**。`operationId`は`PatchItem`、項目IDを渡すパラメータ名は`id`。
+`update_deploy_config_20260901_01.py`を実行すれば自動で設定される(手順6・7は
+参考として残す。別テナントで再実測する場合の手順として)。
 
 6. `deploy_config.json`の`sharePointUpdateAction`へ入れる
 

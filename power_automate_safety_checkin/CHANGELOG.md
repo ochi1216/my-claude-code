@@ -2,6 +2,26 @@
 
 このフォルダ内の変更履歴。
 
+## [20260901_04] - 2026-09-02
+
+**変更ファイル:** `solution/update_deploy_config_20260901_01.py`, `solution/README.md`,
+`docs/GATE_STATUS.md`
+
+- **SharePoint「項目の更新」アクションの`operationId`・パラメータ名を実測した。**
+  `operationId`は`PatchItem`、項目IDを渡すパラメータ名は`id`(`PostItem`・`GetItems`
+  と同じ構造で、`id`パラメータが1つ増えるだけ)。GUIで確認用フローを1本作り、
+  エクスポートしたJSONから読み取った。
+  - この値はコネクタの固定値であり、`PostItem`/`GetItems`と同様にテナント間で
+    変わらず社内情報を含まないため、`update_deploy_config_20260901_01.py`の
+    デフォルト値として埋め込んだ。以後、このスクリプトを実行するだけで
+    `sharePointUpdateAction`に実測済みの値が自動で入る。
+  - 既に`<未実測>`のまま`deploy_config.json`へ`sharePointUpdateAction`が
+    入っている場合も、次に実行したときに実測済みの値へ自動で埋まる
+    (ユーザーが独自に上書きした値がある場合はそちらを優先し、上書きしない)。
+- これで`features.eventClose`(イベントのクローズ処理)を有効化する前提条件が揃った。
+  残る前提条件は`EQ_Received_Items`の列の型修正(数値型→1行テキスト)のみ。
+- 検証は118項目すべて合格を維持。
+
 ## [20260901_03] - 2026-09-01
 
 **追加ファイル:** `solution/update_deploy_config_20260901_01.py`

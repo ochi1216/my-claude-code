@@ -48,6 +48,13 @@ RECEIVED_ITEMS_COLUMNS = collections.OrderedDict([
     ("ErrorDetail", "field_6"),
 ])
 
+# 2026-09-02に実測(solution/README.md「SharePoint『項目の更新』アクションの実測手順」参照)。
+# PostItem/GetItemsと同じくコネクタの固定値であり、社内情報を含まないためここに書いてよい。
+SP_UPDATE_ACTION = collections.OrderedDict([
+    ("operationId", "PatchItem"),
+    ("idParameter", "id"),
+])
+
 GUID_PATTERN = re.compile(r"^\{?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
                           r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}?$")
 
@@ -59,6 +66,14 @@ GUID_PATTERN = re.compile(r"^\{?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
 # 評価する単なる文字列で保存時には検証されないため、フィルターに使う列の内部名を
 # 差し替える方式にした。実行時に 400 (column does not exist) で失敗する。
 BROKEN_COLUMN_NAME = "field_no_such_column_for_error_test"
+
+
+def is_measured(value):
+    """値が実測済みかどうか(build_flows_20260901_02.py の同名関数と同じ考え方)。
+
+    空文字・<...>のプレースホルダは未実測として扱う。
+    """
+    return isinstance(value, str) and value.strip() != "" and "<" not in value
 
 
 def is_placeholder_list_id(value):
@@ -407,12 +422,23 @@ def main():
 
     # --- 4. SharePoint「項目の更新」アクションの枠 ---------------------------
     if "sharePointUpdateAction" not in cfg:
-        insert_before(cfg, "sharePointUpdateAction", collections.OrderedDict([
-            ("operationId", "<未実測>"), ("idParameter", "<未実測>"),
-        ]), "testRecipientOverride")
-        changes.append("sharePointUpdateAction を追加しました(未実測のまま)")
+        insert_before(cfg, "sharePointUpdateAction",
+                       collections.OrderedDict(SP_UPDATE_ACTION), "testRecipientOverride")
+        changes.append("sharePointUpdateAction を追加しました(実測済みの値)")
     else:
-        changes.append("sharePointUpdateAction は設定済みでした(変更なし)")
+        upd = cfg["sharePointUpdateAction"]
+        placeholders = [
+            key for key, value in SP_UPDATE_ACTION.items()
+            if not is_measured(upd.get(key, ""))
+        ]
+        if placeholders:
+            upd.update(SP_UPDATE_ACTION)
+            changes.append(
+                "sharePointUpdateAction の未実測項目を実測済みの値で埋めました: %s"
+                % ", ".join(placeholders)
+            )
+        else:
+            changes.append("sharePointUpdateAction は設定済みでした(変更なし)")
 
     # --- 書き出し ------------------------------------------------------------
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
