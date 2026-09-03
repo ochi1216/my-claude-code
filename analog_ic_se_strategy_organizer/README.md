@@ -1,0 +1,101 @@
+# analog_ic_se_strategy_organizer
+
+**Nexperia**のシニアシステムエンジニア（越智さん）が、**TI（Texas Instruments）をベンチマーク対象**として、
+これを打ち負かす対抗デバイスの企画・将来ロードマップを検討するためのツール。TI製品を型番1つから、
+市場分析・キーカスタマー推定・競合IC比較・次世代スペック提案まで一気通貫でまとめる。詳細な背景・設計は
+[`/DESIGN_analog_ic_se_strategy_organizer.md`](../DESIGN_analog_ic_se_strategy_organizer.md)（リポジトリルート）と
+[`/HANDOVER_analog_ic_scout.md`](../HANDOVER_analog_ic_scout.md) を参照。自社／ベンチマーク対象の設定は
+`config/own_company.json` を参照。
+
+**現状（2026-08-12時点）:** パイプライン本体・ダッシュボードの初版を実装済み。「Nexperia視点への転換」を軸としたMECE改善（`DESIGN_analog_ic_se_strategy_organizer.md` 14章）に順次着手中。優先度1（ホワイトスペース分析）・優先度2（自社を競合比較に必ず含める＋統合比較表）・優先度3（ロードマップビュー）まで実装済み。Gemini API呼び出しは会社PCでの直接アクセス遮断対応として、`../common/gemini_client.py`（submodule）経由に移行済み（下記セットアップ手順4）。**ステージ0（製品登録）で、会社PC直接呼び出し失敗→自宅PCプロキシ経由フォールバック→実際のGemini API呼び出しの一連の流れを実機で確認済み**（2026-08-12）。製品ディープダイブ（5ステージ全体）の実機確認は未実施（詳細は「既知の制限」参照）。
+
+## 必要要件
+
+- Python 3.9以上
+- Gemini APIキー（[Google AI Studio](https://aistudio.google.com/)で取得）
+
+## セットアップ手順
+
+1. リポジトリのクローン時、`common/` submoduleも取得する（未取得の場合）。
+
+   ```
+   git submodule update --init common
+   ```
+
+   **本ツールをgitリポジトリと違うローカルフォルダ構成で管理している場合**（例:
+   `analog_ic_se_strategy_organizer`だけを単独フォルダにコピーして使っている等、
+   `common`フォルダが1つ上の階層に無い場合）は、`common/gemini_client.py`をどこか1箇所に
+   配置し、環境変数`GEMINI_COMMON_DIR`でその場所を指定すること（下記手順3参照）。
+
+2. 依存パッケージをインストールする。
+
+   ```
+   pip install -r requirements.txt
+   ```
+
+3. 環境変数を設定する。
+
+   ```
+   setx GEMINI_API_KEY "your-api-key-here"           # 直接呼び出し用（既存キーを流用）
+   setx GEMINI_PROXY_URL "https://xxxx.ngrok-free.dev"   # 自宅PC経由プロキシのURL（会社PCで直接アクセスが
+                                                          # 遮断された場合のフォールバック用。詳細は
+                                                          # common/GEMINI_MIGRATION_HANDOVER.md参照）
+   setx GEMINI_COMMON_DIR "C:\path\to\common"            # gemini_client.pyの配置場所を明示したい場合のみ。
+                                                          # 省略時は「本ツールの1つ上の階層のcommonフォルダ」
+                                                          # を自動的に探しに行く
+   ```
+
+   （設定後は新しいターミナルを開くこと。macOS/Linuxの場合は`export`を使う）
+
+4. ダッシュボードを起動する。
+
+   **Windows**: `run_dashboard.bat` をダブルクリックする（推奨）。同じフォルダ内にある
+   `analog_ic_se_strategy_organizer_YYYYMMDD_NN.py` のうち、ファイル名の日付・連番が
+   最も新しいものを自動的に選んで起動する。バージョンアップでファイル名の日付が変わっても
+   このバッチファイル自体は書き換える必要がない。`run_dashboard.bat` は必ず`analog_ic_se_strategy_organizer`
+   フォルダ直下（コード本体・`requirements.txt`と同じ階層）に置くこと。
+
+   ```
+   run_dashboard.bat
+   ```
+
+   **macOS/Linux、または手動で起動する場合**: 起動したいバージョンのファイル名を直接指定する。
+
+   ```
+   streamlit run analog_ic_se_strategy_organizer_20260718_02.py
+   ```
+
+ブラウザが自動で開き、以下の3タブが表示される。
+
+1. **📦 製品登録・検索** — 型番を入力して「ステージ0のみ実行」すると、TI公式情報を検索してカテゴリ・主要仕様を軽量に確認できる（低コスト）。既存の分析済み製品を型番・アプリケーションで検索することもできる
+2. **📊 ポートフォリオ俯瞰** — 競合企業データベース（67社）の地域別・カテゴリ別分布、**🕳️ホワイトスペース分析**（カテゴリ別の手薄度・車載クロスの手薄度・自社(Nexperia)の現状ポジションを競合データのみで算出、追加コスト無し）、**🗺️ロードマップビュー**（手薄度×自社の現状×分析済みの鮮度を組み合わせた「次に着手すべきカテゴリ」ランキングと、分析済み製品の時系列散布図。こちらも追加コスト無し）、分析済み製品のカテゴリ分布・競合ギャップランキング・次世代スペック提案の優先度分布をグラフで俯瞰。「AI俯瞰総評」ボタンで、全ケースをGeminiに読ませた傾向コメントも生成できる
+3. **🎯 製品ディープダイブ** — 型番を入力すると、製品取り込み→市場分析→キーカスタマー推定→競合IC比較→次世代スペック提案の5ステージを自動実行し、HTMLレポート（`data/ic_reports/`）を生成する。「通常」（gemini-2.5-flash）と「ディープ」（gemini-2.5-pro）の2モード、競合IC比較は「通常モード」（地域代表1社ずつ、計4社程度）と「フルモード」（該当カテゴリの主要/限定 全社、コスト増）を選べる。**自社（Nexperia）は選定モードに関わらず必ず比較対象に含まれる**（現行製品が無いカテゴリでは無理に検索せず「未参入」と表示）。レポートはパラメータ行×企業列（TI・各競合企業・自社(現行)・🏆自社提案(次世代)）の1つの比較表に統合されており、自社が狙うべきスペックが一目でわかる
+
+## 競合企業データベース（`config/competitors_db.json`）
+
+越智さんが調査した米国・欧州・日本・アジア（台湾・中国・韓国）のアナログ／パワー半導体企業67社のデータベース。各社について、9つの製品カテゴリ（DC-DC/PMIC・LDO・LEDドライバー・AC-DC・ゲートドライバー・ロードスイッチ/eFuse・アイデアルダイオード/ORing・GaNパワーIC/デバイス・パワーディスクリート/モジュール）ごとに「●主要／△限定／—確認できず」の判定、製品群幅スコア、車載対応可否、公式製品URL等を持つ。
+
+**データの更新方法**（越智さんがExcelを更新した場合）:
+
+```
+python3 ic_competitor_import.py
+```
+
+`config/source_data/analog_power_semiconductor_companies_global_2026.xlsx` を読み込み、`config/competitors_db.json` を再生成する。JSONを直接手編集する必要はない。特定企業を一時的に対象外にしたい場合はExcel側で行毎に管理し、恒久的な除外はExcel側で削除してから再インポートすることを推奨（`competitors_db.json`内の`active`フラグは再インポート時に`true`へ上書きされるため、恒久除外の管理には使わないこと）。
+
+## 製品カテゴリ別比較パラメータ（`config/category_schema.json`）
+
+上記9カテゴリそれぞれについて、データシートに実際に載る比較パラメータ（例: DC-DC/PMICなら入力/出力電圧範囲・効率・スイッチング周波数・静止電流等、LDOならドロップアウト電圧・PSRR・出力ノイズ等）を定義したもの。ステージ0（製品取り込み）・ステージ3（競合IC比較）で、カテゴリごとに埋めるべき項目一覧として使う。
+
+## 事実確度構造（fact構造）
+
+各分析ステージが返す事実値は `{value, unit, source_type, source_detail, source_url, confidence, as_of, note}` の構造を持つ。`source_type`は`TI_official`/`third_party`/`llm_estimate`/`user_input`の4値、`confidence`は`high`/`medium`/`low`の3段階。HTMLレポートでは各値に出典・確度バッジを表示する。詳細は [`/DESIGN_analog_ic_se_strategy_organizer.md`](../DESIGN_analog_ic_se_strategy_organizer.md) 3章を参照。
+
+## 既知の制限・未検証事項
+
+- **ステージ0の実機検証は完了**: 会社PC直接呼び出し失敗→自宅PCプロキシ（`home_pc_server_v2.py`の`/generate`エンドポイント）経由フォールバック→実際のGemini API呼び出し→ステージ0正常完了、の一連の流れを2026-08-12に実機確認済み（詳細は`CHANGELOG.md`参照）
+- **製品ディープダイブ（5ステージ全体）は未検証**: ステージ0以外の各ステージ（市場分析・キーカスタマー推定・競合IC比較・次世代スペック提案）、JSONモード（`responseSchema`指定）、ディープモード（`gemini-2.5-pro`）は実機確認できていない。grounded searchで実際にTIのデータシート数値をどこまで正確に拾えるかも未検証（`DESIGN_analog_ic_se_strategy_organizer.md` 11章参照）。越智さんの環境で実際のTI型番数件を「製品ディープダイブ」タブで試してほしい
+- キーカスタマー推定は公開情報のみに基づく「推定」であり、TIとの契約関係を示すものではない
+- 競合他社のデータシート由来スペックを比較表として利用する際の著作権・利用規約上の扱いは法務未確認（レポート内に免責は記載済み）
+
+その他の未解決事項は [`/DESIGN_analog_ic_se_strategy_organizer.md`](../DESIGN_analog_ic_se_strategy_organizer.md) 11章を参照。

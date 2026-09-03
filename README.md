@@ -1,5 +1,15 @@
 # my-claude-code
 
+このリポジトリは `common/` を [gemini-common-tools](https://github.com/ochi1216/gemini-common-tools) の
+git submoduleとして含む（会社PCでのGemini API直接アクセス遮断時、自宅PC経由プロキシへ自動フォールバックする
+共通クライアント）。クローン時は以下でsubmoduleも取得すること。
+
+```
+git clone --recurse-submodules https://github.com/ochi1216/my-claude-code.git
+# または、既にクローン済みの場合
+git submodule update --init common
+```
+
 ## Outlook Total Organizer
 
 Outlookメール解析・アクションダッシュボードツール。詳細は [`outlook_total_organizer/CHANGELOG.md`](outlook_total_organizer/CHANGELOG.md) を参照（README.md は未整備）。
@@ -11,6 +21,14 @@ Outlookメール解析・アクションダッシュボードツール。詳細�
 ## BBT RTOCS Organizer
 
 セットアップ手順は [`rtocs_organizer/README.md`](rtocs_organizer/README.md) を参照。
+
+## analog_ic_se_strategy_organizer
+
+セットアップ手順は [`analog_ic_se_strategy_organizer/README.md`](analog_ic_se_strategy_organizer/README.md) を参照。設計背景は [`DESIGN_analog_ic_se_strategy_organizer.md`](DESIGN_analog_ic_se_strategy_organizer.md)。
+
+## PO Database Organizer
+
+セットアップ手順は [`po_database_organizer/README.md`](po_database_organizer/README.md) を参照。
 
 ## Shareflex Document Dashboard
 

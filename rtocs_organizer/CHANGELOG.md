@@ -2,6 +2,66 @@
 
 このフォルダ内の変更履歴。バージョンアップ時は旧ファイルを残したまま新ファイルを追加し、ここに変更点を追記する。
 
+## [Gemini移行をmain最新版へ再適用] - 2026-09-03
+
+**背景:** 2026-08-11のGemini共通クライアント移行は、当時の`strategy_engine.py`（8ステージ・406行）に対して
+行っていた。その後`main`側で別セッションが機能開発を進め（10ステージ・758行、ダッシュボードは`_20260719_05`まで、
+`generate_text`・`grounding_sources`を追加）、両者が並行して分岐していた。`main`側は**Geminiプロキシ未対応**の
+ままだったため、マージにあたり「**main側の新しい機能を採用し、その上にGemini移行を当て直す**」方針で統合した。
+
+**変更ファイル:** `strategy_engine.py`（`main`版をベースに再移行）
+
+- `main`側の新機能（10ステージ構成、`generate_text`、`_extract_grounding_sources`による参照元URL抽出）は
+  すべて維持。旧移行版にしか無かった変更（Gemini共通クライアント経由化）だけを当て直した
+- `GeminiClient`の`google-generativeai`/`google-genai` SDK直接呼び出しを、
+  `../common/gemini_client.py`の`generate_advanced(payload, model=...)`経由に置き換え
+  （`generate_json`・`generate_text`・`generate_grounded_json`の3メソッド）
+- `_get_genai2_client`（google-genai SDKの遅延生成）は不要になったため削除
+- `_extract_grounding_sources`を、SDKオブジェクトの属性アクセス（snake_case）から
+  Gemini API生JSONのフィールド名（camelCase: `groundingMetadata`/`groundingChunks`）へ変更。
+  **旧移行版ではこの機能自体が欠落していた**（`strategy_report.py`の「参照元」表示が動かない状態だった）ため、
+  今回の統合で復活している
+- `_add_cost`のトークン数取得も同様に`usageMetadata`（camelCase）から読むよう変更
+- **動作検証**: モックで`generate_advanced`をすり替え、(a)`generate_json`がJSONモードのペイロードを組むこと、
+  (b)`generate_text`が`generationConfig`を付けないこと、(c)`generate_grounded_json`が`google_search`ツールを
+  付け、レスポンスから参照元URLを重複排除して抽出すること、(d)`model_name`（flash/pro）が正しく伝播すること、
+  (e)コスト集計が従来通り動作すること、を確認。実際のGemini API呼び出しは未検証
+
+## [GEMINI_COMMON_DIR対応] - 2026-08-11（同日追加修正）
+
+**背景:** 越智さんの実際のローカル環境では`rtocs_organizer`を`bbt\RTOCS_organizer`という独立フォルダで
+管理しており、gitリポジトリのような「commonフォルダが1つ上の階層にある」構成になっていないことが判明。
+相対パス（`../common`）だけに頼ると`ModuleNotFoundError`になるため、環境変数で明示的に指定できるようにした。
+
+**変更ファイル:** `strategy_engine.py`
+
+- `common/gemini_client.py`の探索先を、環境変数`GEMINI_COMMON_DIR`があればそちらを優先、
+  無ければ従来通り「1つ上の階層のcommonフォルダ」にフォールバックするよう変更
+- **動作検証**: `GEMINI_COMMON_DIR`未設定時は従来通り相対パスでimportできること、設定時は
+  そちらが優先されて別ディレクトリの`gemini_client.py`を読み込むことの両方を確認
+
+## [Gemini呼び出し共通化] - 2026-08-11
+
+**背景:** 会社PC上でGemini APIへの直接アクセスが遮断される事象が発生（2026-08-10頃、原因未確定）。
+業務停止を避けるため、自宅PC経由のプロキシへ自動フォールバックする共通クライアント
+（`../common/gemini_client.py`、submodule `ochi1216/gemini-common-tools`）を導入し、戦略分析パイプライン
+（`strategy_engine.py`）のGemini呼び出しをすべてこちらに置き換えた。詳細は`common/GEMINI_MIGRATION_HANDOVER.md`参照。
+
+**変更ファイル:** `strategy_engine.py`, `requirements.txt`（`rtocs_dashboard_*.py`・`rtocs_index.py`・
+`strategy_prompts.py`・`strategy_report.py`は無変更）
+
+- `GeminiClient`の内部実装を、`google-generativeai`/`google-genai` SDKの直接呼び出しから
+  `../common/gemini_client.py`の`generate_advanced(payload, model=...)`経由に置き換え
+- JSONモード・Google Search Groundingのペイロード組み立て・レスポンス解析ロジックは変更なし
+- ディープモード（`gemini-2.5-pro`）判定・戦略批判改訂パスは`self.model_name`をそのまま
+  `generate_advanced`に渡すことで維持
+- `requirements.txt`から`google-genai`を削除。`google-generativeai`は`rtocs_organizer_20260711_01.py`
+  （RTOCS動画スクレイパー、本移行の対象外）が別途直接使用しているため残置
+- **未移行**: `rtocs_organizer_20260711_01.py`は今回のスコープ外（Google Search Groundingを使わない
+  シンプルなJSON生成用途のため）。移行する場合は別途対応が必要
+- **動作検証**: モックで`generate_advanced`をすり替え、`generate_json`/`generate_grounded_json`双方が
+  正しいJSONモード/groundingペイロードを組み立て、`model_name`（flash/pro）が正しく伝播し、
+  コスト計算も従来通り動作することを確認。実際のGemini API呼び出しは未検証（環境にAPIキー無し）
 ## [20260719_05] - 2026-07-19
 
 **変更ファイル:** `strategy_prompts.py`, `strategy_engine.py`, `strategy_report.py`, `README.md`

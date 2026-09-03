@@ -1,0 +1,7 @@
+{
+  "name": "Nexperia",
+  "role": "own_company",
+  "benchmark_target": "Texas Instruments",
+  "note": "本ツールの利用者(越智さん)の所属企業。TIをベンチマーク対象(打ち破るべき相手)として、対抗デバイスの企画・将来ロードマップを検討する立場。competitors_db.json内では他の競合企業と同じ形式で保持されるが、分析ロジック上は「自社」として特別扱いする（ic_schema.load_own_company()参照）。",
+  "updated_at": "2026-07-17"
+}

@@ -8,12 +8,31 @@
 - 各ステージは失敗しても {"error": ...} を格納して続行する（部分レポート方針）
 - コストは既存organizerと同じ方式（トークン→USD→円換算）で集計
 - ディープモード: gemini-2.5-pro + 戦略批判・改訂パス追加
+
+Gemini API呼び出しは共通クライアント（../common/gemini_client.py、submodule
+ochi1216/gemini-common-tools）のgenerate_advanced()経由で行う。会社PCでの
+Gemini API直接アクセス遮断時、自宅PC経由プロキシへ自動フォールバックするため。
+Google Search Grounding・JSONモードのペイロード組み立て・レスポンス解析ロジックは
+従来のgoogle-genai/google-generativeai SDK使用時から変更していない
+（GEMINI_MIGRATION_HANDOVER.md参照）。
 """
 
 import os
+import sys
 import json
 import re
 from datetime import datetime
+
+# common/gemini_client.py の場所は環境変数 GEMINI_COMMON_DIR で明示的に指定できる。
+# 未設定時は「1つ上の階層のcommonフォルダ」（gitリポジトリでrtocs_organizer/
+# analog_ic_se_strategy_organizer/commonが兄弟フォルダになっている構成）にフォールバックする。
+# ローカル環境でツールごとに管理フォルダが分かれている場合は、GEMINI_COMMON_DIRを設定して
+# 共通のgemini_client.py配置場所を1箇所に揃えること。
+_COMMON_DIR = os.environ.get("GEMINI_COMMON_DIR") or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "common")
+if _COMMON_DIR not in sys.path:
+    sys.path.insert(0, _COMMON_DIR)
+from gemini_client import generate_advanced
 
 import rtocs_index
 import strategy_prompts as P
@@ -68,25 +87,28 @@ def find_previous_report(disp_name, reports_dir=None, exclude_path=None):
 def _extract_grounding_sources(response):
     """Google Search Groundingが実際に参照したURLを、レスポンスのgrounding_metadataから
     抽出する。LLMにURLをテキストとして生成させると存在しないURLをハルシネーションする
-    リスクがあるため、API自体が返す検証可能なメタデータ（candidates[].grounding_metadata.
-    grounding_chunks[].web.{uri,title,domain}）のみを使う。
+    リスクがあるため、API自体が返す検証可能なメタデータ（candidates[].groundingMetadata.
+    groundingChunks[].web.{uri,title,domain}）のみを使う。
+
+    共通クライアント経由ではGemini APIの生JSON（dict）が返るため、SDKオブジェクトの
+    属性アクセス（snake_case）ではなくRESTのフィールド名（camelCase）で読む。
     """
     sources = []
     seen = set()
     try:
-        for cand in (getattr(response, "candidates", None) or []):
-            gm = getattr(cand, "grounding_metadata", None)
+        for cand in (response.get("candidates") or []):
+            gm = cand.get("groundingMetadata")
             if not gm:
                 continue
-            for chunk in (getattr(gm, "grounding_chunks", None) or []):
-                web = getattr(chunk, "web", None)
-                uri = getattr(web, "uri", None) if web else None
+            for chunk in (gm.get("groundingChunks") or []):
+                web = chunk.get("web") or {}
+                uri = web.get("uri")
                 if uri and uri not in seen:
                     seen.add(uri)
                     sources.append({
-                        "title": getattr(web, "title", "") or "",
+                        "title": web.get("title", "") or "",
                         "url": uri,
-                        "domain": getattr(web, "domain", "") or "",
+                        "domain": web.get("domain", "") or "",
                     })
     except Exception:
         pass
@@ -104,29 +126,37 @@ def _strip_code_fence(text):
     return text.strip()
 
 
+def _extract_text(response):
+    """generate_advanced()が返す生レスポンスdictから本文テキストを取り出す"""
+    try:
+        return response["candidates"][0]["content"]["parts"][0]["text"]
+    except (KeyError, IndexError, TypeError):
+        return ""
+
+
 class GeminiClient:
-    """JSONモード呼び出し＋コスト集計のラッパー"""
+    """JSONモード呼び出し＋コスト集計のラッパー。
+
+    Gemini API呼び出しは共通クライアント(../common/gemini_client.py)の
+    generate_advanced(payload, model=...)経由で行う。直接アクセス失敗時は
+    自宅PC経由プロキシへ自動フォールバックする（呼び出し側はどちらの経路か
+    意識しなくてよい）。
+    """
 
     def __init__(self, api_key=None, model_name="gemini-2.5-flash"):
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         self.model_name = model_name
         self.total_cost_usd = 0.0
         self.stage_costs_jpy = {}
-        self._model = None
-        self._genai2_client = None
-        if self.api_key:
-            import google.generativeai as genai
-            genai.configure(api_key=self.api_key)
-            self._model = genai.GenerativeModel(model_name)
 
     @property
     def total_cost_jpy(self):
         return self.total_cost_usd * USD_JPY
 
     def _add_cost(self, stage, response):
-        usage = getattr(response, "usage_metadata", None)
-        t_in = getattr(usage, "prompt_token_count", 0) or 0
-        t_out = getattr(usage, "candidates_token_count", 0) or 0
+        usage = response.get("usageMetadata", {}) if isinstance(response, dict) else {}
+        t_in = usage.get("promptTokenCount", 0) or 0
+        t_out = usage.get("candidatesTokenCount", 0) or 0
         p_in, p_out = MODEL_PRICING.get(self.model_name, MODEL_PRICING["gemini-2.5-flash"])
         cost = (t_in / 1_000_000 * p_in) + (t_out / 1_000_000 * p_out)
         self.total_cost_usd += cost
@@ -134,78 +164,67 @@ class GeminiClient:
 
     def generate_json(self, prompt, stage="misc", retries=1):
         """JSONモードで呼び出しdictを返す。失敗時はValueError"""
-        if not self._model:
+        if not self.api_key:
             raise ValueError("GEMINI_API_KEY が設定されていません。")
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"responseMimeType": "application/json"},
+        }
         last_err = None
         for _ in range(retries + 1):
             try:
-                response = self._model.generate_content(
-                    prompt,
-                    generation_config={"response_mime_type": "application/json"},
-                )
+                response = generate_advanced(payload, model=self.model_name)
                 self._add_cost(stage, response)
-                if not response.text:
+                text = _extract_text(response)
+                if not text:
                     raise ValueError("空の応答")
-                return json.loads(_strip_code_fence(response.text))
+                return json.loads(_strip_code_fence(text))
             except Exception as e:
                 last_err = e
         raise ValueError(f"Gemini呼び出し失敗: {last_err}")
 
     def generate_text(self, prompt, stage="misc", retries=1):
         """プレーンテキスト応答（JSONモード不使用）。深掘りチャット等の自由記述回答に使う。"""
-        if not self._model:
+        if not self.api_key:
             raise ValueError("GEMINI_API_KEY が設定されていません。")
+        payload = {"contents": [{"parts": [{"text": prompt}]}]}
         last_err = None
         for _ in range(retries + 1):
             try:
-                response = self._model.generate_content(prompt)
+                response = generate_advanced(payload, model=self.model_name)
                 self._add_cost(stage, response)
-                if not response.text:
+                text = _extract_text(response)
+                if not text:
                     raise ValueError("空の応答")
-                return response.text.strip()
+                return text.strip()
             except Exception as e:
                 last_err = e
         raise ValueError(f"Gemini呼び出し失敗: {last_err}")
 
-    def _get_genai2_client(self):
-        """Google Search Grounding用の新SDK(google-genai)クライアントを遅延生成する。
-
-        レガシーの`google-generativeai`が公開するTool型は`google_search_retrieval`
-        （Gemini 1.5世代向けの旧グラウンディング方式）のみで、Gemini 2.x系が要求する
-        `google_search`ツールとはAPI形状が異なり使えない（実機で400エラーを確認済み）。
-        後継の統合SDK`google-genai`（別パッケージ、共存可能）のみがgoogle_searchツールを
-        公開しているため、ニュース収集ステージに限りこちらを使う。
-        """
-        if self._genai2_client is None:
-            from google import genai as genai2
-            self._genai2_client = genai2.Client(api_key=self.api_key)
-        return self._genai2_client
-
     def generate_grounded_json(self, prompt, stage="misc", retries=1):
-        """Google Search Groundingを有効にした呼び出し（google-genai SDK使用）。
+        """Google Search Groundingを有効にした呼び出し。
 
-        グラウンディングとJSONモード(response_mime_type)は併用できないため、
+        グラウンディングとJSONモード(responseMimeType)は併用できないため、
         プロンプト側にJSON形式での出力を指示し、コードフェンス除去＋json.loadsでパースする。
-        レスポンスのgrounding_metadataから実際に参照されたURLを抽出し、"grounding_sources"
+        レスポンスのgroundingMetadataから実際に参照されたURLを抽出し、"grounding_sources"
         フィールドとして結果に追加する（LLMにURLを生成させるのではなく、APIが返す検証可能な
         メタデータを使うため、出典リンクのハルシネーションが起きない）。
         """
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY が設定されていません。")
-        from google.genai import types as genai2_types
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "tools": [{"google_search": {}}],
+        }
         last_err = None
         for _ in range(retries + 1):
             try:
-                client = self._get_genai2_client()
-                config = genai2_types.GenerateContentConfig(
-                    tools=[genai2_types.Tool(google_search=genai2_types.GoogleSearch())]
-                )
-                response = client.models.generate_content(
-                    model=self.model_name, contents=prompt, config=config)
+                response = generate_advanced(payload, model=self.model_name)
                 self._add_cost(stage, response)
-                if not response.text:
+                text = _extract_text(response)
+                if not text:
                     raise ValueError("空の応答")
-                parsed = json.loads(_strip_code_fence(response.text))
+                parsed = json.loads(_strip_code_fence(text))
                 if isinstance(parsed, dict):
                     sources = _extract_grounding_sources(response)
                     if sources:
