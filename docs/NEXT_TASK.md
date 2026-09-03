@@ -107,50 +107,77 @@ CLAUDE.md, docs/PROJECT_STATUS.md, docs/SESSION_HISTORY.md, docs/NEXT_TASK.md �
 ## Session Management
 
 * Project Name: Document Search Manager 開発
-* Previous Session: S01 - Phase 1 SharePoint全社検索の実装と開発資産の整備
-* Next Session Number: S02
-* Recommended Session Title: Document Search Manager 開発 S02 - Phase 2 Nexus検索の追加
+* Previous Session: S02 - Phase 2 Nexus検索の追加と系統別タブ化
+* Next Session Number: S03
+* Recommended Session Title: Document Search Manager 開発 S03 - Phase 3 Enovia検索の追加
 
 ## Objective
 
-* **Nexus（Shareflex / SF_QualityDocumentsProd）検索を実装し、`2. Nexus` と
-  `0. All` から利用できるようにする。**
-* あわせて、SharePoint全社検索とNexusで同じ文書が二重表示される問題を解消する。
+* **Enovia（3DEXPERIENCE / ENOVIA 2017年版）のドキュメント検索を実装し、
+  `3. Enovia` タブと `0. All` から使えるようにする。**
+* 検索対象は**ドキュメントのみ**でよい（越智さん確認済み）。
 
 ## Background
 
-* Phase 1（SharePoint全社検索）は完了し、会社PCで実動作を確認済み。
-  最新リビジョンは `document_search_manager/document_search_manager_20260903_08.py`
-  （コミット `c8e4de4`）。
+* Phase 1（SharePoint）と Phase 2 / 2.5（Nexus）は完了し、会社PCで実動作を確認済み。
+  最新リビジョンは `document_search_manager/document_search_manager_20260903_16.py`
+  （コミット `5cd128f`、ブランチ `claude/document-search-manager-phase2-nexus-d0tg0m`）。
 * **着手前に必ず `document_search_manager/DESIGN_NOTES.md` を読むこと。**
-  調査で判明した事実・設計判断の理由・既知の罠が集約されている。
+  特に 3-3（Enoviaの未確認事項）と、S02で追記した教訓（3-1d〜3-1j）。
   スキル `document-search-tool-dev` も参照する（開発手順・報告の作法）。
-* **Nexus実装の設計は既に確定している**（`DESIGN_NOTES.md` 3-1）:
-  * Nexusの「Full text search」は SharePoint標準の `RenderListDataAsStream` ＋
-    **`InplaceSearchQuery`** で実装されており、**SharePoint検索インデックス**を参照している。
-    → Graph Search で等価な結果を取得できる見込みが高い。
-  * 実装は `POST /search/query` に、検索範囲をNexusに限定したKQLを渡す:
-    ```
-    <キーワード> path:"https://nexperia.sharepoint.com/sites/SF_QualityDocumentsProd/Documents"
-    ```
-  * **使用スコープは `Sites.Read.All` のままで、新規のEntra ID権限申請は不要。**
-  * SharePoint REST の直接呼び出しは、MCASのセッション認証（`McasUserAuth`）の再現が
-    必要かつ権限追加を伴うため**採用しない**。
-* 関連する設定値は `config.json` に用意済み:
-  `nexus_site_url` / `nexus_folder_path` / `nexus_list_id` /
-  `dedupe_nexus_from_sharepoint`。
+
+### ★Enoviaは「推測で実装しない」★
+
+`DESIGN_NOTES.md` 3-3 のとおり、**Enoviaだけは実装方式が確定していない。**
+
+* URLの `emxNavigator.jsp` は **ENOVIA クラシック（V6系）Navigator UI**。
+  社内は2017年版＋社内カスタマイズのため、**公開ドキュメントは当てにならない。**
+* URL末尾の `ticket=ST-...` は **CASのService Ticket＝ワンタイム**で再利用不可。
+* **IT責任者不在のため承認は不要**（越智さん確認済み）。
+* Enoviaプロバイダは独立したアダプタなので、**実装できなくても①②は無傷。**
+
+### S02で得た「効いた進め方」（Enoviaでも同じ手を使う）
+
+* **推測で直さず、実際に投げて実測する。** Nexusの件数不一致は、5通りのKQLを
+  投げて件数を並べる診断を作ったことで、1クリック・数秒で原因が確定した。
+  仮説を順に試すより速く、証拠も残る。
+* **返ってきているデータを全部見る。** 「取れないはずだ」と決める前に、
+  全項目を一覧に出す診断を作る。Nexusでは、これで `qmEditor`（氏名）が
+  最初から返っていたことに気づいた。
+* **URLやパラメータの仕様は、実際に開いて確かめるまで確定としない。**
+  リクエストのパラメータ名が、画面遷移URLのパラメータ名と同じとは限らない。
 
 ## Scope
+
+### Phase 1（調査・設計提案）— まずここから
+
+1. **越智さんにF12キャプチャを依頼する**（所要10分程度）。
+   Enoviaで検索を1回実行し、F12 → Network → Fetch/XHR で以下を共有いただく:
+   * リクエストURL・メソッド
+   * リクエストヘッダー（Cookie名だけでよい。値は不要）
+   * Payload（フォームデータ / JSON）
+   * レスポンスの形式（JSON / HTML / XML）と先頭部分
+   * ログイン直後のURL遷移（3DPassport / CAS のリダイレクト）
+2. キャプチャの内容から実装方式を確定し、設計案を提示する。
+3. **この段階ではコード生成を行わない。**
+
+### 実装案（S01時点の想定。キャプチャで確定させる）
+
+* **A（第一候補）**: `requests.Session` で3DPassport(CAS)ログイン → セッション保持
+  → キャプチャした検索リクエストを再現 → パース
+* **B（保険）**: Playwrightで会社PCのSSOを使いUI操作＋結果取得
+  （※会社PCでPlaywrightが使えるかは**未確認**）
+* **C（最終手段）**: 手動エクスポート → ローカル索引化
 
 ### Files That May Be Changed
 
 * `document_search_manager/` 配下（新バージョンファイル
-  `document_search_manager_20260904_NN.py` として追加。既存版は `old/` へ移動）
-* `document_search_manager/CHANGELOG.md`（新バージョンのエントリ追加）
-* `document_search_manager/README.md` / `DESIGN_NOTES.md`（仕様変更に応じて更新）
-* `document_search_manager/config.example.json`（設定項目の追加時）
-* `document_search_manager/tests/`（Nexus用の検証を追加）
+  `document_search_manager_YYYYMMDD_NN.py` として追加。既存版は `old/` へ移動）
+* `document_search_manager/CHANGELOG.md` / `README.md` / `DESIGN_NOTES.md`
+* `document_search_manager/config.example.json`（Enovia用の設定項目）
+* `document_search_manager/tests/`（Enovia用の検証を追加）
 * `document_search_manager/run_document_search_manager.bat`（呼び出し先の更新）
+* `document_search_manager/requirements.txt`（新しい依存が必要な場合のみ）
 
 ### Files That Must Not Be Changed
 
@@ -160,49 +187,98 @@ CLAUDE.md, docs/PROJECT_STATUS.md, docs/SESSION_HISTORY.md, docs/NEXT_TASK.md �
 * `rtocs_organizer/` / `shareflex_dashboard/` / `rss_organizer/` 配下一式
 * 各種 `*_translator` / `excel_translation` 配下一式
 * `document_search_manager/old/` 配下の全リビジョン（削除・上書き禁止）
+* **SharePoint / Nexus の検索ロジック・列構成**（Enovia追加の巻き添えにしない）
 
 ## Task
 
-1. `DESIGN_NOTES.md` とスキル `document-search-tool-dev` を読む。
-2. `NexusProvider` を実装する（`SearchProvider` を継承し `probe()` / `search()` のみ）。
-   * `SharePointProvider` の Graph 呼び出し・パーサを再利用する形が望ましい。
-   * Shareflexの列（Document Number / Department / Top Level Process /
-     Document Status / Expiry Date 等）が `fields` から取得できるかを確認する。
-     取得できる場合、Nexus固有のメタデータをどう表示するかは越智さんに確認する
-     （現在 Document Number 列は非表示にしている）。
-3. `dedupe_nexus_from_sharepoint` を `true` にし、SharePoint全社検索側から
-   Nexusサイト配下の文書を除外する（除外件数は画面に明示する）。
-4. 検証ハーネスにNexus用の項目を追加し、`python tests/run_tests.py` を全項目通す。
-5. CHANGELOG・README・DESIGN_NOTES を更新し、越智さんへ納品する。
-6. **受入テスト（実機・越智さんに依頼）**: キーワード `validation` で、
-   Nexus画面とツールの**件数・上位ヒットを突き合わせる**。
-   一致しない場合は保険案（`&q=` のディープリンク生成方式）へ切り替える。
-7. コミット・Pushは越智さんの明示的な指示があった場合のみ。
+1. `DESIGN_NOTES.md`（特に 3-3）とスキル `document-search-tool-dev` を読む。
+2. **越智さんにEnoviaのF12キャプチャを依頼する。**
+3. キャプチャから実装方式を確定し、設計案を提示して承認を得る。
+4. `EnoviaProvider` を実装する（`SearchProvider` を継承し `probe()` / `search()`）。
+   Enoviaタブの列構成は、Enoviaが返すメタデータに合わせて決める
+   （Nexusと同じく `COLUMN_SETS` に1つ足すだけで済む構造になっている）。
+5. Enovia用の検証を追加し、`python tests/run_tests.py` を全項目通す。
+6. CHANGELOG・README・DESIGN_NOTES を更新し、越智さんへ納品する。
+7. **受入テスト（実機・越智さんに依頼）**: Enovia画面とツールの件数・上位ヒットを
+   突き合わせる。
+8. コミット・Pushは越智さんの明示的な指示があった場合のみ。
 
 ## Completion Criteria
 
-* `2. Nexus` 単独と `0. All` の両方でNexus文書が検索でき、画面に表示されること。
-* SharePoint全社検索との重複が除外され、除外件数が画面に明示されること。
+* `3. Enovia` 単独と `0. All` の両方でEnoviaの文書が検索でき、画面に表示されること。
 * `python tests/run_tests.py` が全項目合格すること。
 * CHANGELOG に新バージョンのエントリが追加されていること。
-* 越智さんの実機で、キーワード `validation` での突き合わせが完了していること。
+* 越智さんの実機で、Enovia画面との突き合わせが完了していること。
+* **SharePoint / Nexus の動作に影響が出ていないこと**（既存570項目が通ること）。
 
 ## Required Tests
 
 * `python -m py_compile document_search_manager/document_search_manager_YYYYMMDD_NN.py`
-* `python tests/run_tests.py`（既存268項目＋Nexus用の追加項目）
-* `python tests/ui_check.py`（画面を変更した場合）
-* 実機: 疎通診断でNexusが 🟢 になること、`validation` での件数突き合わせ
+* `python tests/run_tests.py`（既存570項目＋Enovia用の追加項目）
+* `CHROMIUM_PATH=<chromeのパス> python tests/ui_check.py`（画面を変更した場合）
+* 実機: 疎通診断でEnoviaが 🟢 になること、Enovia画面との件数突き合わせ
 
 ## Known Risks
 
-* **Shareflexの全文検索とGraph Searchで結果が一致しない可能性。**
-  参照インデックスは同一と判明しているが、ランキングや対象範囲（ビューのフィルタ等）
-  の違いで件数がずれることはあり得る。突き合わせは必須。
-* Nexusサイトは `.mcas.ms` プロキシ配下にあるため、結果リンクがブラウザで
-  開けない可能性がある（`rewrite_host_to_mcas` で対処）。
-* Phase 1 で未確認のまま残っている2件（フォルダリンクの到達性、一括ダウンロードの
-  成否）は、Nexusでも同様に影響する。S02の実機確認時にあわせて確認するとよい。
+* **認証が最大の関門。** CASのService Ticketはワンタイムで再利用できない。
+  `requests.Session` でログインを再現できるかは未検証。
+* **2017年版＋社内カスタマイズのため、公開情報が当てにならない。**
+  キャプチャ無しに着手すると確実に空振りする。
+* 会社PCでPlaywrightが使えるか未確認（案Bの前提）。
+* Enoviaの結果は SharePoint / Nexus と**メタデータの体系が全く違う**可能性が高い。
+  Nexusで作った「タブごとに列構成を切り替える」仕組みがそのまま効くはずだが、
+  共通スキーマ（`SearchResult`）に無理に押し込めないか注意する。
+
+## Carry-over（S02から持ち越し）
+
+* **v20260903_16 の実機確認**: Nexusタブの有効期限の表示と、期限切れバッジ。
+* Phase 1 から残る実機未確認2件:
+  1. SharePointタブのフォルダリンクが正しくフォルダを開くか
+  2. 一括ダウンロードが成功するか
+
+## Start Prompt
+
+```
+CLAUDE.md, docs/PROJECT_STATUS.md, docs/SESSION_HISTORY.md, docs/NEXT_TASK.md を読み込んでください。
+
+対象リポジトリ: ochi1216/my-claude-code
+対象ブランチ: claude/document-search-manager-phase2-nexus-d0tg0m
+前回セッション（S02）の最終コミット: 5cd128f（Nexusタブに有効期限の列を追加、v20260903_16）
+※作業開始前に、必ず対象ブランチの最新状態をGitHubから取得（fetch/pull）してから作業を始めてください。
+
+セッションタイトル: Document Search Manager 開発 S03 - Phase 3 Enovia検索の追加
+
+着手前に必ず document_search_manager/DESIGN_NOTES.md を読むこと。
+特に 3-3（Enoviaの未確認事項）と、S02で追記した 3-1d〜3-1j の教訓。
+スキル document-search-tool-dev も参照すること。
+
+現在の状態:
+- Phase 1（SharePoint）/ Phase 2・2.5（Nexus）は完了、会社PCで実動作確認済み
+- 最新リビジョンは document_search_manager/document_search_manager_20260903_16.py
+- 検証は tests/run_tests.py で570項目、tests/ui_check.py で34項目すべて合格
+
+次に行う作業（優先順位順）:
+1. Enoviaの実装方式は未確定。まず越智さんにF12キャプチャを依頼する
+   （Enoviaで検索を1回実行 → Network → Fetch/XHR のURL・メソッド・Payload・
+     レスポンス形式・ログイン時のリダイレクト）。推測で実装しないこと。
+2. キャプチャから実装方式を確定し、設計案を提示して承認を得る。
+3. 承認後に EnoviaProvider を実装する（SearchProvider を継承）。
+4. Enovia用の検証を追加し、既存570項目とあわせて全項目を通す。
+5. CHANGELOG・README・DESIGN_NOTES を更新して納品する。
+6. コミット・Pushは明示的な指示があった場合のみ。
+
+変更してよい範囲: document_search_manager/ 配下（新バージョンファイルとして追加。
+既存版は old/ へ移動）。
+変更してはいけない範囲: 他ツール一式、document_search_manager/old/ 配下の全リビジョン、
+SharePoint / Nexus の検索ロジックと列構成（Enovia追加の巻き添えにしない）。
+
+完了条件: 3. Enovia と 0. All でEnoviaの文書が検索・表示でき、全検証項目が合格し、
+CHANGELOGが更新され、実機での突き合わせが完了していること。
+
+持ち越しの実機確認:
+- v20260903_16 の有効期限の表示と期限切れバッジ
+- SharePointタブのフォルダリンクの到達性、一括ダウンロードの成否
+```
 
 ---
 
