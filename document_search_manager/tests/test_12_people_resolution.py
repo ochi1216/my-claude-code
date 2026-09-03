@@ -278,8 +278,10 @@ check("状態として保存する", "title_only: document.getElementById" in ht
 
 # ── P7 Nexusで開くリンク ─────────────────────────────────────
 print("\n[P7] Nexusで開くリンク")
-check("クリック時に検索語をコピーする", "navigator.clipboard" in html_t)
-check("貼り付け先を案内する", "Full text search に貼り付け" in html_t)
+check("1件だけに絞り込んだ状態で開く旨を案内する",
+      "だけに絞り込んだ状態で開きます" in html_t)
+check("クリップボード方式はやめた（リンクだけで絞り込めるため）",
+      "navigator.clipboard" not in html_t)
 
 print(f"\n{'=' * 46}\n  成功 {ok} 件 / 失敗 {ng} 件\n{'=' * 46}")
 sys.exit(1 if ng else 0)

@@ -56,7 +56,7 @@ SharePointとNexusでは持っている情報が違うためです（Nexusの実
 3. 起動する。`run_document_search_manager.bat` をダブルクリックするか、次を実行する。
 
    ```
-   python document_search_manager_20260903_12.py
+   python document_search_manager_20260903_13.py
    ```
 
    初回はターミナルにDevice Code Flowの認証コード（URLとコード）が表示されるので、
@@ -199,7 +199,8 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 | `nexus_extra_fields` | `[]` | Nexus検索のときだけ追加要求する検索マネージドプロパティ（Shareflex固有の列）。**テナントに存在しない名前を書くと検索がHTTP 400になる**ため、実機で確認できたものだけを足す |
 | `title_only_default` / `title_field` | `true` / `title` | 「タイトルだけを検索する」の初期状態と、絞り込みに使う検索プロパティ名 |
 | `nexus_resolve_people` | `true` | 人物列の数値ID（`<列名>LookupId`）を氏名に解決するか |
-| `nexus_view_url` | Nexus画面URL | 「Nexusで開く」リンクの土台。`&q=<文書番号>` を付けて検索済み状態で開く |
+| `nexus_view_url` | Nexus画面URL | 「Nexusで開く」リンクの土台。`&@qmDocumentNo=<文書番号>` を付けて1件に絞り込んだ状態で開く |
+| `nexus_deeplink_field` / `nexus_deeplink_title_field` | `qmDocumentNo` / `qmDocumentTitle` | 上記リンクで使う列フィルタの内部列名 |
 | `nexus_scope_mode` | `path` | Nexus検索の絞り込み方式（`path` / `site` / `none`）。画面の「Nexus検索診断」で実測して決める |
 | `nexus_enrich_metadata` | `true` | Nexusの標準Indexをリスト項目から取得するか |
 | `nexus_enrich_max` / `nexus_enrich_workers` | `200` / `6` | Index取得の上限件数と並列数（1件につき1リクエスト増える） |
@@ -244,10 +245,10 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 - **人物列は Graph が数値IDでしか返しません。**サイトの
   「User Information List」を引いて氏名に直していますが、参照できない
   テナント設定では空欄のままになります（理由は画面に表示されます）。
-- **「Nexusで開く」は、その1件を検索した状態では開けません。**
-  Shareflexが検索条件をURLに載せないためです。代わりに、クリック時に
-  Document Number をクリップボードへコピーするので、Nexusの
-  Full text search に貼り付けてください。
+- **「Nexusで開く」は、その1件だけに絞り込んだ状態でNexusを開きます。**
+  Document Number の列フィルタ（`@qmDocumentNo=`）を使っています。
+  全文検索ではありません（全文検索だと、他の文書の本文に参照文献として
+  書かれた番号にも当たり、1件に絞り込めないため）。
 - **キーワードを引用符で囲むと完全一致のフレーズ検索**になり、件数が大きく減ります
   （実測: `validation plan` で117件 → `"validation plan"` で14件）。
   Nexus画面の Full text search は既定でAND検索なので、比較するときは引用符を外してください。
@@ -261,7 +262,7 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 - **`tests/`** … 検証ハーネス（ネットワーク不要）。
 
   ```
-  python tests/run_tests.py     # 493項目の自動検証
+  python tests/run_tests.py     # 496項目の自動検証
   python tests/ui_check.py      # ブラウザ操作テスト（Playwright必要・任意）
   ```
 
@@ -276,6 +277,6 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 |---|---|---|
 | Phase 1 | SharePoint全社検索 MVP | ✅ 完了（v20260903_08、実機動作確認済み） |
 | Phase 2 | Nexus検索追加（Graph Searchを `nexus_folder_path` に限定）＋重複排除の有効化 | ✅ 完了（件数はNexus画面と一致することを実測で確認） |
-| Phase 2.5 | 系統別タブ＋Nexus標準Indexの表示＋人物列の解決＋タイトル限定検索 | ✅ 実装完了（v20260903_12、Doc Author/Owner の対応のみ実機確認待ち） |
+| Phase 2.5 | 系統別タブ＋Nexus標準Index＋人物列の解決＋タイトル限定検索＋Nexusリンク | ✅ 実装完了（v20260903_13、Doc Author/Owner の対応のみ実機確認待ち） |
 | Phase 3 | Enovia検索追加（実装方式は調査後に確定） | 未着手 |
 | Phase 4 | 3系統統合の磨き込み（名寄せ・検索履歴・お気に入り） | 未着手 |

@@ -39,7 +39,7 @@
   "nexus_folder_path": "/sites/SF_QualityDocumentsProd/Documents",
   "nexus_list_id": "eb4ed9f8-81f8-4484-b8f6-64f22d30bfe0",
 
-  "_comment_nexus_view_url": "Nexus(Shareflex)の画面URL。結果の「Nexusで開く」リンクは、このURLに &q=<文書番号> を付けて生成する。SharePoint標準のフォルダビュー(Forms/AllItems.aspx)はShareflexが自サイトのトップへ強制遷移させるため使えない。ブラウザのアドレスバーの値をそのまま貼ること。",
+  "_comment_nexus_view_url": "Nexus(Shareflex)の画面URL。結果の「Nexusで開く」リンクは、このURLに &@qmDocumentNo=<文書番号> を付けて生成し、その1件だけに絞り込んだ状態で開く。Shareflexは列フィルタの条件を @<内部列名>= の形でURLに載せる（実機のアドレスバーで確認）。全文検索(q=)を使ってはいけない。他の文書の本文に参照文献として書かれた番号にも当たり、1件に絞れなくなるため。SharePoint標準のフォルダビュー(Forms/AllItems.aspx)はShareflexが自サイトのトップへ強制遷移させるため使えない。ブラウザのアドレスバーの値をそのまま貼ること。",
   "nexus_view_url": "https://nexperia.sharepoint.com/sites/SF_QualityDocumentsProd/SitePages/Shareflex/View.aspx?$List=eb4ed9f8-81f8-4484-b8f6-64f22d30bfe0&$RootFolder=%2Fsites%2FSF_QualityDocumentsProd%2FDocuments",
 
   "_comment_nexus_scope_mode": "Nexus検索の絞り込み方式。path=Documentsフォルダで限定（既定） / site=SPSiteURLでサイト単位に限定 / none=限定しない。Nexus画面と件数が合わない場合は、画面の「Nexus検索診断」で3方式の件数を実測し、一番近いものに変更する。",
@@ -52,6 +52,10 @@
 
   "_comment_nexus_resolve_people": "Doc Author / Doc Owner などの人物列は、Graphが数値ID（<列名>LookupId）でしか返さない。true にすると、サイトのユーザー情報リストを引いて氏名に直す。参照できない環境では列を空欄のままにする（数値をそのまま出さない）。",
   "nexus_resolve_people": true,
+
+  "_comment_nexus_deeplink": "「Nexusで開く」リンクで使う列フィルタの内部列名。文書番号がある行は nexus_deeplink_field を、無い行は nexus_deeplink_title_field を使う。",
+  "nexus_deeplink_field": "qmDocumentNo",
+  "nexus_deeplink_title_field": "qmDocumentTitle",
 
   "nexus_enrich_metadata": true,
   "nexus_enrich_max": 100,

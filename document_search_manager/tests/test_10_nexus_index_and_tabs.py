@@ -89,18 +89,30 @@ check("nexus_field_map の指定を最優先する", picked2.get("department") =
 
 # ── I3 Nexusディープリンク ───────────────────────────────────
 print("\n[I3] Shareflex画面を検索済み状態で開くディープリンク")
+# v13: Shareflexは列フィルタの条件を @<内部列名>= の形でURLに載せる
+# （実機のアドレスバーで確認）。全文検索(q=)では、他の文書の本文に
+# 参照文献として書かれた番号にも当たってしまい1件に絞れない。
 link = dsm._nexus_deep_link(CFG, "NDS-00688")
 check("設定のView.aspxを土台にする", link.startswith(CFG["nexus_view_url"]), link)
-check("&q= でキーワードを渡す", "&q=NDS-00688" in link, link)
+check("Document Numberの列フィルタで絞り込む",
+      "&@qmDocumentNo=NDS-00688" in link, link)
+check("全文検索(q=)は使わない", "&q=" not in link, link)
 check("記号はURLエンコードする",
       "%20" in dsm._nexus_deep_link(CFG, "a b"),
       dsm._nexus_deep_link(CFG, "a b"))
-check("キーワードが空ならリンクを作らない", dsm._nexus_deep_link(CFG, "") == "")
+check("文書番号が無ければタイトルの列フィルタで代用する",
+      "@qmDocumentTitle=FMEA" in dsm._nexus_deep_link(CFG, "", "FMEA"),
+      dsm._nexus_deep_link(CFG, "", "FMEA"))
+check("どちらも空ならリンクを作らない", dsm._nexus_deep_link(CFG, "", "") == "")
 check("View.aspxが未設定ならリンクを作らない",
       dsm._nexus_deep_link(dict(CFG, nexus_view_url=""), "x") == "")
 check("? しか無いURLでも壊れない",
       dsm._nexus_deep_link(dict(CFG, nexus_view_url="https://x/v.aspx"), "k")
-      == "https://x/v.aspx?q=k")
+      == "https://x/v.aspx?@qmDocumentNo=k")
+check("列名は設定で変えられる",
+      "@myField=k" in dsm._nexus_deep_link(
+          dict(CFG, nexus_deeplink_field="myField"), "k"),
+      dsm._nexus_deep_link(dict(CFG, nexus_deeplink_field="myField"), "k"))
 
 # ── I4 絞り込み方式の切り替え ────────────────────────────────
 print("\n[I4] KQLの絞り込み方式（nexus_scope_mode）")
@@ -204,8 +216,8 @@ check("Applicable To が入る", row.applicable_to == "Global Supply Chain")
 check("Department が入る", row.department == "Global Supply Chain")
 check("Document Title をタイトルに使う", row.title == "Customer Programs Testing",
       row.title)
-check("Nexusで開くリンクが文書番号で作られる", "&q=NDS-00688" in row.nexus_url,
-      row.nexus_url)
+check("Nexusで開くリンクが文書番号の列フィルタで作られる",
+      "&@qmDocumentNo=NDS-00688" in row.nexus_url, row.nexus_url)
 check("取得できた件数を note に出す", "Index列を 1/1 件" in out["note"], out["note"])
 
 
@@ -225,8 +237,9 @@ check("Index列が取れなくても検索結果は残す（黙って消さな�
       len(out2["results"]) == 1, str(len(out2["results"])))
 check("取れなかったことを note に明示する",
       "取得できませんでした" in out2["note"], out2["note"])
-check("それでもディープリンクはタイトルで作る",
-      "&q=" in out2["results"][0].nexus_url, out2["results"][0].nexus_url)
+check("Index列が取れなくても、タイトルの列フィルタでリンクは作る",
+      "@qmDocumentTitle=" in out2["results"][0].nexus_url,
+      out2["results"][0].nexus_url)
 
 nx3 = dsm.NexusProvider(dict(CFG, nexus_enrich_metadata=False), DummyAuth())
 nx3._mode = "search-api"
