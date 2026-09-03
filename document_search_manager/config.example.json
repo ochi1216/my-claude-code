@@ -1,7 +1,10 @@
 {
-  "_comment_auth": "tenant_id / client_id を空のままにすると、po_database_organizer/config.json から自動的に借用します（読むだけで書き換えません）。新規のEntra ID権限申請は不要です。",
+  "_comment_auth": "tenant_id / client_id を空のままにすると、既存ツールの config.json から自動的に借用します（読むだけで書き換えません）。探索順は po_database_organizer → onenote_report_generator。新規のEntra ID権限申請は不要です。",
   "tenant_id": "",
   "client_id": "",
+
+  "_comment_credentials_from": "既存ツールの config.json が別の場所にある場合は、そのフルパスをここに書くと最優先で参照します。バックスラッシュは2つ重ねてください。",
+  "credentials_from": "",
   "graph_scopes": ["https://graph.microsoft.com/Sites.Read.All"],
 
   "flask_port": 5020,

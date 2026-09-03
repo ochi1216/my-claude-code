@@ -1,5 +1,60 @@
 # Document Search Manager — CHANGELOG
 
+## VERSION 20260903_02
+
+実機（会社PC）での初回起動時に発生した2件の不具合を修正。
+
+### 修正
+
+- **起動バッチの文字化けエラー**
+  `run_document_search_manager.bat` の日本語コメントがUTF-8で保存されていたため、
+  Windowsのコマンドプロンプト（CP932）が解釈できず、
+  `'蜍輔＠縺ｦ...' は、内部コマンドまたは外部コマンドとして認識されていません`
+  というエラーが表示されていた（実害はなく処理自体は継続していた）。
+  バッチ内のコメントをASCII（英語）のみに変更し、改行コードをCRLFに統一した。
+- **tenant_id / client_id の流用元が見つからず起動できない問題**
+  `po_database_organizer/config.json` は `.gitignore` で除外されているため、
+  `git pull` しただけの環境には存在しない。流用元が1箇所しかなかったため、
+  そこに無いと即座に起動失敗していた。以下のように改善した。
+  - 流用元の候補を複数化（`po_database_organizer` → `onenote_report_generator` の順に探索）。
+  - キー名の表記揺れに対応（`tenant_id` / `TENANT_ID` の両方を受け付ける）。
+    `onenote_report_generator` は大文字キーを使用しているため。
+  - プレースホルダ（`<YOUR_TENANT_ID>` のような `<` 始まりの値）は未設定として扱い、
+    次の候補へ進む。
+  - 流用元のJSONが壊れていても停止せず、次の候補へ進む。
+  - 2つの候補から `tenant_id` と `client_id` を1つずつ拾って合成することも可能。
+
+### 追加
+
+- `config.json` に **`credentials_from`** を追加。既存ツールの `config.json` が
+  別の場所にある場合、フルパスを指定すると最優先で参照する。
+- 起動失敗時のエラーメッセージを改善。探索したパスをすべて列挙し、
+  対処方法（直接記入する／`credentials_from` を指定する）を具体的に表示する。
+
+### 変更しないこと（宣誓）
+
+- `document_search_manager_20260903_01.py` は削除・上書きせず、そのまま残す。
+- 検索ロジック（`SharePointProvider` / `SearchManager` / パーサ）には一切手を入れていない。
+  本バージョンの変更は `_load_config` / `_read_credentials` / 起動バッチに限定される。
+- `po_database_organizer/` / `onenote_report_generator/` 配下のファイルは一切変更しない
+  （`config.json` は読み取りのみ）。
+
+### 検証結果
+
+- `python -m py_compile` による構文チェック: 合格。
+- 設定読み込みの新規検証（9項目、すべて合格）:
+  - 流用元がどこにも無い場合に、分かりやすいメッセージで終了する
+    （越智さんの環境で発生した状況の再現）
+  - `po_database_organizer` からの借用（小文字キー）
+  - `onenote_report_generator` からの借用（大文字キー）と、無関係なキー
+    （`GEMINI_API_KEY` 等）を取り込まないこと
+  - プレースホルダを飛ばして次の候補を使うこと
+  - `config.json` への直接記入が最優先されること
+  - `credentials_from` による明示指定が最優先で参照されること
+  - 壊れたJSONの候補があっても停止せず次へ進むこと
+  - 2つの候補から1項目ずつ拾って合成できること
+- v20260903_01 の全56項目の検証ハーネスを v20260903_02 に対して再実行: **全項目合格**。
+
 ## VERSION 20260903_01
 
 初版（Phase 1: SharePoint全社検索 MVP）。

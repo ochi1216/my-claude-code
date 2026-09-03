@@ -21,8 +21,12 @@
 本ツールは **`po_database_organizer` と同一のEntra IDアプリ登録をそのまま流用**します。
 要求スコープは **`Sites.Read.All` のみ**で、新規のGraph権限申請は一切発生しません。
 
-- `config.json` の `tenant_id` / `client_id` を空のままにしておくと、
-  `../po_database_organizer/config.json` から自動的に借用します（**読むだけ**で書き換えません）。
+- `config.json` の `tenant_id` / `client_id` を空のままにしておくと、既存ツールの
+  `config.json` から自動的に借用します（**読むだけ**で書き換えません）。探索順は
+  `../po_database_organizer/config.json` → `../onenote_report_generator/config.json` で、
+  キー名は小文字（`tenant_id`）・大文字（`TENANT_ID`）の両方に対応します。
+- 既存ツールの `config.json` がどちらにも無い場合は、`config.json` の `credentials_from` に
+  フルパスを指定するか、`tenant_id` / `client_id` を直接記入してください（後述）。
 - トークンキャッシュは本フォルダ内の `token_cache.json` に分離して保存します
   （`po_database_organizer` と同時に起動しても競合しません）。そのため初回だけ、
   本ツール用のデバイスコード認証が1回必要です。
@@ -44,7 +48,7 @@
 3. 起動する。`run_document_search_manager.bat` をダブルクリックするか、次を実行する。
 
    ```
-   python document_search_manager_20260903_01.py
+   python document_search_manager_20260903_02.py
    ```
 
    初回はターミナルにDevice Code Flowの認証コード（URLとコード）が表示されるので、
@@ -101,14 +105,30 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 
 ### `tenant_id / client_id が特定できませんでした` と出る
 
-`po_database_organizer/config.json` が存在しない環境です。
-本ツールの `config.json` に、既存ツールと同じ `tenant_id` / `client_id` を直接記入してください。
+既存ツール（`po_database_organizer` / `onenote_report_generator`）の `config.json` が
+どちらも存在しない環境です。コンソールに探索したパスがすべて表示されるので、
+次のどちらかで対処してください。**新規のEntra ID権限申請は不要です。**
+
+**(1) 直接記入する（推奨）** — 既存ツールと同じEntra IDアプリ登録の値を書く。
+
+```json
+"tenant_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+"client_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+```
+
+**(2) 既存の設定ファイルの場所を教える** — 別フォルダにある場合。
+バックスラッシュは2つ重ねてください。
+
+```json
+"credentials_from": "C:\\\\Users\\\\nx023836\\\\Documents\\\\PythonScripts\\\\my-claude-code\\\\po_database_organizer\\\\config.json"
+```
 
 ## 設定項目（`config.json`）
 
 | キー | 既定値 | 説明 |
 |---|---|---|
-| `tenant_id` / `client_id` | 空 | 空なら `po_database_organizer/config.json` から借用 |
+| `tenant_id` / `client_id` | 空 | 空なら既存ツールの `config.json` から借用（po → onenote の順） |
+| `credentials_from` | 空 | 流用元の `config.json` をフルパスで明示指定（最優先で参照） |
 | `graph_scopes` | `["...Sites.Read.All"]` | 要求スコープ。**変更すると新規権限申請が必要になるため、原則変更しない** |
 | `flask_port` | `5020` | 画面のポート（既存ツールの5000/5010と衝突しない値） |
 | `default_max_results` | `100` | 既定の取得件数 |
@@ -142,7 +162,7 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 
 | Phase | 内容 | 状態 |
 |---|---|---|
-| Phase 1 | SharePoint全社検索 MVP | ✅ 完了（v20260903_01） |
+| Phase 1 | SharePoint全社検索 MVP | ✅ 完了（v20260903_02） |
 | Phase 2 | Nexus検索追加（Graph Searchを `nexus_folder_path` に限定）＋重複排除の有効化 | 未着手 |
 | Phase 3 | Enovia検索追加（実装方式は調査後に確定） | 未着手 |
 | Phase 4 | 3系統統合の磨き込み（名寄せ・検索履歴・お気に入り） | 未着手 |
