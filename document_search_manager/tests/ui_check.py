@@ -92,8 +92,29 @@ def start_server():
     # v09 で Nexus が実装済みになったため、こちらもスタブ化する。
     # そうしないと 0.All の検索で実際に Graph を呼びに行ってしまい、
     # 会社PCでは本物のNexusの結果がダミーデータに混ざって件数が合わなくなる。
+    nexus_rows = [
+        dsm.SearchResult(
+            source="Nexus", document_number="NDS-00688", old_system_id="XPR-0367",
+            title="Customer Programs Testing", doc_author="David Chen",
+            doc_owner="Rob Geljon", applicable_to="Global Supply Chain",
+            department="Global Supply Chain", last_modified="2026-03-19",
+            doc_type="docx", url="https://nexperia.sharepoint.com/sites/"
+            "SF_QualityDocumentsProd/Documents/3E08-CD5F/a.docx",
+            nexus_url="https://nexperia.sharepoint.com/x/View.aspx?q=NDS-00688",
+            is_nexus_path=True, rank=1),
+        dsm.SearchResult(
+            source="Nexus", document_number="NDS-00213", old_system_id="XTE-0061",
+            title="Basic and Product Type Request Form", doc_author="Vince Reyes",
+            doc_owner="Marc Albers", applicable_to="Global Supply Chain",
+            department="Global Supply Chain", last_modified="2025-09-15",
+            doc_type="pdf", url="https://nexperia.sharepoint.com/sites/"
+            "SF_QualityDocumentsProd/Documents/801F-6853/b.pdf",
+            nexus_url="https://nexperia.sharepoint.com/x/View.aspx?q=NDS-00213",
+            is_nexus_path=True, rank=2),
+    ]
     manager.providers[dsm.TARGET_NEXUS].search = (
-        lambda keyword, max_results: {"results": [], "total": 0, "note": ""})
+        lambda keyword, max_results: {"results": list(nexus_rows),
+                                      "total": len(nexus_rows), "note": ""})
     dsm._manager = manager
 
     threading.Thread(
@@ -130,13 +151,18 @@ def main():
         page.click("#btnSearch")
         page.wait_for_timeout(900)
 
-        check("検索結果が表示される", len(titles()) == len(SAMPLE), str(len(titles())))
+        # v10: 0.All は SharePoint と Nexus の両方を並べる
+        check("検索結果が表示される", len(titles()) == len(SAMPLE) + 2, str(len(titles())))
 
         headers = page.eval_on_selector_all("#resultHead th",
                                             "e => e.map(x => x.innerText.trim())")
-        check("列構成（ソース/タイトル/選択/作成者/最終更新日/種別/サイト/フォルダ）",
-              len(headers) == 8 and headers[1].startswith("タイトル")
-              and headers[7].startswith("フォルダ"), str(headers))
+        # v10: Allタブからフォルダ列を外した。Nexusのフォルダ名は内部ハッシュで、
+        # SharePointと同じ列に並べても意味を成さないため（仕様変更）。
+        check("Allタブの列構成（ソース/タイトル/選択/作成者/最終更新日/種別/サイト）",
+              len(headers) == 7 and headers[1].startswith("タイトル")
+              and headers[6].startswith("サイト"), str(headers))
+        check("Allタブにフォルダ列は出さない",
+              not any(h.startswith("フォルダ") for h in headers), str(headers))
 
         types = page.eval_on_selector_all("#resultBody tr td:nth-child(6)",
                                           "e => e.map(x => x.innerText)")
@@ -144,10 +170,50 @@ def main():
               all("%" not in t for t in types), str(types))
         check("フォルダ行が「フォルダ」と表示される", "フォルダ" in types, str(types))
 
-        folders = page.eval_on_selector_all("#resultBody tr td:nth-child(8)",
-                                            "e => e.map(x => x.innerText)")
+        # ── SharePointタブへ切り替える（列構成が変わることの確認） ──
+        page.click("#tabs button[data-target='sharepoint']")
+        page.wait_for_timeout(900)
+        sp_headers = page.eval_on_selector_all("#resultHead th",
+                                               "e => e.map(x => x.innerText.trim())")
+        check("SharePointタブに切り替えるとフォルダ列が出る",
+              any(h.startswith("フォルダ") for h in sp_headers), str(sp_headers))
+        check("SharePointタブにはソース列を出さない",
+              not any(h.startswith("ソース") for h in sp_headers), str(sp_headers))
+        folder_index = [i for i, h in enumerate(sp_headers)
+                        if h.startswith("フォルダ")][0] + 1
+        folders = page.eval_on_selector_all(
+            f"#resultBody tr td:nth-child({folder_index})",
+            "e => e.map(x => x.innerText)")
+        check("フォルダ列に値がある", any(f for f in folders), str(folders))
         check("フォルダ列が / 始まりに短縮される",
               all(f.startswith("/") for f in folders if f), str(folders))
+
+        # ── Nexusタブへ切り替える（標準Indexが出ることの確認） ──
+        page.click("#tabs button[data-target='nexus']")
+        page.wait_for_timeout(900)
+        nx_headers = page.eval_on_selector_all("#resultHead th",
+                                               "e => e.map(x => x.innerText.trim())")
+        for label in ("Document Number", "OldSystemIdentifier", "Document Title",
+                      "Doc Author", "Doc Owner", "Applicable To", "Department",
+                      "Nexusで開く"):
+            check(f"Nexusタブに {label} 列がある",
+                  any(h.startswith(label) for h in nx_headers), str(nx_headers))
+        check("Nexusタブにフォルダ列を出さない",
+              not any(h.startswith("フォルダ") for h in nx_headers), str(nx_headers))
+        # 1列目は選択欄。Document Number は2列目（Nexus画面と同じ並び）
+        numbers = page.eval_on_selector_all("#resultBody tr td:nth-child(2)",
+                                            "e => e.map(x => x.innerText)")
+        check("Document Number の値が並ぶ", numbers == ["NDS-00688", "NDS-00213"],
+              str(numbers))
+        nexus_links = page.eval_on_selector_all(
+            "#resultBody tr td a[href*='View.aspx']", "e => e.map(x => x.href)")
+        check("Nexusで開くリンクが張られる", len(nexus_links) == 2, str(nexus_links))
+        if shot_path:
+            page.screenshot(path=shot_path.replace(".png", "_nexus.png"))
+
+        # 以降のソート・絞り込みの検証は Allタブで行う
+        page.click("#tabs button[data-target='all']")
+        page.wait_for_timeout(900)
 
         # 最終更新日で昇順→降順
         page.click("#resultHead th:nth-child(5) .hdr")

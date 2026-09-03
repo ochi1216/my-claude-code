@@ -115,10 +115,17 @@ client = dsm.flask_app.test_client()
 html = client.get("/").get_data(as_text=True)
 
 check("列定義に「フォルダ」がある", 'label: "フォルダ"' in html)
-check("列定義から Document Number が消えている",
-      'key: "document_number"' not in html)
-check("表のヘッダーに Document Number が出ない",
-      'label: "Document Number"' not in html)
+# v10 で Nexusタブに標準Indexを表示するようにしたため、Document Number は
+# 「どこにも出さない」から「Nexusタブにだけ出す」に変わった。
+# SharePoint／Allタブに出していないことを確認する形に更新する
+# （機能の劣化ではなく、仕様変更に伴うテスト記述の陳腐化）。
+check("Nexusタブの列定義に Document Number がある",
+      'key: "document_number"' in html and 'label: "Document Number"' in html)
+check("SharePointタブの列定義には Document Number を出さない",
+      'key: "document_number"' not in
+      html.split("sharepoint: [")[1].split("],")[0])
+check("Allタブの列定義にも Document Number を出さない",
+      'key: "document_number"' not in html.split("all: [")[1].split("],")[0])
 check("フォルダ列はサイト列の右",
       html.index('label: "フォルダ"') > html.index('label: "サイト"'))
 check("件数プルダウンの初期選択が10件", '<option value="10" selected>' in html)

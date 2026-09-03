@@ -274,8 +274,9 @@ print("\n[N9] 画面表示")
 dsm._cfg = CFG
 dsm._manager = mgr
 html = dsm.flask_app.test_client().get("/").get_data(as_text=True)
-check("版数表示が v20260903_09 (Phase 2)", "v20260903_09 (Phase 2" in html)
-check("2. Nexus の選択肢がある", 'value="nexus"' in html)
+check("版数表示が v20260903_10 (Phase 2.5)", "v20260903_10 (Phase 2.5" in html)
+# v10 でラジオボタンからタブに変更した
+check("Nexusタブがある", 'data-target="nexus"' in html)
 check("除外件数を画面に出す仕組みが残っている", "excluded_nexus" in html)
 
 print(f"\n{'=' * 46}\n  成功 {ok} 件 / 失敗 {ng} 件\n{'=' * 46}")

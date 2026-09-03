@@ -14,7 +14,7 @@
 |---|---|---|
 | `0. All` | 有効な全系統を並列検索（既定） | 稼働中（SharePoint ＋ Nexus） |
 | `1. SharePoint` | 社内SharePoint全社横断検索 | **Phase 1 完了・実機稼働確認済み** |
-| `2. Nexus` | Shareflex品質文書サイト（SF_QualityDocumentsProd） | **Phase 2 実装完了・実機突き合わせ待ち** |
+| `2. Nexus` | Shareflex品質文書サイト（SF_QualityDocumentsProd） | **実装済み・件数不一致を調査中（下記 3-1d）** |
 | `3. Enovia` | 3DEXPERIENCE / ENOVIA（2017年版） | Phase 3（未着手） |
 
 ---
@@ -103,38 +103,105 @@
 - **認証を排他制御した**。2系統が別スレッドから同時にトークンを要求するように
   なったので、`token_cache.json` の書き込みが重ならないよう直列化した。
 
-### 3-1b. Nexus固有の列（標準Index）— 未確認事項
+### 3-1d. ★未解決★ Nexus画面と件数が合わない（14 vs 116）
+
+実機での突き合わせ結果（v20260903_09、キーワード `"validation plan"`）:
+
+| | 件数 |
+|---|---|
+| Nexus画面 Full text search | **116 件**（ライブラリ全体は 3,027 件） |
+| 本ツール `2. Nexus` | **14 件** |
+
+**まだ原因は特定できていない。** 推測で直すと当てずっぽうになるため、
+v20260903_10 で **「Nexus検索診断」** を実装した。同じキーワードを
+4通りのKQLで実際に投げ、Graphが返す該当件数(`total`)を並べて表示する。
+
+1. `<kw> path:"<Documentsフォルダ>"` … 現行方式
+2. `<kw> SPSiteURL:"<Nexusサイト>"` … サイト単位で限定
+3. `<kw>` … 限定なし（全社）
+4. 引用符の有無を変えたもの
+
+**現時点で有力な仮説（いずれも未検証）:**
+
+- **入力の非対称**: ツール側には `"validation plan"` と**引用符付き**で入力されて
+  いた（＝完全一致のフレーズ検索）。Nexus画面側は `Validation plan` で、
+  SharePointは既定で AND 検索になる。この差だけで大きく件数が変わり得る。
+  → **同じ条件で測り直すことが先決。**
+- **`path:` の効き方**: KQLの `path:` はフォルダURLの前方一致で効くはずだが、
+  効き方が想定と違う可能性がある。② のサイト単位限定と比較すれば分かる。
+- **Graphのページング**: `moreResultsAvailable=false` で14件で打ち切られていた。
+  `total` が116なのに14件しか返らないなら、Graph側の挙動の問題になる。
+  診断で `total` と取得件数の両方を出しているのはこれを見分けるため。
+
+**次にやること**: 実機で「Nexus検索診断」を実行し、結果に応じて
+`nexus_scope_mode` を変えるか、KQLの組み立てを直す。
+
+### 3-1b. Nexus固有の列（標準Index）— 取得方式（v10で確定）
 
 越智さんから提示されたNexusの標準Indexは次の7列。
 
 `Document Number` / `OldSystemIdentifier` / `Document Title` /
 `Doc Author` / `Doc Owner` / `Applicable To` / `Department`
 
-- **これらが Graph の `fields` で取得できるかは未確認。**
-  Graph Search で列を取るには「検索マネージドプロパティ名」が必要で、
-  Shareflexのカスタム列は `DocumentNumber` のような自動生成名になっている
-  ことが多いが、**テナントごとに違うため推測してはいけない。**
-- **テナントに存在しない名前を `fields` に指定すると、検索全体が HTTP 400 になる。**
-  そのため `nexus_extra_fields`（既定 `[]`）という別枠を設け、
-  400になったときは**まず固有列だけを落として再試行**する二段階の縮退にした。
-  標準の `search_fields` まで巻き添えにすると、タイトルが取れなくなるため。
-- **確認方法（実機で10分）**: Nexusのライブラリ設定でカスタム列の内部名を確認するか、
-  疎通が通っている状態で `nexus_extra_fields` に1つずつ足して400にならない名前を
-  探す。判明した名前をこのメモに追記すること。
+**採用した方式（v20260903_10）**: 検索マネージドプロパティ名を推測せず、
+**リスト項目そのものを引く**。
+
+```
+GET /shares/{share_token}/driveItem?$expand=listItem($expand=fields)
+```
+
+- ファイルのURLさえあれば引けるので、item id や list id を推測しなくてよい。
+  `/shares/{token}/driveItem/content`（一括ダウンロード）で実績のある経路。
+- 返ってくる `fields` のキーは**SharePoint側の内部名そのもの**なので、確実に実在する。
+- 内部名の揺れ（`Document_x0020_Number` / `DocumentNumber` / `Document Number`）は
+  正規化して突き合わせる（`_normalize_field_key`）。1つの綴りに決め打ちしない。
+- 人物列は `{"LookupValue": ...}`、複数選択列は配列で返るため平坦化する（`_field_text`）。
+- **実在した列名は、起動後の最初の検索で1度だけコンソールに出す。**
+  自動判別が外れたときに `nexus_field_map` で明示指定するための材料。
+- 1件につき1リクエスト増えるため、`nexus_enrich_max` / `nexus_enrich_workers` で制御する。
+
+**却下した方式**: Graph Search の `fields` に管理プロパティ名を並べて要求する
+（v09 の `nexus_extra_fields`）。テナントごとに名前が違って当てられず、
+外すと検索全体が HTTP 400 になる。保険として残してあるが、主たる方式ではない。
 - 越智さんの観察では、**Nexusの全文検索は本文だけでなくIndexのキーワードにも
   ヒットしている**。SharePoint検索は管理プロパティも索引しているため矛盾しないが、
   **Graph経由で同じ挙動になるかは実機の突き合わせで確認する必要がある。**
 
-### 3-1c. Nexus専用タブ構成 — 検討中（Phase 2.5）
+### 3-1c. 系統別タブ構成（v20260903_10 で実装）
 
-越智さんのご要望：**SharePointとNexusでファイル構成が異なるため、タブで画面を
-切り替える構成にし、Nexusタブでは上記7列を標準Indexとして表示したい。**
+**採用した方式（案A）**: 表・絞り込み・並べ替え・出力・状態復元は1系統のまま流用し、
+**列定義（`COLUMN_SETS`）だけをタブごとに切り替える**。表を2本持つと保守コストが
+倍になり、必ず片方が腐るため。
 
-現状は「系統をラジオボタンで選び、結果は共通の1つの表に出す」構成で、列定義
-（`COLUMNS`）も全系統共通。タブ化すると系統ごとに列を変えられる一方、
-絞り込み・並べ替え・選択状態・Excel出力・状態復元がすべて列定義に紐づいて
-いるため、**影響範囲は画面側の広範囲に及ぶ。**
-設計案（A/B/C）は S02 の報告で越智さんへ提示した。**承認待ち・未着手。**
+- 列構成は「選択したタブ」ではなく **「実際に検索した系統」** に追従させる
+  （`/api/search` が `target` を返し、画面がそれを見て切り替える）。
+  検索していないのに列だけ変わると、見出しと中身が食い違って誤解を生むため。
+- タブを押すと、キーワードが入っていればその系統で検索し直す。
+- **列構成を変えるときは、表示しない列の絞り込みを必ず落とす**（`applyColumnSet`）。
+  落とさないと、理由の分からない「0件」や「絞り込み後N件」が発生する。
+  実際に v09 では、前回の絞り込みが復元されて114件中6件しか見えない状態が起きた。
+
+**Nexusタブに サイト列・フォルダ列を出さない理由**:
+Shareflexはドキュメントを `Documents/3E08-CD5F/` のような**内部ハッシュのフォルダ**に
+格納する。人間には情報価値がゼロで、SharePointと同じ列に並べても意味を成さない。
+`0. All` タブからもフォルダ列を外している（Nexus行では埋まらないため）。
+
+### 3-1e. ★重要★ Nexus行に SharePoint標準のフォルダビューURLを張ってはいけない
+
+- `.../Documents/Forms/AllItems.aspx?id=...` を開くと、**一度表示された後、数秒で
+  Shareflexが自サイトのトップ画面へ強制遷移させる**（実機で確認）。
+  Shareflexは独自UIで動くため、標準ビューに留まらせない設計になっている。
+- サイトURL（`.../sites/SF_QualityDocumentsProd`）も、Nexusのフォルダトップに
+  飛ぶだけで文書には辿り着けない。
+- **正しいリンクは、Shareflex自身の画面URLに `&q=` を付けたもの**:
+  ```
+  https://nexperia.sharepoint.com/sites/SF_QualityDocumentsProd/SitePages/Shareflex/View.aspx
+    ?$List=eb4ed9f8-81f8-4484-b8f6-64f22d30bfe0
+    &$RootFolder=%2Fsites%2FSF_QualityDocumentsProd%2FDocuments
+    &q=<文書番号>
+  ```
+  これを `config.json` の `nexus_view_url` に持たせ、`&q=` を付けて生成する。
+- ファイル本体のURL（タイトルのリンク先）は従来どおりで問題ない。
 
 ### 3-2. SharePoint REST を直接叩いてはいけない理由
 
@@ -278,7 +345,7 @@ batやショートカットから起動するとパスがずれる。この弱�
 
 ```
 cd document_search_manager
-python tests/run_tests.py              # ネットワーク不要。320項目
+python tests/run_tests.py              # ネットワーク不要。413項目
 python tests/ui_check.py               # ブラウザ操作テスト（Playwright必要・任意）
 python tests/ui_check.py --shot ui.png # 画面のスクリーンショットを保存
 ```

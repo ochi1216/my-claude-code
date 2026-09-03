@@ -39,6 +39,20 @@
   "nexus_folder_path": "/sites/SF_QualityDocumentsProd/Documents",
   "nexus_list_id": "eb4ed9f8-81f8-4484-b8f6-64f22d30bfe0",
 
+  "_comment_nexus_view_url": "Nexus(Shareflex)の画面URL。結果の「Nexusで開く」リンクは、このURLに &q=<文書番号> を付けて生成する。SharePoint標準のフォルダビュー(Forms/AllItems.aspx)はShareflexが自サイトのトップへ強制遷移させるため使えない。ブラウザのアドレスバーの値をそのまま貼ること。",
+  "nexus_view_url": "https://nexperia.sharepoint.com/sites/SF_QualityDocumentsProd/SitePages/Shareflex/View.aspx?$List=eb4ed9f8-81f8-4484-b8f6-64f22d30bfe0&$RootFolder=%2Fsites%2FSF_QualityDocumentsProd%2FDocuments",
+
+  "_comment_nexus_scope_mode": "Nexus検索の絞り込み方式。path=Documentsフォルダで限定（既定） / site=SPSiteURLでサイト単位に限定 / none=限定しない。Nexus画面と件数が合わない場合は、画面の「Nexus検索診断」で3方式の件数を実測し、一番近いものに変更する。",
+  "nexus_scope_mode": "path",
+
+  "_comment_nexus_index": "Nexusの標準Index（Document Number / OldSystemIdentifier / Doc Author / Doc Owner / Applicable To / Department 等）を取得するか。Graphの /shares/{token}/driveItem?$expand=listItem($expand=fields) でリスト項目そのものを読むため、検索マネージドプロパティ名を推測せずに済む。1件につき1リクエスト増えるので、nexus_enrich_max で上限を、nexus_enrich_workers で並列数を決める。",
+  "nexus_enrich_metadata": true,
+  "nexus_enrich_max": 200,
+  "nexus_enrich_workers": 6,
+
+  "_comment_nexus_field_map": "列名の自動判別が外れた場合に、内部名を明示指定する。例: {\"department\": \"Owning Dept\"}。起動後の検索で、実在する列名の一覧がコンソールに1度だけ出力されるので、それを見て設定する。",
+  "nexus_field_map": {},
+
   "_comment_nexus_extra_fields": "Nexus検索のときだけ追加で要求する検索マネージドプロパティ（Shareflex固有の列: Document Number / Department / Top Level Process / Document Status / Expiry Date など）。テナントに存在しない名前を書くと検索がHTTP 400になるため、実機で存在を確認できたものだけを足すこと。400になった場合は、まずこの追加分だけを落として再試行する（標準のsearch_fieldsは巻き添えにしない）。既定は空。",
   "nexus_extra_fields": [],
 

@@ -259,7 +259,13 @@ check("GET / が200", resp.status_code == 200, str(resp.status_code))
 html = resp.get_data(as_text=True)
 check("ダークテーマ色 #1a1a2e を含む", "#1a1a2e" in html)
 check("アクセント色 #e94560 を含む", "#e94560" in html)
-check("0.All が既定選択", 'value="all" checked' in html)
+# v10 で系統の選択をラジオボタンからタブに変更したため、判定方法を変えた
+# （機能の劣化ではなく、UIの仕様変更に伴うテスト記述の陳腐化）。
+check("0.All タブが既定で選択されている",
+      'class="on" data-target="all"' in html)
+check("4系統ぶんのタブがある",
+      all(f'data-target="{t}"' in html
+          for t in ("all", "sharepoint", "nexus", "enovia")))
 
 resp = client.post("/api/search", json={"keyword": "", "target": "all"})
 check("空キーワードは400", resp.status_code == 400, str(resp.status_code))
