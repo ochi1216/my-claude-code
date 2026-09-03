@@ -219,6 +219,36 @@ Graph は人物列を `<列名>LookupId`（数値ID）でしか返さない（`q
 「Doc Author ← 内部列 qmEditor」と出る。対応表はコンソールにも出力する。
 **Doc Author / Doc Owner の対応は、この表示をNexus画面と突き合わせて確定させること。**
 
+### 3-1i. ★重要★ 並列処理でキャッシュに「空の途中結果」を置いてはいけない
+
+v12〜v13 で、**Doc Author / Doc Owner が行によって空欄になる**不具合を出した。
+
+```python
+# 誤り（v13まで）
+if lookup_id in self._people_cache:
+    return self._people_cache[lookup_id]
+self._people_cache[lookup_id] = ""      # ← HTTP要求の「前」に空を置いた
+...HTTP要求...
+self._people_cache[lookup_id] = name
+```
+
+検索結果は6並列で処理される。**同じ人物を同時に引いた2本目以降のスレッドは、
+1本目がまだ取得中に置いた空文字を読んで、そのまま空欄を返していた。**
+同じ担当者の文書が並ぶほど空欄が増える。
+
+- **修正**: 引き当ての開始から結果を貯めるまでを1本の鍵（`threading.Lock`）で
+  囲んで直列化する。同じ人物は先に引いた1本の結果を全員が使う。
+- **再現確認**: 修正前のコードに6スレッドから同じ人物を引かせると
+  **6本中5本が空欄**になる。この形を `tests/test_13_people_concurrency.py`
+  にそのまま残してある。
+- **教訓**:
+  - 「二重取得を防ぐための placeholder」は、**並列前提では逆に取りこぼしを生む。**
+    未取得と取得済みを1つの値で兼ねてはいけない。
+  - **例外も権限エラーも出ないため、テストでも画面でも気づけない。**
+    「一部の行だけ空欄」という症状は、並行処理を疑う手がかりになる。
+  - 並列で走るコードに共有状態を足したら、**必ず並列で検証する**
+    （単体で1回呼んで通ることは、何の保証にもならない）。
+
 ### 3-1g. ★重要★ Shareflexの列フィルタはURLに載る（`@<内部列名>=`）
 
 **Nexusの1件だけを開くリンクは、列フィルタで作る。**
@@ -441,7 +471,7 @@ batやショートカットから起動するとパスがずれる。この弱�
 
 ```
 cd document_search_manager
-python tests/run_tests.py              # ネットワーク不要。496項目
+python tests/run_tests.py              # ネットワーク不要。515項目
 python tests/ui_check.py               # ブラウザ操作テスト（Playwright必要・任意）
 python tests/ui_check.py --shot ui.png # 画面のスクリーンショットを保存
 ```

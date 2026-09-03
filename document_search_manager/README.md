@@ -56,7 +56,7 @@ SharePointとNexusでは持っている情報が違うためです（Nexusの実
 3. 起動する。`run_document_search_manager.bat` をダブルクリックするか、次を実行する。
 
    ```
-   python document_search_manager_20260903_13.py
+   python document_search_manager_20260903_14.py
    ```
 
    初回はターミナルにDevice Code Flowの認証コード（URLとコード）が表示されるので、
@@ -242,6 +242,8 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
   Applicable To / Department）は実機で確定済みです。
   **各セルにマウスを載せると「どの内部列から採った値か」が表示される**ので、
   Nexus画面と突き合わせて確認し、違っていれば `nexus_field_map` で修正できます。
+  **「Nexus列診断」ボタン**を押すと、先頭1件についてNexusが持っている
+  全ての列と値、および対応づけが実行ログに出ます。
 - **人物列は Graph が数値IDでしか返しません。**サイトの
   「User Information List」を引いて氏名に直していますが、参照できない
   テナント設定では空欄のままになります（理由は画面に表示されます）。
@@ -262,7 +264,7 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 - **`tests/`** … 検証ハーネス（ネットワーク不要）。
 
   ```
-  python tests/run_tests.py     # 496項目の自動検証
+  python tests/run_tests.py     # 515項目の自動検証
   python tests/ui_check.py      # ブラウザ操作テスト（Playwright必要・任意）
   ```
 
@@ -277,6 +279,6 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 |---|---|---|
 | Phase 1 | SharePoint全社検索 MVP | ✅ 完了（v20260903_08、実機動作確認済み） |
 | Phase 2 | Nexus検索追加（Graph Searchを `nexus_folder_path` に限定）＋重複排除の有効化 | ✅ 完了（件数はNexus画面と一致することを実測で確認） |
-| Phase 2.5 | 系統別タブ＋Nexus標準Index＋人物列の解決＋タイトル限定検索＋Nexusリンク | ✅ 実装完了（v20260903_13、Doc Author/Owner の対応のみ実機確認待ち） |
+| Phase 2.5 | 系統別タブ＋Nexus標準Index＋人物列の解決＋タイトル限定検索＋Nexusリンク | ✅ 実装完了（v20260903_14、Doc Author/Owner の対応のみ実機確認待ち） |
 | Phase 3 | Enovia検索追加（実装方式は調査後に確定） | 未着手 |
 | Phase 4 | 3系統統合の磨き込み（名寄せ・検索履歴・お気に入り） | 未着手 |
