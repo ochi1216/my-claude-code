@@ -48,7 +48,7 @@
 3. 起動する。`run_document_search_manager.bat` をダブルクリックするか、次を実行する。
 
    ```
-   python document_search_manager_20260903_03.py
+   python document_search_manager_20260903_04.py
    ```
 
    初回はターミナルにDevice Code Flowの認証コード（URLとコード）が表示されるので、
@@ -67,7 +67,11 @@
   初期選択値は `config.json` の `default_max_results` で決まります
   （`config.example.json` の既定は開発段階向けに **10件**。運用時は100等に変更してください）。
   無制限取得は行いません（体感速度を優先しているため）。
+- **タイトルをクリック**するとファイルが直接開きます。
+- **右端の「サイト」列**をクリックすると、その文書が保管されているサイトが開きます。
 - **疎通診断**ボタンで、各系統が利用可能かを確認できます。
+  キーワード不要・1件分の最小リクエストで、接続可否と動作モードだけを確認します
+  （結果テーブルは更新されず、実行ログにのみ表示されます）。
 - **Excel出力 / CSV出力**で結果を `exports/` フォルダに保存します。
 
 ### 系統別ステータスの見方
@@ -165,7 +169,7 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 
 | Phase | 内容 | 状態 |
 |---|---|---|
-| Phase 1 | SharePoint全社検索 MVP | ✅ 完了（v20260903_03、実機動作確認済み） |
+| Phase 1 | SharePoint全社検索 MVP | ✅ 完了（v20260903_04、実機動作確認済み） |
 | Phase 2 | Nexus検索追加（Graph Searchを `nexus_folder_path` に限定）＋重複排除の有効化 | 未着手 |
 | Phase 3 | Enovia検索追加（実装方式は調査後に確定） | 未着手 |
 | Phase 4 | 3系統統合の磨き込み（名寄せ・検索履歴・お気に入り） | 未着手 |
