@@ -20,3 +20,12 @@ onenote_report_generator/token_cache.bin
 onenote_report_generator/bookmarks.json
 onenote_report_generator/bookmarks.json.bak
 onenote_report_generator/reports/*.html
+
+# Document Search Manager のローカル設定・認証キャッシュ・生成物
+# config.jsonにはテナントID/クライアントID、exports/には検索キーワードと
+# 実際の社内文書名が含まれるため、リポジトリには含めない
+# （コミット対象は config.example.json のみ）。
+document_search_manager/config.json
+document_search_manager/token_cache.json
+document_search_manager/cache/
+document_search_manager/exports/

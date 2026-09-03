@@ -16,6 +16,11 @@ Outlookメール解析・アクションダッシュボードツール。詳細�
 
 セットアップ手順は [`shareflex_dashboard/README.md`](shareflex_dashboard/README.md) を参照。
 
+## Document Search Manager
+
+社内SharePoint / Nexus / Enovia を同一キーワードで横断検索するツール。
+セットアップ手順は [`document_search_manager/README.md`](document_search_manager/README.md) を参照。
+
 ## Excel翻訳ツール
 
 セットアップ手順は [`excel_translation/README.md`](excel_translation/README.md) を参照。
