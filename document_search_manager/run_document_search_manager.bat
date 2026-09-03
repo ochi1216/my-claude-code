@@ -2,5 +2,5 @@
 rem Document Search Manager launcher
 rem "cd /d %~dp0" makes this batch independent of the current directory.
 cd /d %~dp0
-python document_search_manager_20260903_08.py
+python document_search_manager_20260903_09.py
 pause

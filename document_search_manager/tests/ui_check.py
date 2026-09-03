@@ -89,6 +89,11 @@ def start_server():
 
     manager = dsm.SearchManager(cfg, DummyAuth())
     manager.providers[dsm.TARGET_SHAREPOINT].search = fake_search
+    # v09 で Nexus が実装済みになったため、こちらもスタブ化する。
+    # そうしないと 0.All の検索で実際に Graph を呼びに行ってしまい、
+    # 会社PCでは本物のNexusの結果がダミーデータに混ざって件数が合わなくなる。
+    manager.providers[dsm.TARGET_NEXUS].search = (
+        lambda keyword, max_results: {"results": [], "total": 0, "note": ""})
     dsm._manager = manager
 
     threading.Thread(

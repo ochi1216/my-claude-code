@@ -34,13 +34,16 @@
 
   "sharepoint_host": "nexperia.sharepoint.com",
 
-  "_comment_nexus": "Phase 2（Nexus検索）で使用する設定。Phase 1では未使用。",
+  "_comment_nexus": "Nexus（Shareflex品質文書サイト）検索の設定。nexus_site_url のホストと nexus_folder_path を組み合わせたURLを、Graph Search のKQL path: 条件に渡して検索範囲を限定する。nexus_list_id は実機調査で判明したShareflexのリストIDで、現在は記録用（Graph経由の検索では使用しない）。",
   "nexus_site_url": "https://nexperia.sharepoint.com/sites/SF_QualityDocumentsProd",
   "nexus_folder_path": "/sites/SF_QualityDocumentsProd/Documents",
   "nexus_list_id": "eb4ed9f8-81f8-4484-b8f6-64f22d30bfe0",
 
-  "_comment_dedupe": "Nexusサイト配下の文書をSharePoint結果から除外するか。Phase 1ではNexusプロバイダが未実装のため false（除外するとNexus文書が見えなくなるため）。Phase 2で true にする。",
-  "dedupe_nexus_from_sharepoint": false,
+  "_comment_nexus_extra_fields": "Nexus検索のときだけ追加で要求する検索マネージドプロパティ（Shareflex固有の列: Document Number / Department / Top Level Process / Document Status / Expiry Date など）。テナントに存在しない名前を書くと検索がHTTP 400になるため、実機で存在を確認できたものだけを足すこと。400になった場合は、まずこの追加分だけを落として再試行する（標準のsearch_fieldsは巻き添えにしない）。既定は空。",
+  "nexus_extra_fields": [],
+
+  "_comment_dedupe": "SharePoint全社検索はNexusサイトも対象に含むため、Nexusと同時に検索すると同じ文書が2行に見える。true にすると、その場合にSharePoint側の行を除外する（除外件数は画面に表示する）。「1. SharePoint」単独で検索したときは、Nexus文書が一切見えなくなるのを防ぐため除外しない。",
+  "dedupe_nexus_from_sharepoint": true,
 
   "_comment_mcas": "結果リンクがブラウザで開けない場合のみ true にする。リンクのホストを .mcas.ms 経由に書き換える。",
   "rewrite_host_to_mcas": false,

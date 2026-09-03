@@ -12,9 +12,9 @@
 
 | 選択肢 | 対象 | 状態 |
 |---|---|---|
-| `0. All` | 有効な全系統を並列検索（既定） | 稼働中（現在はSharePointのみ） |
+| `0. All` | 有効な全系統を並列検索（既定） | 稼働中（SharePoint ＋ Nexus） |
 | `1. SharePoint` | 社内SharePoint全社横断検索 | **Phase 1 完了・実機稼働確認済み** |
-| `2. Nexus` | Shareflex品質文書サイト（SF_QualityDocumentsProd） | Phase 2（未着手） |
+| `2. Nexus` | Shareflex品質文書サイト（SF_QualityDocumentsProd） | **Phase 2 実装完了・実機突き合わせ待ち** |
 | `3. Enovia` | 3DEXPERIENCE / ENOVIA（2017年版） | Phase 3（未着手） |
 
 ---
@@ -74,6 +74,68 @@
 - 有効化と同時に `config.json` の `dedupe_nexus_from_sharepoint` を `true` にする
   （SharePoint全社検索にもNexus文書がヒットして二重表示になるため）。
 
+#### 実装結果（v20260903_09 / Phase 2）
+
+上記の方針どおりに実装した。実装上の判断は以下のとおり。
+
+- **`NexusProvider` は `SharePointProvider` を継承**した。Graph呼び出し・パーサ・
+  ページング・フォールバックは同一で、違うのは「検索範囲を絞るKQL」と
+  「疎通診断のメッセージ」だけだから。親クラスに4つのフックを設けてある。
+
+  | フック | 役割 | Nexusでの差し替え |
+  |---|---|---|
+  | `_query_string(keyword)` | Graphに渡すクエリ文字列 | `<kw> path:"<Nexusフォルダ>"` |
+  | `_search_fields()` | 要求するマネージドプロパティ | 標準＋`nexus_extra_fields` |
+  | `_fallback_sites()` | 権限不足時のサイト単位検索先 | `nexus_site_url` の1件 |
+  | `_degrade_fields()` | HTTP 400時の縮退 | 固有列→標準列の2段階 |
+
+  **この構造の利点**：既知の罠（タイトル欠落、拡張子の誤認識、フォルダの扱い、
+  `/personal/` の判定）への対策が、Nexus側にも自動的に効く。
+
+- **`path:` に渡すのは絶対URL**。`config.json` の `nexus_folder_path` は
+  サーバー相対パスなので、`nexus_site_url` のスキーム＋ホストと突き合わせて
+  絶対URLへ直している（`_nexus_scope_url`）。
+- **保険**：`path:` の絞り込みが効かなかった場合に備え、Nexusサイト外の行は
+  結果から落とす。無関係な文書を「Nexusのヒット」として見せると、重複排除の
+  判定まで狂うため。落とした件数は画面のメッセージに出す（黙って消さない）。
+- **重複排除は「Nexusを実際に検索したときだけ」**行う。`1. SharePoint` 単独でも
+  除外してしまうと、Nexus配下の文書がどこにも表示されない取りこぼしになるため。
+- **認証を排他制御した**。2系統が別スレッドから同時にトークンを要求するように
+  なったので、`token_cache.json` の書き込みが重ならないよう直列化した。
+
+### 3-1b. Nexus固有の列（標準Index）— 未確認事項
+
+越智さんから提示されたNexusの標準Indexは次の7列。
+
+`Document Number` / `OldSystemIdentifier` / `Document Title` /
+`Doc Author` / `Doc Owner` / `Applicable To` / `Department`
+
+- **これらが Graph の `fields` で取得できるかは未確認。**
+  Graph Search で列を取るには「検索マネージドプロパティ名」が必要で、
+  Shareflexのカスタム列は `DocumentNumber` のような自動生成名になっている
+  ことが多いが、**テナントごとに違うため推測してはいけない。**
+- **テナントに存在しない名前を `fields` に指定すると、検索全体が HTTP 400 になる。**
+  そのため `nexus_extra_fields`（既定 `[]`）という別枠を設け、
+  400になったときは**まず固有列だけを落として再試行**する二段階の縮退にした。
+  標準の `search_fields` まで巻き添えにすると、タイトルが取れなくなるため。
+- **確認方法（実機で10分）**: Nexusのライブラリ設定でカスタム列の内部名を確認するか、
+  疎通が通っている状態で `nexus_extra_fields` に1つずつ足して400にならない名前を
+  探す。判明した名前をこのメモに追記すること。
+- 越智さんの観察では、**Nexusの全文検索は本文だけでなくIndexのキーワードにも
+  ヒットしている**。SharePoint検索は管理プロパティも索引しているため矛盾しないが、
+  **Graph経由で同じ挙動になるかは実機の突き合わせで確認する必要がある。**
+
+### 3-1c. Nexus専用タブ構成 — 検討中（Phase 2.5）
+
+越智さんのご要望：**SharePointとNexusでファイル構成が異なるため、タブで画面を
+切り替える構成にし、Nexusタブでは上記7列を標準Indexとして表示したい。**
+
+現状は「系統をラジオボタンで選び、結果は共通の1つの表に出す」構成で、列定義
+（`COLUMNS`）も全系統共通。タブ化すると系統ごとに列を変えられる一方、
+絞り込み・並べ替え・選択状態・Excel出力・状態復元がすべて列定義に紐づいて
+いるため、**影響範囲は画面側の広範囲に及ぶ。**
+設計案（A/B/C）は S02 の報告で越智さんへ提示した。**承認待ち・未着手。**
+
 ### 3-2. SharePoint REST を直接叩いてはいけない理由
 
 - `RenderListDataAsStream` は `nexperia.sharepoint.com/_api/...` を叩く
@@ -115,7 +177,7 @@
   I/Fだけを満たせば、Nexus / Enovia を後から足せる。
 - `0. All` は薄い並列実行層（`ThreadPoolExecutor`）。**部分成功方式**で、
   1系統が落ちても他系統の結果は必ず返す。系統ごとに 🟢/🟡/🔴/⚪ を表示する。
-- 未実装の系統は**黙って0件を返さず**、「Phase 2で実装予定」と明示する。
+- 未実装の系統は**黙って0件を返さず**、「Phase 3で実装予定」と明示する。
 
 ### 4-2. パスの扱い
 
@@ -216,7 +278,7 @@ batやショートカットから起動するとパスがずれる。この弱�
 
 ```
 cd document_search_manager
-python tests/run_tests.py              # ネットワーク不要。268項目
+python tests/run_tests.py              # ネットワーク不要。320項目
 python tests/ui_check.py               # ブラウザ操作テスト（Playwright必要・任意）
 python tests/ui_check.py --shot ui.png # 画面のスクリーンショットを保存
 ```

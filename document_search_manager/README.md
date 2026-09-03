@@ -4,12 +4,12 @@
 
 | 選択肢 | 対象 | 状態 |
 |---|---|---|
-| `0. All` | 有効な全系統を並列検索（既定） | ✅ 稼働（現在はSharePointのみ） |
+| `0. All` | 有効な全系統を並列検索（既定） | ✅ 稼働（SharePoint ＋ Nexus） |
 | `1. SharePoint` | 社内SharePoint全社横断検索 | ✅ **Phase 1で実装済み** |
-| `2. Nexus` | Shareflex品質文書サイト（SF_QualityDocumentsProd） | ⏳ Phase 2で実装予定 |
+| `2. Nexus` | Shareflex品質文書サイト（SF_QualityDocumentsProd） | ✅ **Phase 2で実装済み** |
 | `3. Enovia` | 3DEXPERIENCE / ENOVIA | ⏳ Phase 3で実装予定 |
 
-未実装の系統は、UI上に「Phase 2で実装予定」と明示されます（黙って0件を返しません）。
+未実装の系統は、UI上に「Phase 3で実装予定」と明示されます（黙って0件を返しません）。
 
 ## 必要要件
 
@@ -48,7 +48,7 @@
 3. 起動する。`run_document_search_manager.bat` をダブルクリックするか、次を実行する。
 
    ```
-   python document_search_manager_20260903_08.py
+   python document_search_manager_20260903_09.py
    ```
 
    初回はターミナルにDevice Code Flowの認証コード（URLとコード）が表示されるので、
@@ -122,7 +122,7 @@
 | 🟢 | 検索成功（1件以上ヒット） |
 | 🟡 | 検索は成功したが0件 |
 | 🔴 | エラー（メッセージに理由を表示） |
-| ⚪ | 未実装（Phase 2 / Phase 3で実装予定） |
+| ⚪ | 未実装（Phase 3で実装予定） |
 
 1つの系統がエラーになっても、他の系統の結果は必ず表示されます（部分成功方式）。
 
@@ -186,8 +186,10 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 | `search_fields` | 7項目 | Graph Searchに要求する検索マネージドプロパティ。無効な名前があれば自動でfields無しに切り替わる |
 | `hard_max_results` | `500` | 取得件数の上限 |
 | `provider_timeout_sec` | `30` | 1系統あたりのタイムアウト秒数 |
-| `nexus_site_url` / `nexus_folder_path` / `nexus_list_id` | Nexus用 | Phase 2で使用（Phase 1では未使用） |
-| `dedupe_nexus_from_sharepoint` | `false` | Nexusサイト配下の文書をSharePoint結果から除外するか。**Phase 2で `true` にする** |
+| `nexus_site_url` / `nexus_folder_path` | Nexus用 | この2つを組み合わせたURLを、Graph Search の KQL `path:` に渡して検索範囲をNexusに限定する |
+| `nexus_list_id` | Nexus用 | 実機調査で判明したShareflexのリストID。現在は記録用（Graph経由の検索では未使用） |
+| `nexus_extra_fields` | `[]` | Nexus検索のときだけ追加要求する検索マネージドプロパティ（Shareflex固有の列）。**テナントに存在しない名前を書くと検索がHTTP 400になる**ため、実機で確認できたものだけを足す |
+| `dedupe_nexus_from_sharepoint` | `true` | Nexusと同時に検索したときに、SharePoint側の重複行を除外するか。`1. SharePoint` 単独のときは（取りこぼしを防ぐため）除外しない |
 | `rewrite_host_to_mcas` | `false` | リンクを `.mcas.ms` 経由に書き換えるか |
 | `fallback_site_urls` | `[]` | 全社検索が使えない場合のサイト単位検索対象 |
 
@@ -212,14 +214,18 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 - 自分より新しいバージョンは移動しません（旧版を起動したときに最新版を
   退避させてしまわないため）。
 
-## 既知の制限（Phase 1のスコープ外）
+## 既知の制限（現時点のスコープ外）
 
-- Nexus検索・Enovia検索は未実装（Phase 2 / Phase 3）。
+- Enovia検索は未実装（Phase 3）。
 - 検索結果に**本文スニペットは含めない**（一覧表示までが今回のスコープ）。
-- **Document Number 列は表示していません。** Enovia でのみ必要な項目のため、
-  Phase 3 で復活させる予定です（データ自体は内部で保持しています）。
-- Document Number 列は、SharePoint全社検索では通常空になります
-  （Nexus固有のカスタム列のため）。Phase 2のNexus検索で埋まる想定です。
+- **Document Number 列は表示していません**（データ自体は内部で保持しています）。
+  Nexus固有のメタデータ（Document Number / OldSystemIdentifier / Doc Owner /
+  Applicable To / Department 等）をどう見せるかは、**表示方式を検討中**です。
+- **Nexus固有の列が Graph の `fields` で取得できるかは未確認**です。
+  取得できるマネージドプロパティ名が分かった時点で `nexus_extra_fields` に
+  設定してください（未確認の名前を入れると検索がHTTP 400になります）。
+- **Nexus検索の結果がNexus画面と一致するかは、実機での突き合わせが必要**です
+  （参照インデックスは同じですが、ランキングや対象範囲がずれる可能性があります）。
 - 検索結果のランキングはGraphの返却順に従う。SharePoint画面の並び順とは
   一致しない場合がある。
 
@@ -230,7 +236,7 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 - **`tests/`** … 検証ハーネス（ネットワーク不要）。
 
   ```
-  python tests/run_tests.py     # 268項目の自動検証
+  python tests/run_tests.py     # 320項目の自動検証
   python tests/ui_check.py      # ブラウザ操作テスト（Playwright必要・任意）
   ```
 
@@ -244,6 +250,7 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 | Phase | 内容 | 状態 |
 |---|---|---|
 | Phase 1 | SharePoint全社検索 MVP | ✅ 完了（v20260903_08、実機動作確認済み） |
-| Phase 2 | Nexus検索追加（Graph Searchを `nexus_folder_path` に限定）＋重複排除の有効化 | 未着手 |
+| Phase 2 | Nexus検索追加（Graph Searchを `nexus_folder_path` に限定）＋重複排除の有効化 | ✅ 実装完了（v20260903_09、**実機での突き合わせ待ち**） |
+| Phase 2.5 | Nexus専用タブと標準Index列の表示（設計検討中） | 検討中 |
 | Phase 3 | Enovia検索追加（実装方式は調査後に確定） | 未着手 |
 | Phase 4 | 3系統統合の磨き込み（名寄せ・検索履歴・お気に入り） | 未着手 |
