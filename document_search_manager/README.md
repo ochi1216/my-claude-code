@@ -223,6 +223,22 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 - 検索結果のランキングはGraphの返却順に従う。SharePoint画面の並び順とは
   一致しない場合がある。
 
+## 開発者向け
+
+- **`DESIGN_NOTES.md`** … 調査で判明した事実・設計判断の理由・既知の罠。
+  このツールを次に改修するときは**まずここを読む**。
+- **`tests/`** … 検証ハーネス（ネットワーク不要）。
+
+  ```
+  python tests/run_tests.py     # 268項目の自動検証
+  python tests/ui_check.py      # ブラウザ操作テスト（Playwright必要・任意）
+  ```
+
+  テストは**最新バージョンの本体を自動検出**するため、
+  バージョンを上げてもテスト側の修正は不要です。
+- **`.claude/skills/document-search-tool-dev/`**（リポジトリ直下）…
+  Claude Code でこのツールを改修するときの開発手順を定義したスキル。
+
 ## 開発計画（全体像）
 
 | Phase | 内容 | 状態 |

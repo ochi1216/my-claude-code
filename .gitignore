@@ -31,3 +31,4 @@ document_search_manager/cache/
 document_search_manager/exports/
 document_search_manager/downloads/
 document_search_manager/session_state.json
+document_search_manager/tests/__pycache__/
