@@ -7,3 +7,35 @@ venv/
 po_database_organizer/config.json
 po_database_organizer/token_cache.json
 po_database_organizer/cache/
+
+# Outlookオーガナイザー(振り返りタブ): 対象者ごとのゴール(KPI)定義。
+# Nexperiaのゴールシート由来の機密情報(氏名・KPI・数値目標)を含むため、リポジトリには含めない。
+outlook_total_organizer/json/review_person_goals.json
+
+# Outlookオーガナイザー: ローカル設定・実行時データ。
+# mail_manager_config.json には Gemini APIキーが平文で入る。analysis_cache/ と
+# json/ 配下の各種結果ファイルには実際のメール本文・取引先名・社内の議事内容が含まれるため、
+# リポジトリには絶対に含めない（ローカルフォルダをgit clone化する際の誤コミット防止）。
+outlook_total_organizer/json/
+outlook_total_organizer/analysis_cache/
+outlook_total_organizer/mail_reports/
+
+# analog_ic_se_strategy_organizer: 実行時に生成されるデータ・レポート。
+# 製品ケースライブラリ(product_lake)・インデックス・生成済みHTMLレポートが入る。
+analog_ic_se_strategy_organizer/data/
+
+# rtocs_organizer: 実行時データ（RTOCSのJSONレイク・生成レポート・カテゴリ対応表）。
+rtocs_organizer/data/
+
+# Gemini共通クライアントのフォールバック状態ファイル（直接呼び出し無効化の期限記録）
+.gemini_direct_disabled_until
+**/.gemini_direct_disabled_until
+
+# OneNote Report Generator のローカル設定・認証キャッシュ・生成物
+# bookmarks.jsonには実際のプロジェクト名・会議名・サイトIDが記録されるため、
+# 社内情報保護の観点からリポジトリには含めない（config.example.jsonのみコミット）。
+onenote_report_generator/config.json
+onenote_report_generator/token_cache.bin
+onenote_report_generator/bookmarks.json
+onenote_report_generator/bookmarks.json.bak
+onenote_report_generator/reports/*.html
