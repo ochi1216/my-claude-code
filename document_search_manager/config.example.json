@@ -53,6 +53,9 @@
   "_comment_nexus_resolve_people": "Doc Author / Doc Owner などの人物列は、Graphが数値ID（<列名>LookupId）でしか返さない。true にすると、サイトのユーザー情報リストを引いて氏名に直す。参照できない環境では列を空欄のままにする（数値をそのまま出さない）。",
   "nexus_resolve_people": true,
 
+  "_comment_expiry": "Nexusの有効期限(qmValidUntil)から「期限切れ / まもなく期限」を判定する。expiry_warn_days は、あと何日以内なら「まもなく期限」とみなすか。0にすると期限切れだけを表示する。判定はShareflexのステータス列ではなく日付から行う（qmStatusとqmStatusEnが食い違うことがあるため）。",
+  "expiry_warn_days": 60,
+
   "_comment_nexus_deeplink": "「Nexusで開く」リンクで使う列フィルタの内部列名。文書番号がある行は nexus_deeplink_field を、無い行は nexus_deeplink_title_field を使う。",
   "nexus_deeplink_field": "qmDocumentNo",
   "nexus_deeplink_title_field": "qmDocumentTitle",

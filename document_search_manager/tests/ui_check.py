@@ -101,6 +101,8 @@ def start_server():
             doc_type="docx", url="https://nexperia.sharepoint.com/sites/"
             "SF_QualityDocumentsProd/Documents/3E08-CD5F/a.docx",
             nexus_url="https://nexperia.sharepoint.com/x/View.aspx?q=NDS-00688",
+            valid_until="2020-01-31", expiry_state="expired",
+            doc_status="Expired", doc_status_en="Valid",
             is_nexus_path=True, rank=1),
         dsm.SearchResult(
             source="Nexus", document_number="NDS-00213", old_system_id="XTE-0061",
@@ -110,6 +112,7 @@ def start_server():
             doc_type="pdf", url="https://nexperia.sharepoint.com/sites/"
             "SF_QualityDocumentsProd/Documents/801F-6853/b.pdf",
             nexus_url="https://nexperia.sharepoint.com/x/View.aspx?q=NDS-00213",
+            valid_until="2099-12-31", expiry_state="valid",
             is_nexus_path=True, rank=2),
     ]
     manager.providers[dsm.TARGET_NEXUS].search = (
@@ -195,7 +198,7 @@ def main():
                                                "e => e.map(x => x.innerText.trim())")
         for label in ("Document Number", "OldSystemIdentifier", "Document Title",
                       "Doc Author", "Doc Owner", "Applicable To", "Department",
-                      "Nexusで開く"):
+                      "有効期限", "Nexusで開く"):
             check(f"Nexusタブに {label} 列がある",
                   any(h.startswith(label) for h in nx_headers), str(nx_headers))
         check("Nexusタブにフォルダ列を出さない",
@@ -208,6 +211,23 @@ def main():
         nexus_links = page.eval_on_selector_all(
             "#resultBody tr td a[href*='View.aspx']", "e => e.map(x => x.href)")
         check("Nexusで開くリンクが張られる", len(nexus_links) == 2, str(nexus_links))
+
+        # 有効期限の列とバッジ
+        expiry_index = [i for i, h in enumerate(nx_headers)
+                        if h.startswith("有効期限")][0] + 1
+        expiries = page.eval_on_selector_all(
+            f"#resultBody tr td:nth-child({expiry_index})",
+            "e => e.map(x => x.innerText)")
+        check("有効期限の日付が並ぶ",
+              expiries[0].startswith("2020-01-31")
+              and expiries[1].startswith("2099-12-31"), str(expiries))
+        check("期限切れの行にバッジが出る", "期限切れ" in expiries[0], str(expiries))
+        check("期限内の行にはバッジを出さない",
+              "期限切れ" not in expiries[1] and "まもなく" not in expiries[1],
+              str(expiries))
+        badges = page.eval_on_selector_all("#resultBody .badge.expired",
+                                           "e => e.length")
+        check("期限切れのバッジは1件だけ", badges == 1, str(badges))
         if shot_path:
             page.screenshot(path=shot_path.replace(".png", "_nexus.png"))
 

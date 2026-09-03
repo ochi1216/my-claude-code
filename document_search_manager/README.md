@@ -15,6 +15,11 @@
 検索します。オンのままのほうが目的の文書に辿り着きやすく、オフにすると
 件数が大きく増えます。
 
+Nexusタブには**有効期限**の列があり、期限を過ぎた標準書には **「期限切れ」**、
+60日以内に切れるものには **「まもなく」** のバッジが付きます。
+有効期限の列で「この日以前」に今日の日付を入れると、
+**期限切れの標準書だけを抽出**できます。
+
 画面は**系統ごとのタブ**になっており、**タブごとに表の列構成が切り替わります**。
 SharePointとNexusでは持っている情報が違うためです（Nexusの実体はShareflexで、
 フォルダ名が内部ハッシュになる一方、SharePointには無い標準Indexを持ちます）。
@@ -56,7 +61,7 @@ SharePointとNexusでは持っている情報が違うためです（Nexusの実
 3. 起動する。`run_document_search_manager.bat` をダブルクリックするか、次を実行する。
 
    ```
-   python document_search_manager_20260903_15.py
+   python document_search_manager_20260903_16.py
    ```
 
    初回はターミナルにDevice Code Flowの認証コード（URLとコード）が表示されるので、
@@ -199,6 +204,7 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 | `nexus_extra_fields` | `[]` | Nexus検索のときだけ追加要求する検索マネージドプロパティ（Shareflex固有の列）。**テナントに存在しない名前を書くと検索がHTTP 400になる**ため、実機で確認できたものだけを足す |
 | `title_only_default` / `title_field` | `true` / `title` | 「タイトルだけを検索する」の初期状態と、絞り込みに使う検索プロパティ名 |
 | `nexus_resolve_people` | `true` | 人物列の数値ID（`<列名>LookupId`）を氏名に解決するか |
+| `expiry_warn_days` | `60` | 有効期限のあと何日以内を「まもなく」と表示するか。0で期限切れのみ |
 | `nexus_view_url` | Nexus画面URL | 「Nexusで開く」リンクの土台。`&@qmDocumentNo=<文書番号>` を付けて1件に絞り込んだ状態で開く |
 | `nexus_deeplink_field` / `nexus_deeplink_title_field` | `qmDocumentNo` / `qmDocumentTitle` | 上記リンクで使う列フィルタの内部列名 |
 | `nexus_scope_mode` | `path` | Nexus検索の絞り込み方式（`path` / `site` / `none`）。画面の「Nexus検索診断」で実測して決める |
@@ -260,7 +266,7 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 - **`tests/`** … 検証ハーネス（ネットワーク不要）。
 
   ```
-  python tests/run_tests.py     # 528項目の自動検証
+  python tests/run_tests.py     # 570項目の自動検証
   python tests/ui_check.py      # ブラウザ操作テスト（Playwright必要・任意）
   ```
 

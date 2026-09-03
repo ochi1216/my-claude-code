@@ -296,6 +296,24 @@ https://nexperia.sharepoint.com/sites/SF_QualityDocumentsProd/SitePages/Sharefle
 **教訓**: URLの仕様は、**実際にそのURLを開いて**確かめるまで確定としない。
 「載らない」という否定の結論は、**操作の種類を変えて試すまで**出さない。
 
+### 3-1j. 有効期限は「日付から判定する」（ステータス列を信じない）
+
+Nexusの標準書は有効期限（`qmValidUntil`）を持ち、期限切れかどうかは業務上の
+重要情報。v16でNexusタブに列として追加した。
+
+**判定にShareflexのステータス列を使ってはいけない。**
+実機のNDS-00072は `qmStatus = Expired` と `qmStatusEn = Valid` が**食い違っていた**。
+どちらが正なのか外部からは判断できない。一方、`qmValidUntil = 2026-07-27` は
+明確で、実行日と比べれば誰でも同じ結論に至る。
+
+- **判定は日付で行い、画面には日付そのものを出す**（利用者が検算できる）。
+- Shareflex側の両ステータスは**捨てずにツールチップへ添える**。
+  情報を捨てると、後で「Nexusの表示と違う」と言われたときに追えなくなる。
+- 「まもなく期限」の日数は `expiry_warn_days`（既定60日）で変えられる。
+
+**一般則**: 出所の異なる2つの値が矛盾していたら、**どちらかを選ぶのではなく、
+自分で導出できる根拠（この場合は日付）に切り替え、元の値は参考として残す。**
+
 ### 3-1h. タイトルだけを検索する（既定オン）
 
 - 本文まで対象にすると、タイトルと無関係な文書まで大量に当たる
@@ -486,7 +504,7 @@ batやショートカットから起動するとパスがずれる。この弱�
 
 ```
 cd document_search_manager
-python tests/run_tests.py              # ネットワーク不要。528項目
+python tests/run_tests.py              # ネットワーク不要。570項目
 python tests/ui_check.py               # ブラウザ操作テスト（Playwright必要・任意）
 python tests/ui_check.py --shot ui.png # 画面のスクリーンショットを保存
 ```
