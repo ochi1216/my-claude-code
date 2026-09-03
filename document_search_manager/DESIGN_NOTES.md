@@ -523,9 +523,15 @@ python tests/ui_check.py --shot ui.png # 画面のスクリーンショットを
 - Graph の疎通（`search-api` モードで通るか）
 - 結果リンクが `.mcas.ms` 経由のブラウザで開けるか
   （開けない場合は `rewrite_host_to_mcas` を `true` にする）
-- **フォルダリンク（`Forms/AllItems.aspx?id=...`）が正しくフォルダを開くか** ← 未確認
-- **一括ダウンロード（`/shares/{token}/driveItem/content`）が成功するか** ← 未確認
-  失敗した場合はZIP内の `_ダウンロード失敗一覧.txt` に理由が記録される
+- フォルダリンク（`Forms/AllItems.aspx?id=...`）が正しくフォルダを開くか
+  ← **確認済み（2026-09-03）**
+- 一括ダウンロード（`/shares/{token}/driveItem/content`）が成功するか
+  ← **確認済み（2026-09-03）**。失敗した場合はZIP内の
+  `_ダウンロード失敗一覧.txt` に理由が記録される
+- Nexusタブの有効期限の表示と期限切れバッジ ← **確認済み（2026-09-03）**
+
+**SharePoint / Nexus 側に、実機未確認の項目は残っていない。**
+残るのは Enovia（3-3）のみ。
 
 ---
 

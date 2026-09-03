@@ -204,7 +204,10 @@ Flask画面（ダークテーマ bg `#1a1a2e` / accent `#e94560`）の構成:
 
 * **Phase 1（SharePoint全社検索）完了。会社PCで実動作を確認済み。**
 * **Phase 2（Nexus検索）＋ Phase 2.5（タブ構成・標準Index・有効期限）完了。**
-  会社PCで、件数の一致・Index 7列の表示・Nexus画面との突き合わせまで確認済み。
+  会社PCで、件数の一致・Index 7列の表示・Nexus画面との突き合わせ・
+  **有効期限の表示と期限切れバッジ**まで確認済み。
+* **Phase 1 から残っていた実機未確認2件（フォルダリンクの到達性、
+  一括ダウンロードの成否）も確認済み。未確認事項は無くなった。**
 * ブランチ: `claude/document-search-manager-phase2-nexus-d0tg0m`。
   コミット済み最新: `5cd128f`。本体は `_20260903_16.py`。
 * 検証: `python tests/run_tests.py` で **570項目すべて合格**。
@@ -213,11 +216,9 @@ Flask画面（ダークテーマ bg `#1a1a2e` / accent `#e94560`）の構成:
 
 ## 6. Open Items
 
-* **Phase 1 から残っている実機未確認（2件）**:
-  1. SharePointタブのフォルダリンク（`Forms/AllItems.aspx?id=...`）が
-     正しくフォルダを開くか
-  2. 一括ダウンロード（`/shares/{token}/driveItem/content`）が成功するか
-* **v20260903_16 の実機確認**: 有効期限の表示と期限切れバッジ（未確認）。
+* **SharePoint / Nexus 側に実機未確認の項目は残っていない。**
+  Phase 1 のフォルダリンク・一括ダウンロード、v20260903_16 の有効期限表示は
+  いずれも会社PCで確認済み（2026-09-03）。
 * Phase 3（Enovia）は**未確認事項が残る**。実装前に、Enoviaでの検索時の
   F12キャプチャ（Network → Fetch/XHR）を越智さんに依頼する必要がある。
   会社PCでPlaywrightが使えるかも未確認。
