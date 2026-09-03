@@ -13,6 +13,13 @@
   "page_size": 25,
   "_comment_max_results": "画面の件数プルダウンの初期選択値。開発段階は10件にしている。10/25/50/100/200/500 のいずれか。",
   "default_max_results": 10,
+
+  "_comment_state": "ツールを終了して再起動したとき、前回の検索キーワード・対象・件数・並び順・絞り込みを復元するか。復元時は結果が古くならないよう自動で再検索する。",
+  "restore_last_search": true,
+
+  "_comment_download": "一括ダウンロードの設定。max_download_files は1回の上限件数、download_timeout_sec は1ファイルあたりの待ち時間(秒)。",
+  "max_download_files": 50,
+  "download_timeout_sec": 120,
   "hard_max_results": 500,
   "request_timeout_sec": 30,
   "provider_timeout_sec": 30,

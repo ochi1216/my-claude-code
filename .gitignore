@@ -29,3 +29,5 @@ document_search_manager/config.json
 document_search_manager/token_cache.json
 document_search_manager/cache/
 document_search_manager/exports/
+document_search_manager/downloads/
+document_search_manager/session_state.json
