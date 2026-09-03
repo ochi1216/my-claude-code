@@ -14,7 +14,7 @@
 |---|---|---|
 | `0. All` | 有効な全系統を並列検索（既定） | 稼働中（SharePoint ＋ Nexus） |
 | `1. SharePoint` | 社内SharePoint全社横断検索 | **Phase 1 完了・実機稼働確認済み** |
-| `2. Nexus` | Shareflex品質文書サイト（SF_QualityDocumentsProd） | **実装済み・件数不一致を調査中（下記 3-1d）** |
+| `2. Nexus` | Shareflex品質文書サイト（SF_QualityDocumentsProd） | **実装済み・件数の一致を実測で確認済み** |
 | `3. Enovia` | 3DEXPERIENCE / ENOVIA（2017年版） | Phase 3（未着手） |
 
 ---
@@ -103,38 +103,50 @@
 - **認証を排他制御した**。2系統が別スレッドから同時にトークンを要求するように
   なったので、`token_cache.json` の書き込みが重ならないよう直列化した。
 
-### 3-1d. ★未解決★ Nexus画面と件数が合わない（14 vs 116）
+### 3-1d. ★解決済★ Nexus画面と件数が合わなかった件（14 vs 116）
 
-実機での突き合わせ結果（v20260903_09、キーワード `"validation plan"`）:
+**結論：ツールの実装は正しく、原因は入力の非対称だった。**
+ツール側にだけ引用符付き `"validation plan"` で入力されており、
+完全一致のフレーズ検索になっていた。Nexus画面側は引用符なし＝AND検索。
 
-| | 件数 |
+実機の「Nexus検索診断」の実測値（キーワード `validation plan`）:
+
+| 方式 | Graphが返した該当件数 |
 |---|---|
-| Nexus画面 Full text search | **116 件**（ライブラリ全体は 3,027 件） |
-| 本ツール `2. Nexus` | **14 件** |
+| ① `path:"<Documentsフォルダ>"`（現行方式） | **117 件** |
+| ② `SPSiteURL:"<Nexusサイト>"` | 297 件 |
+| ③ 絞り込みなし（全社） | 126,090 件 |
+| ④ `"validation plan"`（引用符あり）＋ ① | **14 件** |
 
-**まだ原因は特定できていない。** 推測で直すと当てずっぽうになるため、
-v20260903_10 で **「Nexus検索診断」** を実装した。同じキーワードを
-4通りのKQLで実際に投げ、Graphが返す該当件数(`total`)を並べて表示する。
+- **① 117件 ≒ Nexus画面 116件。**参照インデックスが同一という前提どおりで、
+  **`path:` によるフォルダ限定が正しい絞り込み方式**であることが実測で確定した。
+- ② のサイト単位（297件）は広すぎる。Nexusサイトには `Documents` 以外にも
+  文書が存在する。
+- ④ が越智さんの見た14件。**引用符の有無だけで 117 → 14 に減る。**
 
-1. `<kw> path:"<Documentsフォルダ>"` … 現行方式
-2. `<kw> SPSiteURL:"<Nexusサイト>"` … サイト単位で限定
-3. `<kw>` … 限定なし（全社）
-4. 引用符の有無を変えたもの
+**教訓（同種の突き合わせで必ず効く）:**
 
-**現時点で有力な仮説（いずれも未検証）:**
+- **件数が合わないときは、まず両者の入力条件が本当に同じかを疑う。**
+  実装を触る前に、条件を揃えて測り直す。
+- **推測で直さず、複数方式を実際に投げて件数を並べる。**
+  この診断（`/api/nexus_diag`）を作ったことで、1クリック・数秒で確定した。
+  仮説を3つ立てて順に試すより速く、しかも証拠が残る。
+- ツールは引用符を勝手に外さない（利用者の意図を尊重する）。
+  代わりに、引用符が含まれるときは「完全一致になる／件数が大きく減る」旨を
+  ログで警告する。
 
-- **入力の非対称**: ツール側には `"validation plan"` と**引用符付き**で入力されて
-  いた（＝完全一致のフレーズ検索）。Nexus画面側は `Validation plan` で、
-  SharePointは既定で AND 検索になる。この差だけで大きく件数が変わり得る。
-  → **同じ条件で測り直すことが先決。**
-- **`path:` の効き方**: KQLの `path:` はフォルダURLの前方一致で効くはずだが、
-  効き方が想定と違う可能性がある。② のサイト単位限定と比較すれば分かる。
-- **Graphのページング**: `moreResultsAvailable=false` で14件で打ち切られていた。
-  `total` が116なのに14件しか返らないなら、Graph側の挙動の問題になる。
-  診断で `total` と取得件数の両方を出しているのはこれを見分けるため。
+### 3-1f. ★重要★ 並列実行のタイムアウトで全体を失敗にしてはいけない
 
-**次にやること**: 実機で「Nexus検索診断」を実行し、結果に応じて
-`nexus_scope_mode` を変えるか、KQLの組み立てを直す。
+- v10 で `❌ 検索でエラーが発生しました: 1 (of 1) futures unfinished` が発生し、
+  **HTTP 500 で検索結果が丸ごと失われた**（実機で検出）。
+- 原因は `as_completed(..., timeout=...)` の `TimeoutError` を捕まえていなかったこと。
+  Index取得（1件につき1リクエスト）を足したことで、上位100件の検索が
+  既定の30秒を超えるようになり表面化した。
+- **このツールの設計原則は「部分成功方式」**（4-1）。待ち合わせの例外を素通しすると
+  この原則が崩れる。**タイムアウトは必ず捕まえ、間に合った系統の結果は返す。**
+  間に合わなかった系統は 🔴 と理由を表示する（黙って隠さない）。
+- 重い処理を足したら、**既定のタイムアウトが足りているかを必ず見直す**
+  （`provider_timeout_sec` を 30 → 180 秒にした）。
 
 ### 3-1b. Nexus固有の列（標準Index）— 取得方式（v10で確定）
 
@@ -163,6 +175,34 @@ GET /shares/{share_token}/driveItem?$expand=listItem($expand=fields)
 **却下した方式**: Graph Search の `fields` に管理プロパティ名を並べて要求する
 （v09 の `nexus_extra_fields`）。テナントごとに名前が違って当てられず、
 外すと検索全体が HTTP 400 になる。保険として残してあるが、主たる方式ではない。
+
+#### 実機で確定した内部列名（Nexperiaテナント）
+
+Shareflexは画面のラベルとは別に `qm*` / `nx*` の独自接頭辞を使う。
+**名前からは推測できなかった。** 実機のログで実在を確認して確定させたもの:
+
+| 画面のラベル | 内部名 |
+|---|---|
+| Document Number | `qmDocumentNo` |
+| OldSystemIdentifier | `nxOldDocumentNo` |
+| Document Title | `qmDocumentTitle` |
+| Document Type | `qmDocumentType` |
+| Applicable To | `nxApplicable` |
+| Department | `nxFunctionalOrg` |
+| Top Level Process | `qmProcess1` |
+| **Doc Author / Doc Owner** | **未確定** |
+
+その他に存在する列（今は未使用だが、後で効いてくる可能性がある）:
+`qmStatus` / `qmStatusEn`（文書ステータス）、`qmValidFrom` / `qmValidUntil`（有効期限）、
+`qmRevisionNo` / `qmRevisionReason`、`qmApprover` / `qmConfirmerLookupId`、
+`nxDocReviewer` / `nxFunctionalOrg`、`qmProcess1`、`qmConfidentialLevel`。
+
+**人物列の罠**: Graph は人物列を `<列名>LookupId`（数値ID）でしか返さないことがある
+（`qmEditorLookupId` = 27 など）。**数値をそのまま画面に出してはいけない。**
+数値だけの場合は採用せず空欄にする（誤った値より空欄のほうが誠実）。
+Doc Author / Doc Owner が未確定なのはこのため。特定するには、
+Nexusタブで検索したときにコンソールへ出る**「列名 = 値」の一覧**を、
+Nexus画面の同じ文書の行と突き合わせる。
 - 越智さんの観察では、**Nexusの全文検索は本文だけでなくIndexのキーワードにも
   ヒットしている**。SharePoint検索は管理プロパティも索引しているため矛盾しないが、
   **Graph経由で同じ挙動になるかは実機の突き合わせで確認する必要がある。**
@@ -345,7 +385,7 @@ batやショートカットから起動するとパスがずれる。この弱�
 
 ```
 cd document_search_manager
-python tests/run_tests.py              # ネットワーク不要。413項目
+python tests/run_tests.py              # ネットワーク不要。442項目
 python tests/ui_check.py               # ブラウザ操作テスト（Playwright必要・任意）
 python tests/ui_check.py --shot ui.png # 画面のスクリーンショットを保存
 ```

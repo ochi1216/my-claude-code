@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _harness import dsm, DummyAuth  # noqa: E402
+from _harness import dsm, DummyAuth, DSM_FILENAME  # noqa: E402
 
 import json
 
@@ -243,7 +243,9 @@ dsm._manager = mgr
 client = dsm.flask_app.test_client()
 html = client.get("/").get_data(as_text=True)
 
-check("版数表示が v20260903_10", "v20260903_10 (Phase 2.5" in html)
+# 版数は本体のファイル名から導く（版を上げるたびにテストを直さずに済む）
+VERSION = DSM_FILENAME.replace("document_search_manager_", "").replace(".py", "")
+check(f"版数表示が v{VERSION} (Phase 2.5)", f"v{VERSION} (Phase 2.5" in html, VERSION)
 for target in ("all", "sharepoint", "nexus", "enovia"):
     check(f"{target} タブがある", f'data-target="{target}"' in html)
 check("既定は All タブ", 'class="on" data-target="all"' in html)

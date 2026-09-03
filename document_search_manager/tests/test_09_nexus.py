@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _harness import dsm, DummyAuth  # noqa: E402
+from _harness import dsm, DummyAuth, DSM_FILENAME  # noqa: E402
 
 import json
 
@@ -274,7 +274,8 @@ print("\n[N9] 画面表示")
 dsm._cfg = CFG
 dsm._manager = mgr
 html = dsm.flask_app.test_client().get("/").get_data(as_text=True)
-check("版数表示が v20260903_10 (Phase 2.5)", "v20260903_10 (Phase 2.5" in html)
+VERSION = DSM_FILENAME.replace("document_search_manager_", "").replace(".py", "")
+check(f"版数表示が v{VERSION}", f"v{VERSION} (" in html, VERSION)
 # v10 でラジオボタンからタブに変更した
 check("Nexusタブがある", 'data-target="nexus"' in html)
 check("除外件数を画面に出す仕組みが残っている", "excluded_nexus" in html)

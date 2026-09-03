@@ -27,7 +27,7 @@
   "download_timeout_sec": 120,
   "hard_max_results": 500,
   "request_timeout_sec": 30,
-  "provider_timeout_sec": 30,
+  "provider_timeout_sec": 180,
 
   "_comment_search_fields": "Graph Searchに要求する検索マネージドプロパティ。listItemは既定でタイトルを返さないため明示要求する。テナントに存在しない名前を指定するとHTTP 400になるが、その場合は自動的にfields無しで再試行しURLからファイル名を補完する。",
   "search_fields": ["title", "filename", "fileExtension", "path", "author", "lastModifiedTime", "siteTitle"],
@@ -47,10 +47,10 @@
 
   "_comment_nexus_index": "Nexusの標準Index（Document Number / OldSystemIdentifier / Doc Author / Doc Owner / Applicable To / Department 等）を取得するか。Graphの /shares/{token}/driveItem?$expand=listItem($expand=fields) でリスト項目そのものを読むため、検索マネージドプロパティ名を推測せずに済む。1件につき1リクエスト増えるので、nexus_enrich_max で上限を、nexus_enrich_workers で並列数を決める。",
   "nexus_enrich_metadata": true,
-  "nexus_enrich_max": 200,
+  "nexus_enrich_max": 100,
   "nexus_enrich_workers": 6,
 
-  "_comment_nexus_field_map": "列名の自動判別が外れた場合に、内部名を明示指定する。例: {\"department\": \"Owning Dept\"}。起動後の検索で、実在する列名の一覧がコンソールに1度だけ出力されるので、それを見て設定する。",
+  "_comment_nexus_field_map": "列名の自動判別が外れた場合に、内部名を明示指定する。例: {\"doc_author\": \"qmEditor\"}。実機で判明したNexperiaテナントの内部名（qmDocumentNo / nxOldDocumentNo / qmDocumentTitle / nxApplicable / nxFunctionalOrg / qmProcess1 / qmDocumentType）は既定で対応済み。Doc Author / Doc Owner に対応する内部名だけ未確定。起動後にNexusタブで検索すると、実在する列名と値の一覧がコンソールに1度だけ出力されるので、Nexus画面と突き合わせて設定する。",
   "nexus_field_map": {},
 
   "_comment_nexus_extra_fields": "Nexus検索のときだけ追加で要求する検索マネージドプロパティ（Shareflex固有の列: Document Number / Department / Top Level Process / Document Status / Expiry Date など）。テナントに存在しない名前を書くと検索がHTTP 400になるため、実機で存在を確認できたものだけを足すこと。400になった場合は、まずこの追加分だけを落として再試行する（標準のsearch_fieldsは巻き添えにしない）。既定は空。",
