@@ -102,6 +102,110 @@ CLAUDE.md, docs/PROJECT_STATUS.md, docs/SESSION_HISTORY.md, docs/NEXT_TASK.md �
 
 ---
 
+# Document Search Manager 開発
+
+## Session Management
+
+* Project Name: Document Search Manager 開発
+* Previous Session: S01 - Phase 1 SharePoint全社検索の実装と開発資産の整備
+* Next Session Number: S02
+* Recommended Session Title: Document Search Manager 開発 S02 - Phase 2 Nexus検索の追加
+
+## Objective
+
+* **Nexus（Shareflex / SF_QualityDocumentsProd）検索を実装し、`2. Nexus` と
+  `0. All` から利用できるようにする。**
+* あわせて、SharePoint全社検索とNexusで同じ文書が二重表示される問題を解消する。
+
+## Background
+
+* Phase 1（SharePoint全社検索）は完了し、会社PCで実動作を確認済み。
+  最新リビジョンは `document_search_manager/document_search_manager_20260903_08.py`
+  （コミット `c8e4de4`）。
+* **着手前に必ず `document_search_manager/DESIGN_NOTES.md` を読むこと。**
+  調査で判明した事実・設計判断の理由・既知の罠が集約されている。
+  スキル `document-search-tool-dev` も参照する（開発手順・報告の作法）。
+* **Nexus実装の設計は既に確定している**（`DESIGN_NOTES.md` 3-1）:
+  * Nexusの「Full text search」は SharePoint標準の `RenderListDataAsStream` ＋
+    **`InplaceSearchQuery`** で実装されており、**SharePoint検索インデックス**を参照している。
+    → Graph Search で等価な結果を取得できる見込みが高い。
+  * 実装は `POST /search/query` に、検索範囲をNexusに限定したKQLを渡す:
+    ```
+    <キーワード> path:"https://nexperia.sharepoint.com/sites/SF_QualityDocumentsProd/Documents"
+    ```
+  * **使用スコープは `Sites.Read.All` のままで、新規のEntra ID権限申請は不要。**
+  * SharePoint REST の直接呼び出しは、MCASのセッション認証（`McasUserAuth`）の再現が
+    必要かつ権限追加を伴うため**採用しない**。
+* 関連する設定値は `config.json` に用意済み:
+  `nexus_site_url` / `nexus_folder_path` / `nexus_list_id` /
+  `dedupe_nexus_from_sharepoint`。
+
+## Scope
+
+### Files That May Be Changed
+
+* `document_search_manager/` 配下（新バージョンファイル
+  `document_search_manager_20260904_NN.py` として追加。既存版は `old/` へ移動）
+* `document_search_manager/CHANGELOG.md`（新バージョンのエントリ追加）
+* `document_search_manager/README.md` / `DESIGN_NOTES.md`（仕様変更に応じて更新）
+* `document_search_manager/config.example.json`（設定項目の追加時）
+* `document_search_manager/tests/`（Nexus用の検証を追加）
+* `document_search_manager/run_document_search_manager.bat`（呼び出し先の更新）
+
+### Files That Must Not Be Changed
+
+* `outlook_total_organizer/` 配下一式
+* `onenote_report_generator/` 配下一式
+* `po_database_organizer/` 配下一式（`config.json` は**読み取りのみ**。書き換え禁止）
+* `rtocs_organizer/` / `shareflex_dashboard/` / `rss_organizer/` 配下一式
+* 各種 `*_translator` / `excel_translation` 配下一式
+* `document_search_manager/old/` 配下の全リビジョン（削除・上書き禁止）
+
+## Task
+
+1. `DESIGN_NOTES.md` とスキル `document-search-tool-dev` を読む。
+2. `NexusProvider` を実装する（`SearchProvider` を継承し `probe()` / `search()` のみ）。
+   * `SharePointProvider` の Graph 呼び出し・パーサを再利用する形が望ましい。
+   * Shareflexの列（Document Number / Department / Top Level Process /
+     Document Status / Expiry Date 等）が `fields` から取得できるかを確認する。
+     取得できる場合、Nexus固有のメタデータをどう表示するかは越智さんに確認する
+     （現在 Document Number 列は非表示にしている）。
+3. `dedupe_nexus_from_sharepoint` を `true` にし、SharePoint全社検索側から
+   Nexusサイト配下の文書を除外する（除外件数は画面に明示する）。
+4. 検証ハーネスにNexus用の項目を追加し、`python tests/run_tests.py` を全項目通す。
+5. CHANGELOG・README・DESIGN_NOTES を更新し、越智さんへ納品する。
+6. **受入テスト（実機・越智さんに依頼）**: キーワード `validation` で、
+   Nexus画面とツールの**件数・上位ヒットを突き合わせる**。
+   一致しない場合は保険案（`&q=` のディープリンク生成方式）へ切り替える。
+7. コミット・Pushは越智さんの明示的な指示があった場合のみ。
+
+## Completion Criteria
+
+* `2. Nexus` 単独と `0. All` の両方でNexus文書が検索でき、画面に表示されること。
+* SharePoint全社検索との重複が除外され、除外件数が画面に明示されること。
+* `python tests/run_tests.py` が全項目合格すること。
+* CHANGELOG に新バージョンのエントリが追加されていること。
+* 越智さんの実機で、キーワード `validation` での突き合わせが完了していること。
+
+## Required Tests
+
+* `python -m py_compile document_search_manager/document_search_manager_YYYYMMDD_NN.py`
+* `python tests/run_tests.py`（既存268項目＋Nexus用の追加項目）
+* `python tests/ui_check.py`（画面を変更した場合）
+* 実機: 疎通診断でNexusが 🟢 になること、`validation` での件数突き合わせ
+
+## Known Risks
+
+* **Shareflexの全文検索とGraph Searchで結果が一致しない可能性。**
+  参照インデックスは同一と判明しているが、ランキングや対象範囲（ビューのフィルタ等）
+  の違いで件数がずれることはあり得る。突き合わせは必須。
+* Nexusサイトは `.mcas.ms` プロキシ配下にあるため、結果リンクがブラウザで
+  開けない可能性がある（`rewrite_host_to_mcas` で対処）。
+* Phase 1 で未確認のまま残っている2件（フォルダリンクの到達性、一括ダウンロードの
+  成否）は、Nexusでも同様に影響する。S02の実機確認時にあわせて確認するとよい。
+
+---
+
 # OneNote オーガナイザー開発
 
 ## Project Name

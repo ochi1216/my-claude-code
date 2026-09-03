@@ -3,6 +3,13 @@
 セッション終了処理（ユーザーが明示的に指示した場合）のたびに、完了した
 セッションを1件だけ追記する。同一セッション内の途中経過は記録しない。
 
+> このリポジトリは複数プロジェクトを1つのリポジトリで管理しているため、
+> プロジェクトごとに節を分けて記載する。セッション番号もプロジェクトごとに数える。
+
+---
+
+# Outlook オーガナイザー開発
+
 ## Session Index
 
 | Session | Title | Date | Status | Main Files |
@@ -302,3 +309,103 @@
   2. ユーザー承認後、コミット・Push（本セッションの慣例により、明示的な指示があるまで実施しない）。
   3. 以降は未確定（ユーザーからの次のタスク指示を受ける）。
 * 次回の推奨タイトル: `Outlook オーガナイザー開発 S06 - 振り返りタブ手動追加日付バグ修正の完了と後続対応`
+
+
+---
+
+# Document Search Manager 開発
+
+## Session Index
+
+| Session | Title | Date | Status | Main Files |
+| ------- | ----- | ---- | ------ | ---------- |
+| S01 | Document Search Manager 開発 S01 - Phase 1 SharePoint全社検索の実装と開発資産の整備 | 2026-09-03 | 完了 | document_search_manager/document_search_manager_20260903_08.py, document_search_manager/DESIGN_NOTES.md, document_search_manager/tests/ 一式, document_search_manager/README.md, document_search_manager/CHANGELOG.md, .claude/skills/document-search-tool-dev/SKILL.md, docs/PROJECT_STATUS.md, docs/SESSION_HISTORY.md, docs/NEXT_TASK.md |
+
+## S01 - Phase 1 SharePoint全社検索の実装と開発資産の整備
+
+### Purpose
+
+* 社内の3つのドキュメント管理系（SharePoint / Nexus / Enovia）を同一キーワードで
+  横断検索するツールを新規開発する。段階開発とし、本セッションでは
+  **Phase 1（SharePoint全社検索）** を完成させる。
+* あわせて、Phase 2以降で再利用できるよう、調査知見と検証資産を整備する。
+
+### Work Completed
+
+1. **Phase 1 設計提案 → Phase 2 設計監査 → Phase 3 実装**の3フェーズで進行。
+   越智さんの承認を得てから実装に着手した。
+2. 調査（越智さんの会社PCでのF12キャプチャ提供による）:
+   * Nexus（Shareflex）の全文検索が SharePoint標準の `RenderListDataAsStream` ＋
+     **`InplaceSearchQuery`** で実装されており、**SharePoint検索インデックス**を
+     参照していることを確認。Phase 2 は Graph Search で等価に実現できる見込みが立った。
+   * 同リクエストに MCAS が `McasUserAuth` 等を注入していることを確認。
+     SharePoint REST の直接呼び出しは非現実的かつ権限追加が必要なため却下した。
+3. 実装（`_20260903_01` 〜 `_08` の8リビジョン）:
+   * `_01`: Graph Search API による全社横断検索、Flask画面、Excel/CSV出力、疎通診断、
+     プロバイダ抽象と並列実行（部分成功方式）
+   * `_02`: 実機起動時の2件の不具合修正（batの文字化け、認証情報の流用元不足）
+   * `_03`: タイトル・種別が全件空になる不具合の修正、件数選択肢の追加
+   * `_04`: タイトル＝ファイルリンク、右端＝サイトリンクへのリンク配置変更
+   * `_05`: 列ごとのソート、複数選択フィルタ、日付範囲フィルタ、一括ZIPダウンロード、
+     作業状態の保持、旧バージョンの `old/` 自動退避
+   * `_06`: フォルダ列の追加、フォルダの区別（案A）、Document Number 列の削除
+   * `_07`: 拡張子誤認識の修正、フォルダ表示の短縮、OneDrive対応
+   * `_08`: Excel出力のハイパーリンク化、件数表記の明確化
+4. 開発資産の整備（`c8e4de4`）: 検証ハーネスのリポジトリ移設、`DESIGN_NOTES.md` の作成、
+   開発手順のスキル化。
+
+### Files Changed
+
+* 新規: `document_search_manager/` 一式（本体8リビジョン、README、CHANGELOG、
+  DESIGN_NOTES、config.example.json、requirements.txt、起動バッチ、tests/ 一式）
+* 新規: `.claude/skills/document-search-tool-dev/SKILL.md`
+* 変更: `.gitignore`（config.json / token_cache.json / session_state.json /
+  cache/ / exports/ / downloads/ / tests/__pycache__ を除外）
+* 変更: リポジトリ直下 `README.md`（本ツールの節を追加）
+
+### Decisions
+
+* **新規のEntra ID権限を申請しない**（越智さんの明確な指示）。既存アプリ登録を流用し
+  `Sites.Read.All` のみで実装する。実機で `POST /search/query` が通ることを確認できたため、
+  当初の最大リスクは解消した。
+* **フォルダを除外せず「種別=フォルダ」として区別する（案A）。** フォルダ名にのみ
+  キーワードが一致するケースを取りこぼさないため（越智さんの指摘により方針変更）。
+* **フォルダ表示は既定ライブラリ名を `/` に短縮する。** 単純削除では直下の場合に
+  空欄となり情報欠落と区別できないため（越智さんの指摘）。
+* **拡張子判定を「英字始まり1〜10文字の英数字」に限定する。** 社内の
+  `12. Validation` / `MRA2.0` のような命名規則との衝突を避けるため。
+* **旧バージョンはリポジトリ側でも `old/` に置く。** ローカルの自動退避と構成を
+  一致させないと `git pull` で旧版が復活して重複するため。
+* **検証ハーネスはリポジトリ内に置く。** 一時領域にあるとセッション終了で失われるため。
+  最新バージョンを自動検出する設計とし、版を上げてもテスト修正が不要にした。
+
+### Tests
+
+* `python tests/run_tests.py`: **268項目すべて合格**（ネットワーク・Graph API 非依存）。
+  内訳: 検索の中核56 / 設定9 / fields27 / サイトリンク26 / 状態と一括DL42 /
+  フォルダ41 / 拡張子とパス37 / Excel出力30。
+* `python tests/ui_check.py`（Playwright）: **14項目すべて合格**。
+  ソート、複数選択フィルタ、日付範囲、選択、再読み込み後の状態復元を実操作で確認。
+* 検証中に**実バグを5件検出し修正**した:
+  1. 未実装系統の単独指定がエラー扱いになる
+  2. 絞り込みパネルがチェックのたびに閉じて複数選択できない
+  3. 絞り込みパネルが横スクロール領域に切り取られ画面外にはみ出す
+  4. 一括ダウンロードで対象未指定のときに全件が取得される
+  5. （実機報告由来）拡張子の誤認識により番号付きフォルダがファイル扱いになる
+* 会社PCでの実機確認: Graph疎通（`search-api` モード）、キーワード `validation` での
+  検索、タイトル・種別・フォルダ列の表示までを越智さんに確認いただいた。
+
+### Open Items
+
+* **実機でのみ確認可能な未確認事項（2件）**:
+  1. フォルダリンク（`Forms/AllItems.aspx?id=...`）が正しくフォルダを開くか。
+     開かない場合は素のフォルダURL形式へ切り替える。
+  2. 一括ダウンロード（`/shares/{token}/driveItem/content`）が成功するか。
+     失敗時はZIP内の `_ダウンロード失敗一覧.txt` に理由が記録される。
+* Phase 3（Enovia）の実装方式は未確定。F12キャプチャの取得が必要。
+  会社PCでPlaywrightが使えるかも未確認。
+
+### Next Session
+
+* 次の作業: **Phase 2（Nexus検索の追加）**。設計は確定済み（`DESIGN_NOTES.md` 3-1）。
+* 次回の推奨タイトル: `Document Search Manager 開発 S02 - Phase 2 Nexus検索の追加`

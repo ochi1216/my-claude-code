@@ -114,6 +114,99 @@
 
 ---
 
+# Document Search Manager 開発
+
+## 1. Project Overview
+
+* プロジェクト名: Document Search Manager 開発
+* プロジェクトの目的: 社内の3つのドキュメント管理系（SharePoint / Nexus(Shareflex) /
+  Enovia(3DEXPERIENCE)）を、**同一キーワードで横断検索**するツール
+  (`document_search_manager/`) の開発。検索対象は `0. All`（既定）/ `1. SharePoint` /
+  `2. Nexus` / `3. Enovia` から選択する。
+* 主な利用者: 越智さん本人（Japan Site Manager）。必要な社内文書がどこにあるか
+  分からず、3系統を個別に探し回っている状況の解消が動機。
+* 実行環境: 会社PC（Windows）＋ Python。`http://127.0.0.1:5020` のFlask画面。
+  開発・検証環境（Claude Code Web、Linuxコンテナ）では会社のSharePointに
+  アクセスできないため、Graph API疎通・リンク到達性・一括ダウンロードの実動作は
+  毎回越智さんに実機確認を依頼している。
+
+## 2. Repository Structure
+
+* `document_search_manager/`
+  * **最新リビジョン: `document_search_manager_20260903_08.py`**（約1,700行）
+  * `old/`: 旧リビジョン `_20260903_01.py` 〜 `_20260903_07.py`（削除せず保持）。
+    ツール起動時に自分より古い版を自動でここへ退避する。リポジトリ側の構成も
+    一致させてあるため `git pull` で旧版が復活して重複することはない。
+  * `README.md`: 利用者向け（導入手順・画面の使い方・設定項目・トラブルシュート）
+  * `CHANGELOG.md`: 変更履歴（`## VERSION 20260903_01`〜`_08`）
+  * **`DESIGN_NOTES.md`**: 設計メモ・調査記録。**次に改修するときは最初にここを読む**
+  * `config.example.json` / `requirements.txt` / `run_document_search_manager.bat`
+  * `tests/`: 検証ハーネス（268項目）＋ `ui_check.py`（ブラウザ操作14項目）
+* `.claude/skills/document-search-tool-dev/SKILL.md`: このツールの開発手順スキル
+
+## 3. Current Functions
+
+Flask画面（ダークテーマ bg `#1a1a2e` / accent `#e94560`）の構成:
+
+1. **検索**: キーワード入力、検索対象の選択（0.All/1.SharePoint/2.Nexus/3.Enovia）、
+   取得件数（関連度上位 10/25/50/100/200/500 件、既定10件）
+2. **疎通診断**: 各系統が利用可能かを最小リクエスト1回で確認。
+   SharePointは `search-api`（全社横断）/ `site-drive`（サイト単位）を自動判定する
+3. **結果一覧**（列: ソース / タイトル / 選択 / 作成者 / 最終更新日 / 種別 / サイト /
+   フォルダ）
+   * タイトル＝ファイルへの直接リンク、サイト＝保管先サイト、フォルダ＝保管フォルダ
+   * 列見出しクリックで昇順→降順→解除のソート
+   * 見出しの「⋮」で列ごとの絞り込み。最終更新日は日付範囲（以降/以前）、
+     それ以外はチェックボックスの複数選択
+   * 選択チェックボックスで複数ファイルの一括ZIPダウンロード
+4. **出力**: Excel（タイトル/サイト/フォルダのセル自体がハイパーリンク、
+   オートフィルタ付き）/ CSV（URLを列として保持）。画面の絞り込み・並び順を反映する
+5. **状態の保持**: 終了・再起動しても、前回の検索キーワード・対象・件数・並び順・
+   絞り込み条件を復元する（結果は保存せず自動で再検索する）
+
+## 4. Confirmed Specifications
+
+* **新規のEntra ID権限を申請しない**（越智さんの明確な指示）。既存の
+  `po_database_organizer` と同一アプリ登録を流用し、スコープは `Sites.Read.All` のみ。
+  **`POST /search/query`（entityTypes: listItem）がこのスコープだけで通ることを
+  実機で確認済み。**
+* `tenant_id` / `client_id` は `config.json` が空なら既存ツールから自動借用する
+  （探索順: `po_database_organizer` → `onenote_report_generator`、
+  `credentials_from` で任意パス指定も可）。越智さんの環境では
+  `C:\Users\nx023836\Documents\PythonScripts\SharePoint\PO_Matrix_manager\config.json`
+  を `credentials_from` で参照している。
+* **検索結果のフォルダは除外せず「種別=フォルダ」として区別する**（案A）。
+  フォルダ名にキーワードが含まれる一方で中のファイルには含まれないケースでは、
+  フォルダの存在そのものが情報になるため。
+* **フォルダ列は `Shared Documents` などの既定ライブラリ名を `/` に短縮**して表示する。
+  単純削除では直下の場合に空欄となり情報欠落と区別できないため。
+* 拡張子とみなす条件は「英字で始まる1〜10文字の英数字」（例外 `7z`）。
+  社内の `12. Validation` / `MRA2.0` のような命名を誤判定しないため。
+* Document Number 列は表示しない（Enoviaでのみ必要。Phase 3 で復活させる）。
+* 維持すべき方針: 旧バージョンを削除しない／認証・検索ロジックに不用意に触らない／
+  コミット・Pushは明示的な指示があったときのみ。
+
+## 5. Current Status
+
+* **Phase 1（SharePoint全社検索）完了。会社PCで実動作を確認済み。**
+* コミット済み最新: `c8e4de4`（開発資産の整備）。本体は `_20260903_08.py`。
+* 検証: `python tests/run_tests.py` で **268項目すべて合格**。
+  `tests/ui_check.py`（Playwright）で **14項目すべて合格**。
+* **実機でのみ確認可能な未確認事項が2件残っている**:
+  1. フォルダリンク（`Forms/AllItems.aspx?id=...`）が正しくフォルダを開くか
+  2. 一括ダウンロード（`/shares/{token}/driveItem/content`）が成功するか
+* 未着手: Phase 2（Nexus）、Phase 3（Enovia）、Phase 4（3系統統合の磨き込み）
+
+## 6. Open Items
+
+* Phase 2（Nexus）は**設計が確定済み**（`DESIGN_NOTES.md` 3-1参照）。
+  Graph Search を `nexus_folder_path` に限定するだけで新規権限は不要。
+* Phase 3（Enovia）は**未確認事項が残る**。実装前に、Enoviaでの検索時の
+  F12キャプチャ（Network → Fetch/XHR）を越智さんに依頼する必要がある。
+  会社PCでPlaywrightが使えるかも未確認。
+
+---
+
 # OneNote オーガナイザー開発
 
 最終更新：S01（2026-07-24）
