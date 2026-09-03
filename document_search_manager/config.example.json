@@ -11,10 +11,14 @@
   "auto_open_browser": true,
 
   "page_size": 25,
-  "default_max_results": 100,
+  "_comment_max_results": "画面の件数プルダウンの初期選択値。開発段階は10件にしている。10/25/50/100/200/500 のいずれか。",
+  "default_max_results": 10,
   "hard_max_results": 500,
   "request_timeout_sec": 30,
   "provider_timeout_sec": 30,
+
+  "_comment_search_fields": "Graph Searchに要求する検索マネージドプロパティ。listItemは既定でタイトルを返さないため明示要求する。テナントに存在しない名前を指定するとHTTP 400になるが、その場合は自動的にfields無しで再試行しURLからファイル名を補完する。",
+  "search_fields": ["title", "filename", "fileExtension", "path", "author", "lastModifiedTime", "siteTitle"],
 
   "sharepoint_host": "nexperia.sharepoint.com",
 

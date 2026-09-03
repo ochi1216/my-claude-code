@@ -48,7 +48,7 @@
 3. 起動する。`run_document_search_manager.bat` をダブルクリックするか、次を実行する。
 
    ```
-   python document_search_manager_20260903_02.py
+   python document_search_manager_20260903_03.py
    ```
 
    初回はターミナルにDevice Code Flowの認証コード（URLとコード）が表示されるので、
@@ -63,7 +63,9 @@
 
 - **検索欄**にキーワードを入力し、Enter または「検索」ボタン。
 - **検索対象**を `0. All` 〜 `3. Enovia` から選択（既定は `0. All`）。
-- **取得件数**は上位 50 / 100 / 200 / 500 件から選択（既定100件）。
+- **取得件数**は上位 10 / 25 / 50 / 100 / 200 / 500 件から選択。
+  初期選択値は `config.json` の `default_max_results` で決まります
+  （`config.example.json` の既定は開発段階向けに **10件**。運用時は100等に変更してください）。
   無制限取得は行いません（体感速度を優先しているため）。
 - **疎通診断**ボタンで、各系統が利用可能かを確認できます。
 - **Excel出力 / CSV出力**で結果を `exports/` フォルダに保存します。
@@ -131,7 +133,8 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 | `credentials_from` | 空 | 流用元の `config.json` をフルパスで明示指定（最優先で参照） |
 | `graph_scopes` | `["...Sites.Read.All"]` | 要求スコープ。**変更すると新規権限申請が必要になるため、原則変更しない** |
 | `flask_port` | `5020` | 画面のポート（既存ツールの5000/5010と衝突しない値） |
-| `default_max_results` | `100` | 既定の取得件数 |
+| `default_max_results` | `10` | 件数プルダウンの初期選択値（10/25/50/100/200/500） |
+| `search_fields` | 7項目 | Graph Searchに要求する検索マネージドプロパティ。無効な名前があれば自動でfields無しに切り替わる |
 | `hard_max_results` | `500` | 取得件数の上限 |
 | `provider_timeout_sec` | `30` | 1系統あたりのタイムアウト秒数 |
 | `nexus_site_url` / `nexus_folder_path` / `nexus_list_id` | Nexus用 | Phase 2で使用（Phase 1では未使用） |
@@ -153,8 +156,8 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 
 - Nexus検索・Enovia検索は未実装（Phase 2 / Phase 3）。
 - 検索結果に**本文スニペットは含めない**（一覧表示までが今回のスコープ）。
-- Graph `/search/query` が `Sites.Read.All` で通るかは、会社PCでの実機確認が必要
-  （通らない場合はサイト単位検索へ自動フォールバックする）。
+- Document Number 列は、SharePoint全社検索では通常空になります
+  （Nexus固有のカスタム列のため）。Phase 2のNexus検索で埋まる想定です。
 - 検索結果のランキングはGraphの返却順に従う。SharePoint画面の並び順とは
   一致しない場合がある。
 
@@ -162,7 +165,7 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 
 | Phase | 内容 | 状態 |
 |---|---|---|
-| Phase 1 | SharePoint全社検索 MVP | ✅ 完了（v20260903_02） |
+| Phase 1 | SharePoint全社検索 MVP | ✅ 完了（v20260903_03、実機動作確認済み） |
 | Phase 2 | Nexus検索追加（Graph Searchを `nexus_folder_path` に限定）＋重複排除の有効化 | 未着手 |
 | Phase 3 | Enovia検索追加（実装方式は調査後に確定） | 未着手 |
 | Phase 4 | 3系統統合の磨き込み（名寄せ・検索履歴・お気に入り） | 未着手 |
