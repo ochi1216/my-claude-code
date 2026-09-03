@@ -190,12 +190,19 @@ Shareflexは画面のラベルとは別に `qm*` / `nx*` の独自接頭辞を�
 | Applicable To | `nxApplicable` |
 | Department | `nxFunctionalOrg` |
 | Top Level Process | `qmProcess1` |
-| **Doc Author / Doc Owner** | **未確定** |
+| Doc Author | `qmEditor` |
+| Doc Owner | `qmConfirmer` |
 
 その他に存在する列（今は未使用だが、後で効いてくる可能性がある）:
 `qmStatus` / `qmStatusEn`（文書ステータス）、`qmValidFrom` / `qmValidUntil`（有効期限）、
 `qmRevisionNo` / `qmRevisionReason`、`qmApprover` / `qmConfirmerLookupId`、
 `nxDocReviewer` / `nxFunctionalOrg`、`qmProcess1`、`qmConfidentialLevel`。
+
+**確定は実機の「Nexus列診断」で行った**（NDS-00072 / FMEA の全列を出力し、
+Nexus画面の同じ行と突き合わせ）。Doc Author = Maik Jörn Teschner、
+Doc Owner = Ansgar Thorns が一致することを確認済み。
+この列データは `tests/test_13_people_concurrency.py` に取り込んであるので、
+対応づけが崩れたらテストで落ちる。
 
 #### ★重要★ 人物列の罠（Doc Author / Doc Owner）
 
@@ -213,6 +220,14 @@ Graph は人物列を `<列名>LookupId`（数値ID）でしか返さない（`q
 `GET /sites/{siteId}/lists/User Information List/items/{id}?$expand=fields` で引き、
 `qmEditorLookupId = 27` から `qmEditor = "David Chen"` という列を作ってから
 対応づける。同じ人は引き直さない。参照できない環境では**空欄のままにする**。
+
+**その後の発見（v15）**: **Shareflexの人物列は、氏名そのものも一緒に返ってくる。**
+`qmEditor = "Maik Jörn Teschner"` と `qmEditorLookupId = 325` の両方が来る。
+つまり**この環境では引き当て自体が不要だった**（しかもユーザー情報リストは
+HTTP 404 で参照できない）。氏名が既にある列は引き当てに行かないようにした。
+残してあるのは、氏名が返らない列への保険。
+**教訓**: 「取れないはずだ」と決める前に、**返ってきているデータを全部見る。**
+列診断で全列を一覧にして初めて `qmEditor` が入っていることに気づいた。
 
 **あわせて、値の出所を常に見えるようにした。** 画面のラベルと内部名の対応は
 名前からは決められないため、各セルにマウスを載せると
@@ -471,7 +486,7 @@ batやショートカットから起動するとパスがずれる。この弱�
 
 ```
 cd document_search_manager
-python tests/run_tests.py              # ネットワーク不要。515項目
+python tests/run_tests.py              # ネットワーク不要。528項目
 python tests/ui_check.py               # ブラウザ操作テスト（Playwright必要・任意）
 python tests/ui_check.py --shot ui.png # 画面のスクリーンショットを保存
 ```

@@ -1,5 +1,70 @@
 # Document Search Manager — CHANGELOG
 
+## VERSION 20260903_15
+
+実機の「Nexus列診断」の結果を反映。Doc Author / Doc Owner の対応づけが
+正しいことをNexus画面との突き合わせで確認し、無駄な通信を取り除いた。
+
+### 確定した事実（実機の列診断より）
+
+- **Doc Author / Doc Owner の対応づけは正しかった。** NDS-00072（FMEA）で
+  Nexus画面と一致することを確認した。
+
+  | 画面のラベル | 内部列 | 値（NDS-00072） |
+  |---|---|---|
+  | Doc Author | `qmEditor` | Maik Jörn Teschner |
+  | Doc Owner | `qmConfirmer` | Ansgar Thorns |
+
+- **Shareflexの人物列は、氏名そのものも一緒に返ってくる。**
+  `qmEditor = Maik Jörn Teschner` と `qmEditorLookupId = 325` の両方が返る。
+  つまり **ユーザー情報リストを引く必要は無かった。**
+- ユーザー情報リストの参照は、この環境では **HTTP 404** で使えない。
+  ただし上記のとおり、人物列の表示には影響しない。
+
+### 変更
+
+- **氏名が既に取れている列は、引き当てに行かないようにした。**
+  `qmEditorLookupId` に対して `qmEditor` が既にあるなら、そちらを使う。
+  無駄な通信が減り、**「ユーザー情報リストの参照が HTTP 404」という
+  誤解を招く警告も出なくなる**（人物列は正しく表示されているのに、
+  何か失敗しているように見えていた）。
+  氏名が返ってこない列については、従来どおり引き当てを試みる。
+- **確定した対応づけを候補一覧の先頭に固定した。**
+  Doc Owner の第一候補を `qmConfirmer` にした（従来は存在しない
+  `qmOwner` を先に探していた）。
+
+### 変更しないこと（宣誓）
+
+- 認証方式・要求スコープ（`Sites.Read.All`）は変更していない。
+- v14 で入れた並行処理の修正（引き当ての直列化）はそのまま維持している。
+- Nexus検索のKQL・タブ構成・列構成・タイトル限定検索・
+  「Nexusで開く」リンク・Excel/CSV出力には手を入れていない。
+- 旧バージョン `_20260903_14.py` は削除せず `old/` へ移動して保持する。
+
+### 検証結果
+
+- `python -m py_compile document_search_manager_20260903_15.py`: 合格。
+- **実機の列データ（NDS-00072 / FMEA の全列）を検証に取り込み、
+  対応づけを固定した**（13項目を追加）。
+  - Doc Author が `qmEditor` であること（作成者 `Author` を使わないこと）
+  - Doc Owner が `qmConfirmer` であること（`qmReviewer` を使わないこと）
+  - Document Title が `qmDocumentTitle`（`Title` より優先）であること
+  - 氏名が既にある列で引き当てに行かないこと、無い列では従来どおり引くこと
+- 常に真になってしまう検証を1件見つけたので、実効性のある条件に書き直した。
+- **既存の検証ハーネスを再実行: 累計528項目すべて合格。**
+- `python tests/ui_check.py`（Playwright / Chromium）: 29項目すべて合格。
+
+### 参考：Nexusが持っているその他の列（今は未使用）
+
+必要になったら列に足せる。内部名は実機で確認済み。
+
+- `qmStatusEn`（文書ステータス。例: Valid）／`qmStatus`（例: Expired）
+- `qmValidFrom` / `qmValidUntil`（有効期間。例: 2026-07-27）
+- `qmRevisionNo`（版数）／`qmRevisionChange`（改訂理由）
+- `qmReviewer`（レビュー担当。例: QM Doc Control）
+- `qmProcess1`（Top Level Process。例: Product Creation）
+- `qmConfidentialLevel` / `qmContentType` / `qmRecordNo`
+
 ## VERSION 20260903_14
 
 Doc Author / Doc Owner が「入る行と入らない行がある」原因を特定して修正した。

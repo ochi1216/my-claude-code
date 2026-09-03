@@ -211,5 +211,99 @@ check("列診断APIは空キーワードを400",
 html = client.get("/").get_data(as_text=True)
 check("画面に列診断ボタンがある", 'id="btnNexusFields"' in html)
 
+# ── C5 実機の列データでの対応づけ（NDS-00072 / FMEA） ────────
+# 越智さんの実機の「Nexus列診断」で得られた本物の列と値。
+# Nexus画面と突き合わせて Doc Author = Maik Jörn Teschner /
+# Doc Owner = Ansgar Thorns であることを確認済み。対応づけを固定する。
+print("\n[C5] 実機の列データでの対応づけ")
+REAL_FMEA = {
+    "Author": "viktor dierenfeld",
+    "AuthorLookupId": 17,
+    "AppEditorLookupId": 3,
+    "EditorLookupId": 1073741822,
+    "Title": "FMEA",
+    "FileLeafRef": "FMEA.docx",
+    "nxApplicable": "Quality; BG ICS; BG MOS Discretes; BG WIM; BG Bipolar Discretes",
+    "nxFunctionalOrg": "BG WIM",
+    "nxOldDocumentNo": "XPR-0151",
+    "qmConfirmer": "Ansgar Thorns",
+    "qmConfirmerLookupId": 132,
+    "qmDocumentNo": "NDS-00072",
+    "qmDocumentTitle": "FMEA",
+    "qmDocumentType": "Process Description",
+    "qmEditor": "Maik Jörn Teschner",
+    "qmEditorLookupId": 325,
+    "qmProcess1": "Product Creation",
+    "qmReviewer": "QM Doc Control",
+    "qmStatusEn": "Valid",
+    "qmValidUntil": "2026-07-27T12:00:00Z",
+}
+picked, sources = dsm._pick_nexus_fields(REAL_FMEA, CFG)
+check("Doc Author は qmEditor", picked.get("doc_author") == "Maik Jörn Teschner",
+      picked.get("doc_author"))
+check("Doc Owner は qmConfirmer", picked.get("doc_owner") == "Ansgar Thorns",
+      picked.get("doc_owner"))
+check("Doc Author に作成者(Author)を使わない",
+      sources.get("doc_author") == "qmEditor", str(sources))
+check("Doc Owner に qmReviewer を使わない",
+      sources.get("doc_owner") == "qmConfirmer", str(sources))
+check("Document Number は qmDocumentNo", picked.get("document_number") == "NDS-00072")
+check("OldSystemIdentifier は nxOldDocumentNo",
+      picked.get("old_system_id") == "XPR-0151")
+check("Document Title は qmDocumentTitle（Title より優先）",
+      sources.get("title") == "qmDocumentTitle", str(sources))
+check("Applicable To は nxApplicable",
+      picked.get("applicable_to", "").startswith("Quality; BG ICS"),
+      picked.get("applicable_to"))
+check("Department は nxFunctionalOrg", picked.get("department") == "BG WIM")
+
+# ── C6 氏名が既に入っている列は引き当てに行かない ────────────
+print("\n[C6] 氏名が取れている列は引き当てを省く")
+nx5 = dsm.NexusProvider(CFG, DummyAuth())
+nx5._people_cache = {}
+nx5._people_lock = threading.Lock()
+nx5._people_disabled = False
+nx5._people_note = ""
+
+visited = []
+
+
+def counting_get(url, headers=None, params=None, timeout=None):
+    visited.append(url)
+    return slow_get(url, headers, params, timeout)
+
+
+dsm.http_req.get = counting_get
+try:
+    f = dict(REAL_FMEA)
+    nx5._resolve_people("tok", f)
+finally:
+    dsm.http_req.get = orig_get
+
+user_calls = [u for u in visited if "/items/" in u]
+check("qmEditor / qmConfirmer は引き当てに行かない（氏名が既にある）",
+      all("/items/325" not in u and "/items/132" not in u for u in user_calls),
+      str(user_calls))
+check("氏名が残る", f["qmEditor"] == "Maik Jörn Teschner"
+      and f["qmConfirmer"] == "Ansgar Thorns")
+check("氏名が既にある列ぶんの通信が減る",
+      len(user_calls) < len([k for k in REAL_FMEA if str(k).endswith("LookupId")]),
+      f"{len(user_calls)} 回")
+
+# 氏名が無い列は従来どおり引き当てる
+nx6 = dsm.NexusProvider(CFG, DummyAuth())
+nx6._people_cache = {}
+nx6._people_lock = threading.Lock()
+nx6._people_disabled = False
+nx6._people_note = ""
+dsm.http_req.get = slow_get
+try:
+    f2 = {"qmEditorLookupId": 27}
+    nx6._resolve_people("tok", f2)
+finally:
+    dsm.http_req.get = orig_get
+check("氏名が無い列は従来どおり引き当てる",
+      f2.get("qmEditor") == "Maik Jorn Teschner", str(f2))
+
 print(f"\n{'=' * 46}\n  成功 {ok} 件 / 失敗 {ng} 件\n{'=' * 46}")
 sys.exit(1 if ng else 0)

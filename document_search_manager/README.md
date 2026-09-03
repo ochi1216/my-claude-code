@@ -56,7 +56,7 @@ SharePointとNexusでは持っている情報が違うためです（Nexusの実
 3. 起動する。`run_document_search_manager.bat` をダブルクリックするか、次を実行する。
 
    ```
-   python document_search_manager_20260903_14.py
+   python document_search_manager_20260903_15.py
    ```
 
    初回はターミナルにDevice Code Flowの認証コード（URLとコード）が表示されるので、
@@ -237,16 +237,12 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 - **Nexusの標準Indexは Nexusタブでのみ表示**します（SharePointには無い列のため）。
   列名の自動判別が外れた場合は、起動後の検索でコンソールに出る実在の列名を見て
   `nexus_field_map` に設定してください。
-- **Doc Author / Doc Owner の内部列名は確定していません。**
-  他の5列（Document Number / OldSystemIdentifier / Document Title /
-  Applicable To / Department）は実機で確定済みです。
-  **各セルにマウスを載せると「どの内部列から採った値か」が表示される**ので、
-  Nexus画面と突き合わせて確認し、違っていれば `nexus_field_map` で修正できます。
+- **Index 7列の対応づけは実機で確定済み**です（Nexus画面と突き合わせて一致を確認）。
+  `qmDocumentNo` / `nxOldDocumentNo` / `qmDocumentTitle` / `qmEditor`(Doc Author) /
+  `qmConfirmer`(Doc Owner) / `nxApplicable` / `nxFunctionalOrg`。
+  **各セルにマウスを載せると「どの内部列から採った値か」が表示されます。**
   **「Nexus列診断」ボタン**を押すと、先頭1件についてNexusが持っている
   全ての列と値、および対応づけが実行ログに出ます。
-- **人物列は Graph が数値IDでしか返しません。**サイトの
-  「User Information List」を引いて氏名に直していますが、参照できない
-  テナント設定では空欄のままになります（理由は画面に表示されます）。
 - **「Nexusで開く」は、その1件だけに絞り込んだ状態でNexusを開きます。**
   Document Number の列フィルタ（`@qmDocumentNo=`）を使っています。
   全文検索ではありません（全文検索だと、他の文書の本文に参照文献として
@@ -264,7 +260,7 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 - **`tests/`** … 検証ハーネス（ネットワーク不要）。
 
   ```
-  python tests/run_tests.py     # 515項目の自動検証
+  python tests/run_tests.py     # 528項目の自動検証
   python tests/ui_check.py      # ブラウザ操作テスト（Playwright必要・任意）
   ```
 
@@ -279,6 +275,6 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 |---|---|---|
 | Phase 1 | SharePoint全社検索 MVP | ✅ 完了（v20260903_08、実機動作確認済み） |
 | Phase 2 | Nexus検索追加（Graph Searchを `nexus_folder_path` に限定）＋重複排除の有効化 | ✅ 完了（件数はNexus画面と一致することを実測で確認） |
-| Phase 2.5 | 系統別タブ＋Nexus標準Index＋人物列の解決＋タイトル限定検索＋Nexusリンク | ✅ 実装完了（v20260903_14、Doc Author/Owner の対応のみ実機確認待ち） |
+| Phase 2.5 | 系統別タブ＋Nexus標準Index＋タイトル限定検索＋Nexusリンク | ✅ 完了（v20260903_15、実機で対応づけの一致まで確認済み） |
 | Phase 3 | Enovia検索追加（実装方式は調査後に確定） | 未着手 |
 | Phase 4 | 3系統統合の磨き込み（名寄せ・検索履歴・お気に入り） | 未着手 |
