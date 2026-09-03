@@ -46,6 +46,13 @@
   "nexus_scope_mode": "path",
 
   "_comment_nexus_index": "Nexusの標準Index（Document Number / OldSystemIdentifier / Doc Author / Doc Owner / Applicable To / Department 等）を取得するか。Graphの /shares/{token}/driveItem?$expand=listItem($expand=fields) でリスト項目そのものを読むため、検索マネージドプロパティ名を推測せずに済む。1件につき1リクエスト増えるので、nexus_enrich_max で上限を、nexus_enrich_workers で並列数を決める。",
+  "_comment_title_only": "「タイトルだけを検索する」の初期状態。本文まで検索すると件数が大きく増えるため、既定はオン。title_field は絞り込みに使う検索マネージドプロパティ名で、通常は title のままでよい。",
+  "title_only_default": true,
+  "title_field": "title",
+
+  "_comment_nexus_resolve_people": "Doc Author / Doc Owner などの人物列は、Graphが数値ID（<列名>LookupId）でしか返さない。true にすると、サイトのユーザー情報リストを引いて氏名に直す。参照できない環境では列を空欄のままにする（数値をそのまま出さない）。",
+  "nexus_resolve_people": true,
+
   "nexus_enrich_metadata": true,
   "nexus_enrich_max": 100,
   "nexus_enrich_workers": 6,

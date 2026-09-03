@@ -83,7 +83,7 @@ REAL = {
     "Title": "a",
     "FileLeafRef": "a.docx",
 }
-picked = dsm._pick_nexus_fields(REAL, CFG)
+picked, sources = dsm._pick_nexus_fields(REAL, CFG)
 check("qmDocumentNo → Document Number", picked.get("document_number") == "NDS-00688",
       json.dumps(picked, ensure_ascii=False))
 check("nxOldDocumentNo → OldSystemIdentifier", picked.get("old_system_id") == "XPR-0367")
@@ -98,22 +98,31 @@ check("qmDocumentType → Document Type", picked.get("document_type") == "Proces
 print("\n[T3] 人物列が数値IDでしか返らない場合の扱い")
 only_ids = {"qmEditorLookupId": 27, "AuthorLookupId": "31",
             "qmConfirmerLookupId": 44}
-picked_ids = dsm._pick_nexus_fields(only_ids, CFG)
+picked_ids, _s = dsm._pick_nexus_fields(only_ids, CFG)
 check("LookupIdの数値は Doc Author に採用しない",
       "doc_author" not in picked_ids, json.dumps(picked_ids, ensure_ascii=False))
 check("LookupIdの数値は Doc Owner に採用しない", "doc_owner" not in picked_ids)
 
 named = {"qmEditorLookupId": 27, "qmEditor": {"LookupValue": "David Chen"},
          "qmApprover": "Rob Geljon"}
-picked_named = dsm._pick_nexus_fields(named, CFG)
+picked_named, _s2 = dsm._pick_nexus_fields(named, CFG)
 check("名前が取れる列があればそちらを使う",
       picked_named.get("doc_author") == "David Chen",
       json.dumps(picked_named, ensure_ascii=False))
 check("Doc Owner も名前が取れれば使う", picked_named.get("doc_owner") == "Rob Geljon")
 
-check("LookupIdでも数値でなければ採用する",
-      dsm._pick_nexus_fields({"qmEditorLookupId": "David Chen"}, CFG)
-      .get("doc_author") == "David Chen")
+# v12: 人物列は _resolve_people が <列名>LookupId → <列名> に直したうえで
+# 対応づける。氏名が直接入っていた場合も同じ経路で拾えることを確認する。
+nx_resolve = dsm.NexusProvider(CFG, DummyAuth())
+direct = {"qmEditorLookupId": "David Chen", "qmOwnerLookupId": ["Rob Geljon"]}
+nx_resolve._resolve_people("tok", direct)
+check("数値でないLookupIdの値は、そのまま素直な列名へ引き継ぐ",
+      direct.get("qmEditor") == "David Chen", str(direct))
+check("配列でも引き継ぐ", direct.get("qmOwner") == "Rob Geljon", str(direct))
+check("引き継いだ値がIndex列に載る",
+      dsm._pick_nexus_fields(direct, CFG)[0].get("doc_author") == "David Chen")
+check("qmDocumentNo から採ったことを記録する",
+      sources.get("document_number") == "qmDocumentNo", str(sources))
 
 # ── T4 Index取得は Nexusタブのときだけ ───────────────────────
 print("\n[T4] Index取得は「2. Nexus」タブのときだけ行う")

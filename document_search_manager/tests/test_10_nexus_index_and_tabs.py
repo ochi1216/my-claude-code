@@ -64,7 +64,8 @@ FIELDS = {
     "TopLevelProcess": "Plan",
     "FileLeafRef": "a.docx",
 }
-picked = dsm._pick_nexus_fields(FIELDS, CFG)
+# v12: (値の辞書, 出所の辞書) を返すようになった（値の出どころを画面に出すため）
+picked, sources = dsm._pick_nexus_fields(FIELDS, CFG)
 check("Document Number（_x0020_表記）", picked.get("document_number") == "NDS-00688",
       json.dumps(picked, ensure_ascii=False))
 check("OldSystemIdentifier", picked.get("old_system_id") == "XPR-0367")
@@ -76,10 +77,13 @@ check("Applicable To（配列）", picked.get("applicable_to") == "Global Supply
 check("Department", picked.get("department") == "Global Supply Chain")
 check("Top Level Process", picked.get("top_level_process") == "Plan")
 check("該当しない列は拾わない", "nonsense" not in picked)
-check("fieldsが辞書でなくても落ちない", dsm._pick_nexus_fields(None, CFG) == {})
+check("fieldsが辞書でなくても落ちない", dsm._pick_nexus_fields(None, CFG) == ({}, {}))
+check("どの内部列から採ったかを返す",
+      sources.get("document_number") == "Document_x0020_Number",
+      json.dumps(sources, ensure_ascii=False))
 
 cfg_map = dict(CFG, nexus_field_map={"department": "Owning Dept"})
-picked2 = dsm._pick_nexus_fields({"Owning Dept": "JP Site", "Department": "X"}, cfg_map)
+picked2, _src2 = dsm._pick_nexus_fields({"Owning Dept": "JP Site", "Department": "X"}, cfg_map)
 check("nexus_field_map の指定を最優先する", picked2.get("department") == "JP Site",
       json.dumps(picked2, ensure_ascii=False))
 
@@ -127,15 +131,19 @@ def diag_stub(token, query_string, frm, size):
 nx_diag = dsm.NexusProvider(CFG, DummyAuth())
 nx_diag._call_search_api = diag_stub
 rows = nx_diag.diagnose("validation plan")
-check("4方式ぶんを返す", len(rows) == 4, str(len(rows)))
+# v12: 「タイトルのみ」の件数も比較できるよう5方式にした
+check("5方式ぶんを返す", len(rows) == 5, str(len(rows)))
 check("① はフォルダ限定", 'path:"' in rows[0]["query"], rows[0]["query"])
 check("② はサイト限定", "SPSiteURL:" in rows[1]["query"], rows[1]["query"])
 check("③ は限定なし", rows[2]["query"] == "validation plan", rows[2]["query"])
 check("④ は完全一致（引用符あり）", '"validation plan"' in rows[3]["query"],
       rows[3]["query"])
+check("⑤ はタイトルのみ",
+      "title:validation" in rows[4]["query"] and "title:plan" in rows[4]["query"],
+      rows[4]["query"])
 check("該当件数(total)を持ち帰る", all(r.get("total") == 116 for r in rows),
       json.dumps(rows, ensure_ascii=False)[:200])
-check("実際に投げたKQLが4本", len(asked) == 4, str(len(asked)))
+check("実際に投げたKQLが5本", len(asked) == 5, str(len(asked)))
 
 rows_q = dsm.NexusProvider(CFG, DummyAuth())
 rows_q._call_search_api = diag_stub
@@ -278,7 +286,7 @@ diag_provider._call_search_api = diag_stub
 mgr.providers[dsm.TARGET_NEXUS] = diag_provider
 resp = client.post("/api/nexus_diag", json={"keyword": "validation plan"})
 check("診断APIが200", resp.status_code == 200, str(resp.status_code))
-check("診断APIが4方式を返す", len(resp.get_json()["rows"]) == 4)
+check("診断APIが5方式を返す", len(resp.get_json()["rows"]) == 5)
 check("診断APIは空キーワードを400", 
       client.post("/api/nexus_diag", json={"keyword": ""}).status_code == 400)
 

@@ -11,6 +11,10 @@
 
 未実装の系統は、UI上に「Phase 3で実装予定」と明示されます（黙って0件を返しません）。
 
+**「タイトルだけを検索する」**（既定オン）をオフにすると、文書の本文まで
+検索します。オンのままのほうが目的の文書に辿り着きやすく、オフにすると
+件数が大きく増えます。
+
 画面は**系統ごとのタブ**になっており、**タブごとに表の列構成が切り替わります**。
 SharePointとNexusでは持っている情報が違うためです（Nexusの実体はShareflexで、
 フォルダ名が内部ハッシュになる一方、SharePointには無い標準Indexを持ちます）。
@@ -52,7 +56,7 @@ SharePointとNexusでは持っている情報が違うためです（Nexusの実
 3. 起動する。`run_document_search_manager.bat` をダブルクリックするか、次を実行する。
 
    ```
-   python document_search_manager_20260903_11.py
+   python document_search_manager_20260903_12.py
    ```
 
    初回はターミナルにDevice Code Flowの認証コード（URLとコード）が表示されるので、
@@ -193,6 +197,8 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 | `nexus_site_url` / `nexus_folder_path` | Nexus用 | この2つを組み合わせたURLを、Graph Search の KQL `path:` に渡して検索範囲をNexusに限定する |
 | `nexus_list_id` | Nexus用 | 実機調査で判明したShareflexのリストID。現在は記録用（Graph経由の検索では未使用） |
 | `nexus_extra_fields` | `[]` | Nexus検索のときだけ追加要求する検索マネージドプロパティ（Shareflex固有の列）。**テナントに存在しない名前を書くと検索がHTTP 400になる**ため、実機で確認できたものだけを足す |
+| `title_only_default` / `title_field` | `true` / `title` | 「タイトルだけを検索する」の初期状態と、絞り込みに使う検索プロパティ名 |
+| `nexus_resolve_people` | `true` | 人物列の数値ID（`<列名>LookupId`）を氏名に解決するか |
 | `nexus_view_url` | Nexus画面URL | 「Nexusで開く」リンクの土台。`&q=<文書番号>` を付けて検索済み状態で開く |
 | `nexus_scope_mode` | `path` | Nexus検索の絞り込み方式（`path` / `site` / `none`）。画面の「Nexus検索診断」で実測して決める |
 | `nexus_enrich_metadata` | `true` | Nexusの標準Indexをリスト項目から取得するか |
@@ -230,11 +236,18 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 - **Nexusの標準Indexは Nexusタブでのみ表示**します（SharePointには無い列のため）。
   列名の自動判別が外れた場合は、起動後の検索でコンソールに出る実在の列名を見て
   `nexus_field_map` に設定してください。
-- **Doc Author / Doc Owner の内部列名が未確定**です。他の5列
-  （Document Number / OldSystemIdentifier / Document Title / Applicable To /
-  Department）は実機で確定済みです。Nexusタブで検索するとコンソールに
-  「列名 = 値」の一覧が1度だけ出るので、Nexus画面と突き合わせて
-  `nexus_field_map` に設定してください。
+- **Doc Author / Doc Owner の内部列名は確定していません。**
+  他の5列（Document Number / OldSystemIdentifier / Document Title /
+  Applicable To / Department）は実機で確定済みです。
+  **各セルにマウスを載せると「どの内部列から採った値か」が表示される**ので、
+  Nexus画面と突き合わせて確認し、違っていれば `nexus_field_map` で修正できます。
+- **人物列は Graph が数値IDでしか返しません。**サイトの
+  「User Information List」を引いて氏名に直していますが、参照できない
+  テナント設定では空欄のままになります（理由は画面に表示されます）。
+- **「Nexusで開く」は、その1件を検索した状態では開けません。**
+  Shareflexが検索条件をURLに載せないためです。代わりに、クリック時に
+  Document Number をクリップボードへコピーするので、Nexusの
+  Full text search に貼り付けてください。
 - **キーワードを引用符で囲むと完全一致のフレーズ検索**になり、件数が大きく減ります
   （実測: `validation plan` で117件 → `"validation plan"` で14件）。
   Nexus画面の Full text search は既定でAND検索なので、比較するときは引用符を外してください。
@@ -248,7 +261,7 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 - **`tests/`** … 検証ハーネス（ネットワーク不要）。
 
   ```
-  python tests/run_tests.py     # 442項目の自動検証
+  python tests/run_tests.py     # 493項目の自動検証
   python tests/ui_check.py      # ブラウザ操作テスト（Playwright必要・任意）
   ```
 
@@ -263,6 +276,6 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 |---|---|---|
 | Phase 1 | SharePoint全社検索 MVP | ✅ 完了（v20260903_08、実機動作確認済み） |
 | Phase 2 | Nexus検索追加（Graph Searchを `nexus_folder_path` に限定）＋重複排除の有効化 | ✅ 完了（件数はNexus画面と一致することを実測で確認） |
-| Phase 2.5 | 系統別タブ＋Nexus標準Indexの表示＋Nexusリンクの修正 | ✅ 実装完了（v20260903_11、Doc Author/Owner の列名のみ実機確認待ち） |
+| Phase 2.5 | 系統別タブ＋Nexus標準Indexの表示＋人物列の解決＋タイトル限定検索 | ✅ 実装完了（v20260903_12、Doc Author/Owner の対応のみ実機確認待ち） |
 | Phase 3 | Enovia検索追加（実装方式は調査後に確定） | 未着手 |
 | Phase 4 | 3系統統合の磨き込み（名寄せ・検索履歴・お気に入り） | 未着手 |

@@ -197,15 +197,57 @@ Shareflexは画面のラベルとは別に `qm*` / `nx*` の独自接頭辞を�
 `qmRevisionNo` / `qmRevisionReason`、`qmApprover` / `qmConfirmerLookupId`、
 `nxDocReviewer` / `nxFunctionalOrg`、`qmProcess1`、`qmConfidentialLevel`。
 
-**人物列の罠**: Graph は人物列を `<列名>LookupId`（数値ID）でしか返さないことがある
-（`qmEditorLookupId` = 27 など）。**数値をそのまま画面に出してはいけない。**
-数値だけの場合は採用せず空欄にする（誤った値より空欄のほうが誠実）。
-Doc Author / Doc Owner が未確定なのはこのため。特定するには、
-Nexusタブで検索したときにコンソールへ出る**「列名 = 値」の一覧**を、
-Nexus画面の同じ文書の行と突き合わせる。
+#### ★重要★ 人物列の罠（Doc Author / Doc Owner）
+
+Graph は人物列を `<列名>LookupId`（数値ID）でしか返さない（`qmEditorLookupId` = 27）。
+ここで **2段階の失敗が起きた（v11で実際に発生）**。
+
+1. **数値をそのまま画面に出してはいけない。**「27」は情報ではない。
+2. **数値だから採用しない → 次の候補に回る、という設計が裏目に出た。**
+   候補一覧に `nxDocReviewer`（Doc Reviewer）や `qmApprover`（承認者）を
+   入れていたため、**Doc Author / Doc Owner の列に別の役割の人が表示された。**
+   一部の行だけ値が入っていたのは、それらの列が入力されている文書だけだったため。
+   **「空欄を埋めよう」として役割の違う列を流用するのは、空欄より悪い。**
+
+**対処（v12）**: 数値IDを氏名に解決する。サイトの「User Information List」を
+`GET /sites/{siteId}/lists/User Information List/items/{id}?$expand=fields` で引き、
+`qmEditorLookupId = 27` から `qmEditor = "David Chen"` という列を作ってから
+対応づける。同じ人は引き直さない。参照できない環境では**空欄のままにする**。
+
+**あわせて、値の出所を常に見えるようにした。** 画面のラベルと内部名の対応は
+名前からは決められないため、各セルにマウスを載せると
+「Doc Author ← 内部列 qmEditor」と出る。対応表はコンソールにも出力する。
+**Doc Author / Doc Owner の対応は、この表示をNexus画面と突き合わせて確定させること。**
+
+### 3-1g. ★重要★ Shareflexは検索条件をURLに載せない
+
+- 越智さんから提供いただいた「検索実行中のNexus画面のURL」に、**検索語が
+  含まれていなかった**（Full text search に `Validation plan` を入れた状態で、
+  URLは `View.aspx?$List=...&$RootFolder=...` のみ）。
+- つまり **`&q=` を付ければ検索済み状態で開ける、という当初の想定は誤り**だった
+  （3-1 の記述はF12のリクエストパラメータを見ての推測で、URL遷移としては未検証だった）。
+- **対処**: 「Nexusで開く」は、クリック時に検索語（Document Number）を
+  **クリップボードへコピーしてから**Nexusを開く。Nexus側の Full text search に
+  貼るだけで済む。URLで検索状態を開ける方法が判明したら、
+  `_nexus_deep_link` の組み立てを直すだけで対応できる形にしてある。
+- **教訓**: 「URLにパラメータを足せば開ける」は、実際にそのURLを開いて
+  確かめるまで信じない。リクエストのパラメータ名が、画面遷移用のURLの
+  パラメータ名と同じとは限らない。
 - 越智さんの観察では、**Nexusの全文検索は本文だけでなくIndexのキーワードにも
   ヒットしている**。SharePoint検索は管理プロパティも索引しているため矛盾しないが、
   **Graph経由で同じ挙動になるかは実機の突き合わせで確認する必要がある。**
+
+### 3-1h. タイトルだけを検索する（既定オン）
+
+- 本文まで対象にすると、タイトルと無関係な文書まで大量に当たる
+  （`validation plan` の全文検索は117件、全社では126,090件）。
+  標準書を探す用途では、**タイトルに語が含まれるものだけ**のほうが目的に近い。
+- 実装は KQL の `title:` 修飾。複数語は `title:validation title:plan` と並べる
+  （KQLはAND既定）。**引用符付きで入力された場合は `title:"validation plan"` と
+  して完全一致を尊重する**（利用者の意図を勝手に変えない）。
+- 対象の検索プロパティ名は `title_field` で変更できる。Shareflexの
+  `qmDocumentTitle` に対応する検索プロパティ名が判明したら差し替えられる。
+- Nexus検索診断に「⑤ タイトルのみ」を足したので、件数の差を実測できる。
 
 ### 3-1c. 系統別タブ構成（v20260903_10 で実装）
 
@@ -385,7 +427,7 @@ batやショートカットから起動するとパスがずれる。この弱�
 
 ```
 cd document_search_manager
-python tests/run_tests.py              # ネットワーク不要。442項目
+python tests/run_tests.py              # ネットワーク不要。493項目
 python tests/ui_check.py               # ブラウザ操作テスト（Playwright必要・任意）
 python tests/ui_check.py --shot ui.png # 画面のスクリーンショットを保存
 ```
