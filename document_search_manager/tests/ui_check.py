@@ -458,6 +458,55 @@ def main():
         check("該当件数をすべて取得したら「さらに取得」は無効化される",
               page.is_disabled("#btnLoadMore"), "")
 
+        # ── 依頼1：SharePointの「フォルダのみを検索する」（案A） ─────
+        # 直前の区間でSharePointタブのまま終わっているため、まず0.Allタブへ
+        # 戻ってから「隠れている」ことを確認する。
+        page.click("#tabs button[data-target='all']")
+        page.wait_for_timeout(200)
+        check("0.Allタブではフォルダのみを検索する行は隠れている",
+              not page.is_visible("#folderOnlyRow"))
+        page.click("#tabs button[data-target='sharepoint']")
+        page.wait_for_timeout(200)
+        check("SharePointタブに切り替えるとフォルダのみを検索する行が出る",
+              page.is_visible("#folderOnlyRow"))
+
+        # ファイル2件・フォルダ1件が混ざったスタブで、絞り込みが実際に
+        # 効くこと（0件になるだけの弱い確認ではなく）を確認する。
+        mixed_rows = [
+            dsm.SearchResult(source="SharePoint", title="normal-file-1",
+                             url="https://x/f1.docx", doc_type="docx", rank=1),
+            dsm.SearchResult(source="SharePoint", title="normal-file-2",
+                             url="https://x/f2.docx", doc_type="docx", rank=2),
+            dsm.SearchResult(source="SharePoint", title="a-folder",
+                             url="https://x/folder", doc_type=dsm.FOLDER_TYPE_LABEL,
+                             is_folder=True, rank=3),
+        ]
+        dsm._manager.providers[dsm.TARGET_SHAREPOINT].search = (
+            lambda kw, mx: {"results": list(mixed_rows), "total": len(mixed_rows), "note": ""})
+        page.fill("#keyword", "folderonlytest")
+        page.click("#btnSearch")
+        page.wait_for_timeout(400)
+        check("フォルダのみを検索するオフの状態では、ファイルもフォルダも見える",
+              sorted(titles()) == ["a-folder", "normal-file-1", "normal-file-2"],
+              str(titles()))
+
+        page.check("#folderOnly")
+        page.wait_for_timeout(200)
+        check("フォルダのみを検索するをオンにすると、その場でフォルダだけに絞られる"
+              "（再検索せずクライアント側で反映される）",
+              titles() == ["a-folder"], str(titles()))
+
+        page.uncheck("#folderOnly")
+        page.wait_for_timeout(200)
+        check("オフに戻すと絞り込みが解除される",
+              sorted(titles()) == ["a-folder", "normal-file-1", "normal-file-2"],
+              str(titles()))
+
+        page.click("#tabs button[data-target='all']")
+        page.wait_for_timeout(200)
+        check("0.Allタブに戻るとフォルダのみを検索する行はまた隠れる",
+              not page.is_visible("#folderOnlyRow"))
+
         browser.close()
 
     print(f"\n{'=' * 46}")

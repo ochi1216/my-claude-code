@@ -50,6 +50,10 @@
   "title_only_default": true,
   "title_field": "title",
 
+  "_comment_prefix_search": "「前方一致で検索する」の初期状態（SharePoint/Nexusのみ）。オンでも prefix_search_min_length 未満の語には*を付けない。短い語に前方一致を適用すると無関係な結果が大量にヒットすることが実機検証で判明したための安全対策。",
+  "prefix_search_default": false,
+  "prefix_search_min_length": 4,
+
   "_comment_nexus_resolve_people": "Doc Author / Doc Owner などの人物列は、Graphが数値ID（<列名>LookupId）でしか返さない。true にすると、サイトのユーザー情報リストを引いて氏名に直す。参照できない環境では列を空欄のままにする（数値をそのまま出さない）。",
   "nexus_resolve_people": true,
 

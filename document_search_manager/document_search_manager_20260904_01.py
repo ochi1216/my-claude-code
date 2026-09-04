@@ -255,6 +255,8 @@ DEFAULT_CFG: Dict[str, Any] = {
     "nexus_deeplink_title_field": "qmDocumentTitle",
     "title_only_default": True,
     "title_field": "title",
+    "prefix_search_default": False,
+    "prefix_search_min_length": 4,
     "nexus_enrich_max": 200,
     "nexus_enrich_workers": 6,
     "nexus_field_map": {},
@@ -936,6 +938,33 @@ def _title_only_query(keyword: str, field: str = "title") -> str:
     return " ".join(f'{field}:{w}' for w in words)
 
 
+def _apply_prefix_wildcard(text: str, min_length: int) -> str:
+    """各単語の末尾に `*` を付け、KQLの前方一致にする。
+
+    実機で確認したとおり（"P01"が"P010024_Lorry"に一致しない不具合の調査）、
+    KQLの末尾`*`は「十分に具体的な語」には正しく効く
+    （"P010024*" → 42件、いずれも関連文書）が、**短い語では暴走・誤動作する**
+    （"P01*" → 無関係な"P1"ばかり3687件／"P0*" → 7188件／"P1*" → 108,103件）。
+    そのため、既定ですべての検索に付けるのではなく、この関数を呼んだとき
+    （＝「前方一致で検索する」がオンのとき）だけ、かつ `min_length` 文字
+    以上の単語にだけ `*` を付ける（短い語は暴走を避けるため無加工のまま）。
+    引用符で囲まれた完全一致の指定は、そのまま尊重して変更しない。
+    """
+    text = str(text or "").strip()
+    if not text:
+        return ""
+    if text.startswith('"') and text.endswith('"') and len(text) >= 2:
+        return text
+    min_length = max(1, int(min_length or 1))
+    words = []
+    for w in text.split():
+        if w and len(w) >= min_length and not w.endswith("*"):
+            words.append(w + "*")
+        else:
+            words.append(w)
+    return " ".join(words)
+
+
 def _expiry_state(valid_until: str, cfg: Dict[str, Any]) -> str:
     """有効期限から、期限の状態を判定する。
 
@@ -1079,12 +1108,19 @@ class SharePointProvider(SearchProvider):
     # 以下の4つを差し替えるだけで、このクラスの実装をそのまま再利用できる。
     # 「タイトルだけを検索する」かどうか。SearchManager が画面の指定を反映する。
     title_only: bool = False
+    # 「前方一致で検索する」かどうか。既定オフ（実機で確認したとおり、
+    # 短い語では暴走・誤動作するため、既定の挙動は変えない）。
+    prefix_search: bool = False
 
     def _keyword_expr(self, keyword: str) -> str:
-        """キーワード部分の式。タイトル限定が指定されていればそれを組み立てる。"""
+        """キーワード部分の式。タイトル限定・前方一致が指定されていれば組み立てる。"""
+        text = str(keyword or "").strip()
+        if self.prefix_search:
+            text = _apply_prefix_wildcard(
+                text, self.cfg.get("prefix_search_min_length", 4))
         if self.title_only:
-            return _title_only_query(keyword, self.cfg.get("title_field", "title"))
-        return str(keyword or "").strip()
+            return _title_only_query(text, self.cfg.get("title_field", "title"))
+        return text
 
     def _query_string(self, keyword: str) -> str:
         """Graph Search に渡すクエリ文字列。既定はキーワードをそのまま使う。"""
@@ -2394,7 +2430,7 @@ class SearchManager:
         return [provider] if provider and provider.implemented else []
 
     def search(self, keyword: str, target: str, max_results: int,
-               title_only: bool = False) -> Dict[str, Any]:
+               title_only: bool = False, prefix_search: bool = False) -> Dict[str, Any]:
         providers = self._targets(target)
         # Nexusを実際に検索したときだけ、SharePoint側の重複を落とす（_dedupe参照）
         nexus_searched = any(p.key == TARGET_NEXUS for p in providers)
@@ -2405,6 +2441,10 @@ class SearchManager:
         for provider in providers:
             provider.index_wanted = (target == TARGET_NEXUS)
             provider.title_only = bool(title_only)
+            # prefix_search はSharePoint/Nexus（KQL）にのみ意味を持つ属性。
+            # EnoviaProviderにも属性自体は付くが、自前の_keyword_exprが
+            # これを参照しないため無害（黙って無視される）。
+            provider.prefix_search = bool(prefix_search)
 
         # 未実装の系統が明示的に選ばれた場合は、その旨をそのまま返す
         if not providers:
@@ -2563,6 +2603,7 @@ INDEX_HTML = r"""<!doctype html>
     border-radius: 8px; padding: 16px; margin-bottom: 16px;
   }
   .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  .row[hidden] { display: none; }
   input[type=text], input[type=date], select {
     background: var(--panel2); color: var(--text);
     border: 1px solid var(--border); border-radius: 6px;
@@ -2700,6 +2741,16 @@ INDEX_HTML = r"""<!doctype html>
       <label class="opt" title="オンにすると、文書のタイトルにキーワードが含まれるものだけを探します。オフにすると本文の中身まで対象にするため、件数が大きく増えます。">
         <input type="checkbox" id="titleOnly" checked>
         タイトルだけを検索する（オフで本文も検索）
+      </label>
+      <label class="opt" title="オンにすると、入力した語で始まるもの（前方一致）も対象にします。短い語（既定4文字未満）では該当件数が大量になりすぎるため対象外です。SharePoint/Nexusのみ対応（Enoviaには効果がありません）。">
+        <input type="checkbox" id="prefixSearch">
+        前方一致で検索する
+      </label>
+    </div>
+    <div class="row" id="folderOnlyRow" hidden>
+      <label class="opt" title="オンにすると、SharePointの検索結果をフォルダだけに絞り込みます（種別列の絞り込みを自動設定します）。取得済みの上位N件の中で絞り込むため、該当フォルダが多い場合は「さらに取得」もあわせてお使いください。">
+        <input type="checkbox" id="folderOnly">
+        フォルダのみを検索する（SharePointタブのみ）
       </label>
     </div>
     <div class="tabs" id="tabs">
@@ -2855,8 +2906,13 @@ var restoring = false;    // 復元中は状態を保存し直さない
 // 別物で、こちらは「古い結果を見せないため再検索する」という既存方針を保つ）。
 var searchCache = {};
 
-function cacheKey(keyword, target, maxResults, titleOnly) {
-  return keyword + "" + target + "" + maxResults + "" + titleOnly;
+function cacheKey(keyword, target, maxResults, titleOnly, prefixSearch) {
+  // \x01 は入力されないと想定できる制御文字での区切り（キーワードに
+  // 区切り文字そのものが混ざっても壊れないように）。folderOnly は
+  // 取得後の絞り込み（クライアント側のみ）であり、サーバーへの問い合わせ
+  // 内容を変えないため、キーには含めない。
+  return keyword + "" + target + "" + maxResults + "" + titleOnly
+       + "" + prefixSearch;
 }
 
 function log(msg) {
@@ -2989,6 +3045,8 @@ function saveState() {
     target: currentTarget(),
     max_results: parseInt(document.getElementById("maxResults").value, 10),
     title_only: document.getElementById("titleOnly").checked,
+    prefix_search: document.getElementById("prefixSearch").checked,
+    folder_only: document.getElementById("folderOnly").checked,
     sort: sortState,
     filters: filters
   };
@@ -3471,6 +3529,9 @@ function setTarget(target) {
   for (var i = 0; i < buttons.length; i++) {
     buttons[i].className = (buttons[i].dataset.target === target) ? "on" : "";
   }
+  // 「フォルダのみを検索する」はSharePointタブでのみ意味を持つため、
+  // 他のタブでは隠す（Nexus/Enoviaには出さない、というご指示のとおり）。
+  document.getElementById("folderOnlyRow").hidden = (target !== "sharepoint");
   updateTabHint();
 }
 
@@ -3517,6 +3578,8 @@ function currentSearchParams() {
     target: currentTarget(),
     maxResults: parseInt(document.getElementById("maxResults").value, 10),
     titleOnly: document.getElementById("titleOnly").checked,
+    prefixSearch: document.getElementById("prefixSearch").checked,
+    folderOnly: document.getElementById("folderOnly").checked,
   };
 }
 
@@ -3542,8 +3605,17 @@ function applySearchResponse(data, target, fromCache) {
   }
   // 実際に検索した系統に合わせて列構成を切り替える。
   // 表示できない列に残った絞り込みは、ここで取り除かれる。
-  applyColumnSet(data.target || target);
+  var actualTarget = data.target || target;
+  applyColumnSet(actualTarget);
   updateTabHint();
+  // 依頼1（案A）：「フォルダのみを検索する」がオンで、実際にSharePointを
+  // 検索したときだけ、種別の絞り込みをフォルダだけに自動設定する。
+  // 取得済みの件数の中で絞り込む方式のため、該当フォルダが上限件数を
+  // 超えて存在する場合は「さらに取得」もあわせて使う必要がある
+  // （設計上の既知の制約。DESIGN_NOTES参照）。
+  if (document.getElementById("folderOnly").checked && actualTarget === "sharepoint") {
+    filters.doc_type = { values: ["フォルダ"] };
+  }
   var kept = Object.keys(filters);
   if (kept.length) {
     log(ICON_INFO + " 絞り込みが有効です: " + kept.join(", ")
@@ -3566,7 +3638,7 @@ function applySearchResponse(data, target, fromCache) {
 function runSearch() {
   var p = currentSearchParams();
   if (!p.keyword) { log("キーワードが空です。"); return; }
-  var key = cacheKey(p.keyword, p.target, p.maxResults, p.titleOnly);
+  var key = cacheKey(p.keyword, p.target, p.maxResults, p.titleOnly, p.prefixSearch);
 
   var cached = searchCache[key];
   if (cached) {
@@ -3579,6 +3651,7 @@ function runSearch() {
   setBusy(true);
   log(ICON_SEARCH + " 検索開始: \"" + p.keyword + "\" / 対象: " + p.target
       + " / 範囲: " + (p.titleOnly ? "タイトルのみ" : "本文も含む")
+      + (p.prefixSearch ? " / 前方一致あり" : "")
       + " / 上限: " + p.maxResults + " 件");
   // 引用符で囲むと「完全一致のフレーズ検索」になり、件数が大きく減る。
   // Nexus画面の Full text search は既定でAND検索なので、同じ条件で比べるには
@@ -3593,7 +3666,8 @@ function runSearch() {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ keyword: p.keyword, target: p.target,
-                           max_results: p.maxResults, title_only: p.titleOnly })
+                           max_results: p.maxResults, title_only: p.titleOnly,
+                           prefix_search: p.prefixSearch })
   })
   .then(function (r) { return r.json(); })
   .then(function (data) {
@@ -3611,7 +3685,7 @@ document.getElementById("btnSearch").addEventListener("click", function () { run
 document.getElementById("btnRefresh").addEventListener("click", function () {
   var p = currentSearchParams();
   if (!p.keyword) { log("キーワードが空です。"); return; }
-  delete searchCache[cacheKey(p.keyword, p.target, p.maxResults, p.titleOnly)];
+  delete searchCache[cacheKey(p.keyword, p.target, p.maxResults, p.titleOnly, p.prefixSearch)];
   log(ICON_INFO + " " + tabLabel(p.target) + " の最新の情報を取得し直します…");
   runSearch();
 });
@@ -3764,6 +3838,19 @@ document.getElementById("btnClearFilter").addEventListener("click", function () 
   log(ICON_INFO + " フィルタとソートを解除しました。");
 });
 
+// 「フォルダのみを検索する」は、既に表示中のSharePoint結果があれば
+// 再検索せず即座に絞り込みへ反映する（クライアント側だけの絞り込みのため）。
+document.getElementById("folderOnly").addEventListener("change", function (e) {
+  if (shownTarget !== "sharepoint") { return; }
+  if (e.target.checked) {
+    filters.doc_type = { values: ["フォルダ"] };
+  } else {
+    delete filters.doc_type;
+  }
+  closeAllPanels();
+  applyView();
+});
+
 // ── 出力（画面に表示されている行・並び順で出力する） ─────
 function download(fmt) {
   if (!viewResults.length) { return; }
@@ -3795,6 +3882,12 @@ function restoreState() {
 
       if (typeof s.title_only === "boolean") {
         document.getElementById("titleOnly").checked = s.title_only;
+      }
+      if (typeof s.prefix_search === "boolean") {
+        document.getElementById("prefixSearch").checked = s.prefix_search;
+      }
+      if (typeof s.folder_only === "boolean") {
+        document.getElementById("folderOnly").checked = s.folder_only;
       }
 
       var sel = document.getElementById("maxResults");
@@ -3870,6 +3963,14 @@ def api_state():
         "target": str(payload.get("target", TARGET_ALL)),
         "max_results": int(payload.get("max_results") or
                            _cfg.get("default_max_results", 10)),
+        # title_only は既存コードでは保存対象から漏れており、画面側は
+        # 復元されたつもりでも実際には毎回既定値に戻っていた
+        # （今回prefix_search/folder_onlyを追加する際に発見した既存の不具合。
+        # 影響は「タイトルだけを検索する」のチェック状態が再起動をまたいで
+        # 復元されないことのみで、検索結果自体への影響はない）。
+        "title_only": bool(payload.get("title_only", True)),
+        "prefix_search": bool(payload.get("prefix_search", False)),
+        "folder_only": bool(payload.get("folder_only", False)),
         "sort": payload.get("sort") or {},
         "filters": payload.get("filters") or {},
         "saved_at": datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S"),
@@ -4009,6 +4110,8 @@ def api_search():
     max_results = max(1, min(max_results, int(_cfg.get("hard_max_results", 500))))
     title_only = bool(payload.get("title_only",
                                   _cfg.get("title_only_default", True)))
+    prefix_search = bool(payload.get("prefix_search",
+                                     _cfg.get("prefix_search_default", False)))
 
     if not keyword:
         return jsonify({"error": "キーワードが指定されていません。"}), 400
@@ -4016,7 +4119,7 @@ def api_search():
     started = datetime.now()
     try:
         outcome = _manager.search(keyword, target, max_results,
-                                  title_only=title_only)
+                                  title_only=title_only, prefix_search=prefix_search)
     except Exception as e:
         print(f"❌ 検索でエラーが発生しました: {e}")
         return jsonify({"error": f"検索でエラーが発生しました: {e}"}), 500
