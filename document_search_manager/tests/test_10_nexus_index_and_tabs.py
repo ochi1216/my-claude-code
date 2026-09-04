@@ -272,6 +272,12 @@ check(f"版数表示が v{VERSION} (...)", f"v{VERSION} (" in html, VERSION)
 for target in ("all", "sharepoint", "nexus", "enovia"):
     check(f"{target} タブがある", f'data-target="{target}"' in html)
 check("既定は All タブ", 'class="on" data-target="all"' in html)
+# 越智さんの指摘（タブ切り替え後、応答が届くまで前のタブの結果が残って
+# 見え、切り替わっていないと誤解される）への対応。タブクリック時点で
+# 即座に「検索しています」表示へ切り替えるロジックがあることを確認する
+# （実際に応答前後で切り替わることの確認は ui_check.py で行う）。
+check("タブ切り替え時に即座に「検索中」表示へ切り替えるロジックがある",
+      "を検索しています" in html and 'resultBody").innerHTML' in html, "")
 
 nexus_set = html.split("nexus: [")[1].split("],")[0]
 for key in ("document_number", "old_system_id", "doc_author", "doc_owner",

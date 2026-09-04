@@ -378,6 +378,30 @@ def main():
               len(all_select_disabled) > 0 and all(all_select_disabled),
               str(all_select_disabled))
 
+        # ── タブ切り替え直後、応答が届く前の表示 ──────────────
+        # 越智さんからのフィードバック：タブを切り替えても応答が届くまでの
+        # 数秒間、前のタブの結果が残って見え、切り替わっていないように
+        # 誤解される、という指摘への対応。応答をわざと遅らせるスタブに
+        # 差し替え、クリック直後（応答が届く前）に「検索しています」の
+        # 表示へ切り替わることを確認する。
+        def slow_sharepoint_search(keyword, max_results):
+            time.sleep(1.2)
+            return {"results": [dsm.SearchResult(source="SharePoint", title="slow-hit",
+                                                  url="https://x/slow.docx", rank=1)],
+                    "total": 1, "note": ""}
+
+        dsm._manager.providers[dsm.TARGET_SHAREPOINT].search = slow_sharepoint_search
+        page.click("#tabs button[data-target='sharepoint']")
+        page.wait_for_timeout(150)   # 応答（1.2秒後）より十分前に確認する
+        loading_text = page.text_content("#resultBody")
+        check("タブ切り替え直後、応答が届く前は「検索しています」表示になる"
+              "（前のタブの結果が残ったままにならない）",
+              "検索しています" in (loading_text or ""), loading_text)
+        page.wait_for_timeout(1500)  # 応答が届くのを待つ
+        settled_titles = titles()
+        check("応答が届いたら通常どおり結果に置き換わる",
+              settled_titles == ["slow-hit"], str(settled_titles))
+
         browser.close()
 
     print(f"\n{'=' * 46}")

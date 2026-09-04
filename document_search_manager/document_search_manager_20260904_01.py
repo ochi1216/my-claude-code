@@ -3474,10 +3474,18 @@ document.getElementById("tabs").addEventListener("click", function (e) {
   var button = e.target.closest ? e.target.closest("button") : null;
   if (!button || !button.dataset.target) { return; }
   if (button.dataset.target === selectedTarget) { return; }
-  setTarget(button.dataset.target);
+  var newTarget = button.dataset.target;
+  setTarget(newTarget);
   // タブを押したら、その系統で検索し直す（キーワードが入っている場合）。
   // タブなので「切り替えたらその系統の一覧が出る」のが自然なため。
   if (document.getElementById("keyword").value.trim()) {
+    // 応答が届くまでの間、前のタブの結果がそのまま残って見えると
+    // 「切り替わっていない」ように誤解されるため、要求を出す前に
+    // ここでいったん「検索中」表示に切り替える（列構成・件数・絞り込みの
+    // 実際の反映は、いつもどおり応答が届いてから行う）。
+    document.getElementById("resultBody").innerHTML =
+      '<tr><td class="muted">' + tabLabel(newTarget) + " を検索しています…</td></tr>";
+    document.getElementById("resultCount").textContent = "検索結果: …";
     document.getElementById("btnSearch").click();
   } else {
     saveState();
