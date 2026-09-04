@@ -2720,6 +2720,8 @@ INDEX_HTML = r"""<!doctype html>
       </div>
       <div class="row">
         <button id="btnClearFilter" class="mini">フィルタ・ソート解除</button>
+        <button id="btnRefresh" class="mini" title="キャッシュを使わず、このタブ・この条件の最新の検索結果を取得し直します。">🔄 最新の情報に更新</button>
+        <button id="btnLoadMore" class="mini" disabled title="現在の上限件数より多く該当している場合に、上限を引き上げて再取得します。">さらに取得</button>
         <button id="btnDownload" disabled>選択ファイルをZIPで取得</button>
         <button id="btnXlsx" class="ghost" disabled>Excel出力</button>
         <button id="btnCsv" class="ghost" disabled>CSV出力</button>
@@ -2845,6 +2847,17 @@ var sortState = { key: null, dir: 0 };   // dir: 1=昇順 / -1=降順 / 0=解除
 var selected = {};        // 一括ダウンロード用の選択状態 {_idx: true}
 var pendingState = null;  // 起動時に復元する状態（検索結果の到着後に適用する）
 var restoring = false;    // 復元中は状態を保存し直さない
+
+// タブのキャッシュ（②）。キーワード・対象・上限件数・タイトル限定の組み合わせ
+// ごとに /api/search の応答をそのまま記憶する。同じ組み合わせに戻ったときは
+// 再取得せず即座に表示する（タブを行き来するたびに毎回待たされる問題への対処）。
+// ページを再読み込みすると消える（メモリ上のみ。前回の検索状態の復元とは
+// 別物で、こちらは「古い結果を見せないため再検索する」という既存方針を保つ）。
+var searchCache = {};
+
+function cacheKey(keyword, target, maxResults, titleOnly) {
+  return keyword + "" + target + "" + maxResults + "" + titleOnly;
+}
 
 function log(msg) {
   var el = document.getElementById("log");
@@ -3440,6 +3453,12 @@ function setBusy(busy) {
   document.getElementById("btnNexusFields").disabled = busy;
   document.getElementById("btnEnoviaLogin").disabled = busy;
   document.getElementById("btnEnoviaDiag").disabled = busy;
+  document.getElementById("btnRefresh").disabled = busy;
+  // btnLoadMore は「もっと該当件数があるか」でも有効・無効が決まるため、
+  // ここでは busy=true のときの無効化だけ行い、busy=false での再有効化は
+  // updateLoadMoreButton() に任せる（さもないと該当件数が無いのに
+  // 検索完了時に毎回有効へ戻ってしまう）。
+  if (busy) { document.getElementById("btnLoadMore").disabled = true; }
 }
 
 var selectedTarget = "all";
@@ -3492,21 +3511,79 @@ document.getElementById("tabs").addEventListener("click", function (e) {
   }
 });
 
-document.getElementById("btnSearch").addEventListener("click", function () {
-  var keyword = document.getElementById("keyword").value.trim();
-  if (!keyword) { log("キーワードが空です。"); return; }
-  var target = currentTarget();
-  var maxResults = parseInt(document.getElementById("maxResults").value, 10);
-  var titleOnly = document.getElementById("titleOnly").checked;
+function currentSearchParams() {
+  return {
+    keyword: document.getElementById("keyword").value.trim(),
+    target: currentTarget(),
+    maxResults: parseInt(document.getElementById("maxResults").value, 10),
+    titleOnly: document.getElementById("titleOnly").checked,
+  };
+}
+
+function updateLoadMoreButton(statuses) {
+  var hasMore = (statuses || []).some(function (s) { return s.total > s.count; });
+  document.getElementById("btnLoadMore").disabled = !hasMore;
+}
+
+// 検索結果（サーバーの応答そのもの。キャッシュ由来でも新規取得でも同じ形）を
+// 画面へ反映する。fromCache は、ログの文面を変えるためだけに使う。
+function applySearchResponse(data, target, fromCache) {
+  allResults = data.results || [];
+  allResults.forEach(function (r, i) { r._idx = i; });
+  filters = {};
+  sortState = { key: null, dir: 0 };
+  selected = {};
+  if (pendingState) {
+    filters = pendingState.filters || {};
+    sortState = pendingState.sort || { key: null, dir: 0 };
+    pendingState = null;
+    restoring = true;
+    log(ICON_INFO + " 前回の並び順と絞り込みを復元しました。");
+  }
+  // 実際に検索した系統に合わせて列構成を切り替える。
+  // 表示できない列に残った絞り込みは、ここで取り除かれる。
+  applyColumnSet(data.target || target);
+  updateTabHint();
+  var kept = Object.keys(filters);
+  if (kept.length) {
+    log(ICON_INFO + " 絞り込みが有効です: " + kept.join(", ")
+        + "（「フィルタ・ソート解除」で全件表示に戻せます）");
+  }
+  renderStatuses(data.statuses || []);
+  applyView();
+  restoring = false;
+  var note = "";
+  if (data.excluded_nexus > 0) { note = "（Nexus重複 " + data.excluded_nexus + " 件を除外）"; }
+  document.getElementById("excludedNote").textContent = note;
+  updateLoadMoreButton(data.statuses || []);
+  var suffix = fromCache ? "（前回取得した結果を再表示。キャッシュ）" : "";
+  log(ICON_OK + " 検索完了: " + allResults.length + " 件 (" + (data.elapsed_sec || 0) + " 秒)" + suffix);
+}
+
+// 検索を実行する。②：直前と同じ条件（キーワード・対象・上限件数・タイトル
+// 限定）であれば、サーバーへ問い合わせずキャッシュから即座に表示する
+// （タブを行き来するたびに毎回待たされる問題への対処）。
+function runSearch() {
+  var p = currentSearchParams();
+  if (!p.keyword) { log("キーワードが空です。"); return; }
+  var key = cacheKey(p.keyword, p.target, p.maxResults, p.titleOnly);
+
+  var cached = searchCache[key];
+  if (cached) {
+    log(ICON_INFO + " " + tabLabel(p.target) + " は同じ条件で検索済みのため、"
+        + "キャッシュを表示します（「🔄 最新の情報に更新」で取得し直せます）。");
+    applySearchResponse(cached, p.target, true);
+    return;
+  }
 
   setBusy(true);
-  log(ICON_SEARCH + " 検索開始: \"" + keyword + "\" / 対象: " + target
-      + " / 範囲: " + (titleOnly ? "タイトルのみ" : "本文も含む")
-      + " / 上限: " + maxResults + " 件");
+  log(ICON_SEARCH + " 検索開始: \"" + p.keyword + "\" / 対象: " + p.target
+      + " / 範囲: " + (p.titleOnly ? "タイトルのみ" : "本文も含む")
+      + " / 上限: " + p.maxResults + " 件");
   // 引用符で囲むと「完全一致のフレーズ検索」になり、件数が大きく減る。
   // Nexus画面の Full text search は既定でAND検索なので、同じ条件で比べるには
   // 引用符を外す必要がある（実測: validation plan で 117件 → 引用符付きで 14件）。
-  if (keyword.indexOf("\"") >= 0) {
+  if (p.keyword.indexOf("\"") >= 0) {
     log(ICON_INFO + " キーワードに引用符が含まれています。引用符で囲むと"
         + "「その並びのままの完全一致」になり、件数が大きく減ります。"
         + "Nexus画面と同じ条件で比べる場合は引用符を外してください。");
@@ -3515,43 +3592,40 @@ document.getElementById("btnSearch").addEventListener("click", function () {
   fetch("/api/search", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ keyword: keyword, target: target,
-                           max_results: maxResults, title_only: titleOnly })
+    body: JSON.stringify({ keyword: p.keyword, target: p.target,
+                           max_results: p.maxResults, title_only: p.titleOnly })
   })
   .then(function (r) { return r.json(); })
   .then(function (data) {
-    if (data.error) { log(ICON_ERROR + " " + data.error); setBusy(false); return; }
-    allResults = data.results || [];
-    allResults.forEach(function (r, i) { r._idx = i; });
-    filters = {};
-    sortState = { key: null, dir: 0 };
-    selected = {};
-    if (pendingState) {
-      filters = pendingState.filters || {};
-      sortState = pendingState.sort || { key: null, dir: 0 };
-      pendingState = null;
-      restoring = true;
-      log(ICON_INFO + " 前回の並び順と絞り込みを復元しました。");
-    }
-    // 実際に検索した系統に合わせて列構成を切り替える。
-    // 表示できない列に残った絞り込みは、ここで取り除かれる。
-    applyColumnSet(data.target || target);
-    updateTabHint();
-    var kept = Object.keys(filters);
-    if (kept.length) {
-      log(ICON_INFO + " 絞り込みが有効です: " + kept.join(", ")
-          + "（「フィルタ・ソート解除」で全件表示に戻せます）");
-    }
-    renderStatuses(data.statuses || []);
-    applyView();
-    restoring = false;
-    var note = "";
-    if (data.excluded_nexus > 0) { note = "（Nexus重複 " + data.excluded_nexus + " 件を除外）"; }
-    document.getElementById("excludedNote").textContent = note;
-    log(ICON_OK + " 検索完了: " + allResults.length + " 件 (" + (data.elapsed_sec || 0) + " 秒)");
+    if (data.error) { log(ICON_ERROR + " " + data.error); return; }
+    searchCache[key] = data;
+    applySearchResponse(data, p.target, false);
   })
   .catch(function (e) { log(ICON_ERROR + " 通信エラー: " + e); })
   .finally(function () { setBusy(false); });
+}
+
+document.getElementById("btnSearch").addEventListener("click", function () { runSearch(); });
+
+// ②の保険：キャッシュを無視して最新の情報を取り直す。
+document.getElementById("btnRefresh").addEventListener("click", function () {
+  var p = currentSearchParams();
+  if (!p.keyword) { log("キーワードが空です。"); return; }
+  delete searchCache[cacheKey(p.keyword, p.target, p.maxResults, p.titleOnly)];
+  log(ICON_INFO + " " + tabLabel(p.target) + " の最新の情報を取得し直します…");
+  runSearch();
+});
+
+// ③-C：上限件数を選択肢の最大値まで引き上げて再取得する
+// （既定は少なめの件数で素早く表示し、必要なときだけ多く取りに行く）。
+document.getElementById("btnLoadMore").addEventListener("click", function () {
+  var sel = document.getElementById("maxResults");
+  var last = sel.options[sel.options.length - 1];
+  if (sel.value !== last.value) {
+    sel.value = last.value;
+  }
+  log(ICON_INFO + " 取得件数を「" + last.text + "」に切り替えて再取得します。");
+  runSearch();
 });
 
 document.getElementById("keyword").addEventListener("keydown", function (e) {

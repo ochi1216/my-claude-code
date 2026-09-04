@@ -362,8 +362,14 @@ def main():
         if shot_path:
             page.screenshot(path=shot_path.replace(".png", "_enovia.png"))
 
-        # 0.Allタブでは、同じDocument Numberでもリビジョンをタイトルに併記する（B5）
+        # 0.Allタブでは、同じDocument Numberでもリビジョンをタイトルに併記する（B5）。
+        # 0.Allタブは、このテストの冒頭で同じキーワードを一度検索済みのため、
+        # タブのキャッシュ（②）によりEnoviaを差し込む前の結果が再表示される。
+        # 実際の利用でも起こり得る状況なので、「🔄 最新の情報に更新」で
+        # 取得し直せることも合わせて確認する。
         page.click("#tabs button[data-target='all']")
+        page.wait_for_timeout(900)
+        page.click("#btnRefresh")
         page.wait_for_timeout(900)
         all_titles_with_enovia = page.eval_on_selector_all(
             "#resultBody tr td.title", "e => e.map(x => x.innerText)")
@@ -401,6 +407,56 @@ def main():
         settled_titles = titles()
         check("応答が届いたら通常どおり結果に置き換わる",
               settled_titles == ["slow-hit"], str(settled_titles))
+
+        # ── タブのキャッシュ（②）と「さらに取得」（③-C） ─────
+        # 越智さんからの要望：条件を変えていないのにタブを行き来するたびに
+        # 毎回待たされるのを無くしたい／最初は少なめでも早く表示し、
+        # 必要なときだけ多く取得したい、という2点への対応を確認する。
+        call_count = {"n": 0}
+        TOTAL_MATCHES = 15   # 上限件数(10)より多く、かつ上限の選択肢(500)より少ない
+
+        def counting_search(keyword, max_results):
+            call_count["n"] += 1
+            n = min(max_results, TOTAL_MATCHES)
+            rows = [dsm.SearchResult(source="SharePoint", title="cache-hit-%d" % i,
+                                     url="https://x/cache-%d.docx" % i, rank=i + 1)
+                    for i in range(n)]
+            return {"results": rows, "total": TOTAL_MATCHES, "note": ""}
+
+        dsm._manager.providers[dsm.TARGET_SHAREPOINT].search = counting_search
+        page.click("#tabs button[data-target='sharepoint']")
+        page.fill("#keyword", "cachetest")
+        page.click("#btnSearch")
+        page.wait_for_timeout(600)
+        check("初回検索でSharePointが1回呼ばれる", call_count["n"] == 1, call_count["n"])
+        check("上限(10件)より該当件数(15件)が多いので「さらに取得」が有効になる",
+              not page.is_disabled("#btnLoadMore"), "")
+
+        # 条件を変えずにタブを行き来しても、キャッシュにより再取得しない
+        page.click("#tabs button[data-target='nexus']")
+        page.wait_for_timeout(400)
+        page.click("#tabs button[data-target='sharepoint']")
+        page.wait_for_timeout(400)
+        check("同じ条件でタブへ戻ってもSharePointは再度呼ばれない（キャッシュ）",
+              call_count["n"] == 1, call_count["n"])
+        check("キャッシュ表示でも結果はすぐに反映される",
+              titles() == ["cache-hit-%d" % i for i in range(10)], str(titles()))
+
+        # 「🔄 最新の情報に更新」はキャッシュを無視して取得し直す
+        page.click("#btnRefresh")
+        page.wait_for_timeout(600)
+        check("「最新の情報に更新」はキャッシュを無視して再取得する",
+              call_count["n"] == 2, call_count["n"])
+
+        # 「さらに取得」は上限を選択肢の最大値まで引き上げて再取得する
+        page.click("#btnLoadMore")
+        page.wait_for_timeout(600)
+        check("「さらに取得」で取得件数の選択が最大値になる",
+              page.input_value("#maxResults") == "500", page.input_value("#maxResults"))
+        check("「さらに取得」で該当件数(15件)がすべて取得される",
+              len(titles()) == TOTAL_MATCHES, str(len(titles())))
+        check("該当件数をすべて取得したら「さらに取得」は無効化される",
+              page.is_disabled("#btnLoadMore"), "")
 
         browser.close()
 
