@@ -525,8 +525,10 @@ def main():
                              url="https://x/s.pptx", doc_type="pptx", rank=3),
             dsm.SearchResult(source="SharePoint", title="a-sheet",
                              url="https://x/e.xlsx", doc_type="xlsx", rank=4),
+            dsm.SearchResult(source="SharePoint", title="a-macro-sheet",
+                             url="https://x/e2.xlsm", doc_type="xlsm", rank=5),
             dsm.SearchResult(source="SharePoint", title="a-pdf",
-                             url="https://x/p.pdf", doc_type="pdf", rank=5),
+                             url="https://x/p.pdf", doc_type="pdf", rank=6),
         ]
         dsm._manager.providers[dsm.TARGET_SHAREPOINT].search = (
             lambda kw, mx: {"results": list(summary_rows), "total": len(summary_rows), "note": ""})
@@ -535,13 +537,16 @@ def main():
         page.wait_for_timeout(400)
 
         summary_buttons = page.query_selector_all("#resultBody button.mini")
-        check("要約ボタンが行数ぶん出る", len(summary_buttons) == 5, len(summary_buttons))
+        check("要約ボタンが行数ぶん出る", len(summary_buttons) == 6, len(summary_buttons))
         disabled_states = [b.is_disabled() for b in summary_buttons]
         check("docx行の要約ボタンは有効", disabled_states[0] is False, disabled_states)
         check("フォルダ行の要約ボタンは無効", disabled_states[1] is True, disabled_states)
         check("pptx行の要約ボタンは有効（Phase Bで追加）", disabled_states[2] is False, disabled_states)
         check("xlsx行の要約ボタンは有効（Phase Cで追加）", disabled_states[3] is False, disabled_states)
-        check("pdf行の要約ボタンは無効（現状docx/pptx/xlsxのみ対応）", disabled_states[4] is True, disabled_states)
+        check("xlsm行の要約ボタンは有効（マクロ有効ブックもxlsxと同様に対応）",
+              disabled_states[4] is False, disabled_states)
+        check("pdf行の要約ボタンは無効（現状docx/pptx/xlsx/xlsmのみ対応）",
+              disabled_states[5] is True, disabled_states)
 
         summary_buttons[0].click()
         check("クリックするとポップアップが開く", page.is_visible("#summaryOverlay"))

@@ -159,9 +159,14 @@ xlsx_row = mk(doc_type="xlsx")
 check("xlsxも要約可能（Phase Cで追加）",
       dsm._summarizable_reason(xlsx_row) == (True, ""), dsm._summarizable_reason(xlsx_row))
 
+xlsm_row = mk(doc_type="xlsm")
+check("xlsmも要約可能（マクロ有効ブック、xlsxと同じ抽出）",
+      dsm._summarizable_reason(xlsm_row) == (True, ""), dsm._summarizable_reason(xlsm_row))
+
 pdf_row = mk(doc_type="pdf")
 reason = dsm._summarizable_reason(pdf_row)
-check("docx/pptx/xlsx以外（pdf）は現状要約不可", reason[0] is False and "pdf" in reason[1], reason)
+check("docx/pptx/xlsx/xlsm以外（pdf）は現状要約不可",
+      reason[0] is False and "pdf" in reason[1], reason)
 
 nexus_row = mk(source="Nexus")
 check("Nexusのdocxも要約可能（SharePointProvider系統を継承）",
@@ -266,6 +271,9 @@ if HAS_DOCX and HAS_PPTX:
     check("doc_type=docxならdocx抽出が使われる", "docxの本文" in d_text, d_text)
     check("doc_type=pptxならpptx抽出が使われる", "pptxの本文" in p_text, p_text)
     check("doc_type=xlsxならxlsx抽出が使われる", "xlsxの本文" in x_text2, x_text2)
+    xm_text, _, _ = dsm._extract_text_for_summary("xlsm", xlsx_bytes_for_dispatch, 10000)
+    check("doc_type=xlsmでもxlsx抽出が使われる（同じファイル形式）",
+          "xlsxの本文" in xm_text, xm_text)
 else:
     print("\n[G2c] python-docx/python-pptx未インストールのためスキップ")
 
@@ -575,8 +583,8 @@ check("/api/summarize を呼び出すfetchがある", '"/api/summarize"' in html
 check("Escキーで閉じるハンドラがある", "summaryPopupKeyHandler" in html)
 check("示唆を箇条書き（配列）で描画するロジックがある（文章と箇条書きの混在対策）",
       "summary-insight-list" in html)
-check("画面側の対応形式判定にpptx/xlsxが含まれる（Phase B/C）",
-      'SUMMARIZABLE_EXTENSIONS = ["docx", "pptx", "xlsx"]' in html)
+check("画面側の対応形式判定にpptx/xlsx/xlsmが含まれる",
+      'SUMMARIZABLE_EXTENSIONS = ["docx", "pptx", "xlsx", "xlsm"]' in html)
 check("画面側に切り詰め確認の描画ロジックがある",
       "renderTruncationConfirm" in html and "needs_confirmation" in html)
 
