@@ -161,9 +161,12 @@ def main():
                                             "e => e.map(x => x.innerText.trim())")
         # v10: Allタブからフォルダ列を外した。Nexusのフォルダ名は内部ハッシュで、
         # SharePointと同じ列に並べても意味を成さないため（仕様変更）。
-        check("Allタブの列構成（ソース/タイトル/選択/作成者/最終更新日/種別/サイト）",
-              len(headers) == 7 and headers[1].startswith("タイトル")
-              and headers[6].startswith("サイト"), str(headers))
+        # 要約機能Phase A(20260904_02)で末尾に「要約」列を追加したため8列になった
+        # （仕様変更に伴う陳腐化。列自体は次のcheckで別途確認する）。
+        check("Allタブの列構成（ソース/タイトル/選択/作成者/最終更新日/種別/サイト/要約）",
+              len(headers) == 8 and headers[1].startswith("タイトル")
+              and headers[6].startswith("サイト") and headers[7].startswith("要約"),
+              str(headers))
         check("Allタブにフォルダ列は出さない",
               not any(h.startswith("フォルダ") for h in headers), str(headers))
 
@@ -506,6 +509,50 @@ def main():
         page.wait_for_timeout(200)
         check("0.Allタブに戻るとフォルダのみを検索する行はまた隠れる",
               not page.is_visible("#folderOnlyRow"))
+
+        # ── 文書の要約（AI・Gemini経由）── 要約機能 Phase A ─────────
+        page.click("#tabs button[data-target='sharepoint']")
+        page.wait_for_timeout(200)
+        summary_rows = [
+            dsm.SearchResult(source="SharePoint", title="summarizable-doc",
+                             url="https://x/sd.docx", doc_type="docx", rank=1),
+            dsm.SearchResult(source="SharePoint", title="a-folder-2",
+                             url="https://x/folder2", doc_type=dsm.FOLDER_TYPE_LABEL,
+                             is_folder=True, rank=2),
+            dsm.SearchResult(source="SharePoint", title="a-slide",
+                             url="https://x/s.pptx", doc_type="pptx", rank=3),
+        ]
+        dsm._manager.providers[dsm.TARGET_SHAREPOINT].search = (
+            lambda kw, mx: {"results": list(summary_rows), "total": len(summary_rows), "note": ""})
+        page.fill("#keyword", "summarytest")
+        page.click("#btnSearch")
+        page.wait_for_timeout(400)
+
+        summary_buttons = page.query_selector_all("#resultBody button.mini")
+        check("要約ボタンが行数ぶん出る", len(summary_buttons) == 3, len(summary_buttons))
+        disabled_states = [b.is_disabled() for b in summary_buttons]
+        check("docx行の要約ボタンは有効", disabled_states[0] is False, disabled_states)
+        check("フォルダ行の要約ボタンは無効", disabled_states[1] is True, disabled_states)
+        check("pptx行の要約ボタンは無効（Phase Aはdocxのみ）", disabled_states[2] is True, disabled_states)
+
+        summary_buttons[0].click()
+        check("クリックするとポップアップが開く", page.is_visible("#summaryOverlay"))
+
+        page.wait_for_timeout(800)
+        # このサンドボックスにはGemini共通モジュールが無いため、実際に
+        # エンドツーエンドでエラー表示まで辿り着くことを確認する
+        # （検索とは独立した経路で、要約機能だけがエラーになることを示す）。
+        # 応答が非常に速い（HAS_GEMINIチェックで即エラーになる）ため、
+        # 「生成中」表示は一瞬しか出ずタイミング依存になる。ここでは
+        # 最終的にエラー表示まで到達することだけを確認する。
+        error_text = page.text_content(".summary-body")
+        check("Gemini未設定の環境ではエラーメッセージが表示される（黙って固まらない）",
+              "summary-error" in page.eval_on_selector(".summary-body", "e => e.innerHTML"),
+              error_text)
+
+        page.click(".summary-header button")
+        page.wait_for_timeout(100)
+        check("閉じるボタンでポップアップが消える", not page.is_visible("#summaryOverlay"))
 
         browser.close()
 

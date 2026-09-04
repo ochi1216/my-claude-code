@@ -3,6 +3,17 @@ requests>=2.31
 flask>=3.0
 openpyxl>=3.1
 
+# 検索結果の要約機能（Phase A: .docxのみ）で本文抽出に使用。
+# 未インストールでも他の機能（検索・出力・ダウンロード等）には影響しないが、
+# 「要約」ボタンを押すと分かりやすいエラーメッセージで案内される。
+python-docx>=1.1
+
+# Gemini API呼び出しは共通モジュール gemini_client.py
+# （PythonScripts\common\gemini_client.py、word_translator等と共用）経由。
+# gemini_client.py 自体がrequestsを使うため、上記requestsの導入で足りる
+# （追加インストールは不要）。環境変数 GEMINI_API_KEY または GEMINI_PROXY_URL
+# のいずれかを設定しておく必要がある（README参照）。
+
 # playwright は「Enoviaにログイン」ボタン（Cookie取得用のEdge起動）でのみ使う
 # 任意の依存。未インストールでも他の機能（SharePoint/Nexus検索、Enoviaの
 # 検索そのもの、config.jsonへのCookie手貼り運用）には影響しない。
