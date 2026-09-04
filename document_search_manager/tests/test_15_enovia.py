@@ -126,7 +126,10 @@ check("Description（ds6w:description）",
       result_rev3.description == "NEH8100 Verification and Validation Plan",
       result_rev3.description)
 check("Revision（ds6wg:revision）", result_rev3.revision == "3", result_rev3.revision)
-check("State（ds6w:what/ds6w:status、そのまま）",
+check("State（ds6w:what/ds6w:status、そのまま。"
+      "ポリシー名を一律の定型句とみなして削る案を検討したが、実機データで "
+      "\"nex_Superseded.SUP\" のようにポリシー名側にこそ意味がある例が"
+      "見つかったため、生の値のまま表示することにした）",
       result_rev3.enovia_state == "Document Release.IN_WORK", result_rev3.enovia_state)
 check("作成者（ds6w:who/ds6w:responsible/ds6w:originator）",
       result_rev3.author == "Sheribeth Bolanos", result_rev3.author)
