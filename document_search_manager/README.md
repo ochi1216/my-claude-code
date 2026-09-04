@@ -198,8 +198,8 @@ Enovia検索を使うには、**画面の「Enoviaにログイン」ボタン**�
 ### 文書の要約（AI・Gemini経由）
 
 検索結果を開かなくても、内容の見当が付くように、AI（Gemini）による
-3段階の要約をポップアップ表示する機能です（Phase A、対象は
-SharePoint / Nexus の `.docx` のみ）。
+3段階の要約をポップアップ表示する機能です（対象は
+SharePoint / Nexus の `.docx` / `.pptx`）。
 
 - ①**Executive Summary**：この文書が何についてのものかを300字程度で説明。
 - ②**文書の構造**：章立て（見出しや話題のまとまり）ごとの概要一覧。
@@ -210,7 +210,7 @@ SharePoint / Nexus の `.docx` のみ）。
 
 **セットアップ**（要約機能を使わない場合は不要）:
 
-1. `pip install python-docx`
+1. `pip install python-docx python-pptx`
 2. 環境変数 `GEMINI_API_KEY`（直接呼び出し用）または `GEMINI_PROXY_URL`
    （自宅PCプロキシ経由用）のいずれかを設定する
    （word_translator等の翻訳ツールと共通の設定です。既に設定済みの場合は
@@ -225,8 +225,8 @@ SharePoint / Nexus の `.docx` のみ）。
 | 行の種類 | 理由 |
 |---|---|
 | フォルダ | 本文を持たないため |
-| Enovia | 検索の実体・認証方式が全く別（Exalead系API）のため、Phase Aでは未対応 |
-| `.docx`以外（.pptx/.pdf/.xlsx等） | Phase Aのスコープ外（今後のPhase Bで順次対応予定） |
+| Enovia | 検索の実体・認証方式が全く別（Exalead系API）のため未対応 |
+| `.docx`/`.pptx`以外（.pdf/.xlsx等） | 現時点のスコープ外（今後順次対応予定） |
 
 対象外の行では「要約」ボタンが最初から無効になっており、
 マウスを載せると理由が表示されます。
@@ -244,6 +244,9 @@ SharePoint / Nexus の `.docx` のみ）。
   消えます）。
 - 初回の要約生成には、文書のダウンロード・本文抽出・AI呼び出しを含め
   数十秒かかることがあります。
+- 本文抽出は、`.docx`は見出し・段落のテキスト、`.pptx`はスライドの
+  タイトル・本文テキストのみが対象です。**表・グラフ・画像中の文字列、
+  `.pptx`の発表者ノートは対象外**です。
 
 ### 系統別ステータスの見方
 
@@ -423,9 +426,10 @@ word_translator等の翻訳ツールで使っているものと同じ環境変�
 
 ## 既知の制限（現時点のスコープ外）
 
-- **文書の要約（AI）は SharePoint / Nexus の `.docx` のみ対応（Phase A）。**
-  フォルダ・Enovia・`.pptx`/`.pdf`/`.xlsx`は現時点で非対応
-  （今後のPhase Bで順次拡張予定。依頼順: docx→pptx→pdf→xlsx）。
+- **文書の要約（AI）は SharePoint / Nexus の `.docx` / `.pptx` のみ対応。**
+  フォルダ・Enovia・`.pdf`/`.xlsx`は現時点で非対応
+  （今後順次拡張予定。依頼順: docx→pptx→pdf→xlsx）。
+  `.pptx`は表・グラフ・画像中の文字列、発表者ノートは抽出対象外。
 - **Enoviaの一括ZIPダウンロードは未対応。** 詳細画面の `WebPublish URL` は
   文書の状態（`Allow Web publish: No` 等）次第で拒否されることを実機で
   確認済みのため、設計から外した。「Enoviaで開く」からEnovia画面上で

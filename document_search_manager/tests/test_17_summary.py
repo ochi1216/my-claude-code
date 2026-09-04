@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""文書の要約機能（AI・Gemini経由）── 要約機能 Phase A
+"""文書の要約機能（AI・Gemini経由）── 要約機能 Phase A/B
 
 依頼:「検索結果の内容を、①300字のExecutive Summary ②章立てと概要
 ③Japan Site Managerへの示唆、の3段階でAI要約したい」への対応。
 
-対象は SharePoint / Nexus の .docx のみ（Phase Aのスコープ）。フォルダ・
-Enovia・他形式（.pptx/.pdf/.xlsx）は対象外（設計議論で合意済み、
+対象は SharePoint / Nexus の .docx / .pptx（Phase Aで.docx、Phase Bで.pptx
+を追加）。フォルダ・Enovia・他形式（.pdf/.xlsx）は対象外（設計議論で合意済み、
 DESIGN_NOTES参照）。AI呼び出しは既存の翻訳ツール群と同じ共通モジュール
 gemini_client.py を流用するが、本テストはネットワークには一切アクセスせず、
 _generate_advanced 等をスタブに差し替えて検証する。
@@ -26,6 +26,12 @@ try:
     HAS_DOCX = True
 except ImportError:
     HAS_DOCX = False
+
+try:
+    from pptx import Presentation
+    HAS_PPTX = True
+except ImportError:
+    HAS_PPTX = False
 
 ok, ng = 0, 0
 
@@ -50,6 +56,37 @@ def make_docx_bytes(paragraphs):
             doc.add_paragraph(text)
     buf = io.BytesIO()
     doc.save(buf)
+    return buf.getvalue()
+
+
+def make_pptx_bytes(slides):
+    """[(title_or_None, [本文の段落, ...]), ...] からpptxのバイト列を作る。"""
+    from pptx.util import Inches
+
+    prs = Presentation()
+    layout_with_title = prs.slide_layouts[1]   # タイトル＋本文
+    layout_blank = prs.slide_layouts[6]        # 白紙（タイトルプレースホルダ無し）
+
+    for title, body_lines in slides:
+        if title is not None:
+            slide = prs.slides.add_slide(layout_with_title)
+            slide.shapes.title.text = title
+            if body_lines:
+                body_tf = slide.placeholders[1].text_frame
+                body_tf.text = body_lines[0]
+                for line in body_lines[1:]:
+                    body_tf.add_paragraph().text = line
+        else:
+            slide = prs.slides.add_slide(layout_blank)
+            if body_lines:
+                box = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(4), Inches(3))
+                tf = box.text_frame
+                tf.text = body_lines[0]
+                for line in body_lines[1:]:
+                    tf.add_paragraph().text = line
+
+    buf = io.BytesIO()
+    prs.save(buf)
     return buf.getvalue()
 
 
@@ -100,8 +137,12 @@ reason = dsm._summarizable_reason(no_url_row)
 check("リンクが無い行は要約不可", reason[0] is False and "リンク" in reason[1], reason)
 
 pptx_row = mk(doc_type="pptx")
-reason = dsm._summarizable_reason(pptx_row)
-check("docx以外（pptx）は現状要約不可", reason[0] is False and "pptx" in reason[1], reason)
+check("pptxも要約可能（Phase Bで追加）",
+      dsm._summarizable_reason(pptx_row) == (True, ""), dsm._summarizable_reason(pptx_row))
+
+pdf_row = mk(doc_type="pdf")
+reason = dsm._summarizable_reason(pdf_row)
+check("docx/pptx以外（pdf）は現状要約不可", reason[0] is False and "pdf" in reason[1], reason)
 
 nexus_row = mk(source="Nexus")
 check("Nexusのdocxも要約可能（SharePointProvider系統を継承）",
@@ -136,6 +177,38 @@ if HAS_DOCX:
     check("本文が無ければ空文字", empty_text == "", repr(empty_text))
 else:
     print("\n[G2] python-docx未インストールのためスキップ（他機能には影響しない設計）")
+
+
+# ── G2b _extract_pptx_text（本文抽出・スライド区切り・切り詰め） ────
+if HAS_PPTX:
+    print("\n[G2b] pptx本文抽出（_extract_pptx_text）── Phase Bで追加")
+
+    content = make_pptx_bytes([
+        ("スライド1のタイトル", ["本文1行目", "本文2行目"]),
+        (None, ["タイトル無しスライドの本文"]),
+    ])
+    text, truncated = dsm._extract_pptx_text(content, max_chars=10000)
+    check("スライドの区切りにタイトルが付く", "# Slide 1: スライド1のタイトル" in text, text)
+    check("スライド本文が含まれる", "本文1行目" in text and "本文2行目" in text, text)
+    check("タイトル無しスライドは番号のみの区切りになる", "# Slide 2" in text, text)
+    check("タイトル無しスライドの本文も含まれる",
+          "タイトル無しスライドの本文" in text, text)
+    check("十分に短ければ切り詰められない", truncated is False)
+
+    long_content = make_pptx_bytes([("長いスライド", ["あ" * 100])])
+    long_text, long_truncated = dsm._extract_pptx_text(long_content, max_chars=50)
+    check("上限を超えると切り詰められる", long_truncated is True)
+    check("切り詰め後の長さが上限以下", len(long_text) <= 50, len(long_text))
+
+    print("\n[G2c] 拡張子による振り分け（_extract_text_for_summary）")
+    docx_bytes_for_dispatch = make_docx_bytes([("docxの本文", None)])
+    pptx_bytes_for_dispatch = make_pptx_bytes([("見出し", ["pptxの本文"])])
+    d_text, _ = dsm._extract_text_for_summary("docx", docx_bytes_for_dispatch, 10000)
+    p_text, _ = dsm._extract_text_for_summary("pptx", pptx_bytes_for_dispatch, 10000)
+    check("doc_type=docxならdocx抽出が使われる", "docxの本文" in d_text, d_text)
+    check("doc_type=pptxならpptx抽出が使われる", "pptxの本文" in p_text, p_text)
+else:
+    print("\n[G2b] python-pptx未インストールのためスキップ（他機能には影響しない設計）")
 
 
 # ── G3 _generate_summary（Geminiレスポンスの解析） ──────────────
@@ -217,7 +290,9 @@ rows = [
     mk(title="FolderX", is_folder=True, doc_type=dsm.FOLDER_TYPE_LABEL,
        url="https://x/sites/S/Docs/Folder"),                                    # フォルダ
     mk(title="EnoviaDoc", source="Enovia", url="https://x/sites/S/Docs/B.docx"),  # Enovia
-    mk(title="PptxOne", doc_type="pptx", url="https://x/sites/S/Docs/C.pptx"),  # pptx
+    mk(title="PdfOne", doc_type="pdf", url="https://x/sites/S/Docs/C.pdf"),      # 未対応形式
+    mk(title="PptxDoc", url="https://x/sites/S/Docs/D.pptx", doc_type="pptx",
+       last_modified="2026-09-01"),                                             # 要約可（Phase B）
 ]
 mgr.providers[dsm.TARGET_SHAREPOINT].search = lambda kw, mx: {
     "results": list(rows), "total": len(rows), "note": ""}
@@ -225,6 +300,7 @@ dsm._manager = mgr
 client = dsm.flask_app.test_client()
 search_resp = client.post("/api/search", json={"keyword": "sample", "target": "sharepoint"}).get_json()
 idx_doc_a = idx_of(search_resp, "DocA")
+idx_pptx_doc = idx_of(search_resp, "PptxDoc")
 
 r = client.post("/api/summarize", json={})
 check("idx未指定は400", r.status_code == 400, r.status_code)
@@ -237,9 +313,9 @@ r = client.post("/api/summarize", json={"idx": idx_of(search_resp, "EnoviaDoc")}
 check("Enovia行は400（理由付き）",
       r.status_code == 400 and "Enovia" in r.get_json()["error"], r.get_json())
 
-r = client.post("/api/summarize", json={"idx": idx_of(search_resp, "PptxOne")})
-check("pptx行は400（理由付き）",
-      r.status_code == 400 and "pptx" in r.get_json()["error"], r.get_json())
+r = client.post("/api/summarize", json={"idx": idx_of(search_resp, "PdfOne")})
+check("pdf行は400（理由付き・現状docx/pptxのみ対応）",
+      r.status_code == 400 and "pdf" in r.get_json()["error"], r.get_json())
 
 r = client.post("/api/summarize", json={"idx": "999"})
 check("範囲外の索引は400", r.status_code == 400, r.status_code)
@@ -368,6 +444,21 @@ else:
         r7 = client.post("/api/summarize", json={"idx": idx_doc_a})
         check("Gemini呼び出し失敗は502", r7.status_code == 502
               and "要約の生成に失敗" in r7.get_json()["error"], r7.get_json())
+
+        # ── pptx（Phase Bで追加）でも /api/summarize が一連で動く ──
+        if HAS_PPTX:
+            pptx_bytes = make_pptx_bytes([
+                ("スライド1", ["これはpptxのテスト用の本文です。" * 5]),
+            ])
+            dsm.http_req.get = lambda *a, **k: FakeResp(200, pptx_bytes)
+            dsm._generate_advanced = counting_gemini
+            gemini_calls_before = len(gemini_calls)
+            r8 = client.post("/api/summarize", json={"idx": idx_pptx_doc})
+            check("pptxでも正常系は200", r8.status_code == 200, r8.status_code)
+            check("pptxでもGeminiが呼ばれる（拡張子で抽出関数が振り分けられている）",
+                  len(gemini_calls) == gemini_calls_before + 1, len(gemini_calls))
+        else:
+            print("  (python-pptx未インストールのため、pptxのエンドツーエンド検証はスキップ)")
     finally:
         dsm.http_req.get = orig_http_get
         dsm._generate_advanced = orig_generate_advanced
@@ -387,6 +478,8 @@ check("/api/summarize を呼び出すfetchがある", '"/api/summarize"' in html
 check("Escキーで閉じるハンドラがある", "summaryPopupKeyHandler" in html)
 check("示唆を箇条書き（配列）で描画するロジックがある（文章と箇条書きの混在対策）",
       "summary-insight-list" in html)
+check("画面側の対応形式判定にpptxが含まれる（Phase B）",
+      'SUMMARIZABLE_EXTENSIONS = ["docx", "pptx"]' in html)
 
 
 print(f"\n{'=' * 46}\n  成功 {ok} 件 / 失敗 {ng} 件\n{'=' * 46}")

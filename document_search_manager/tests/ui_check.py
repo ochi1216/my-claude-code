@@ -510,7 +510,7 @@ def main():
         check("0.Allタブに戻るとフォルダのみを検索する行はまた隠れる",
               not page.is_visible("#folderOnlyRow"))
 
-        # ── 文書の要約（AI・Gemini経由）── 要約機能 Phase A ─────────
+        # ── 文書の要約（AI・Gemini経由）── 要約機能 Phase A/B ────────
         page.click("#tabs button[data-target='sharepoint']")
         page.wait_for_timeout(200)
         summary_rows = [
@@ -521,6 +521,8 @@ def main():
                              is_folder=True, rank=2),
             dsm.SearchResult(source="SharePoint", title="a-slide",
                              url="https://x/s.pptx", doc_type="pptx", rank=3),
+            dsm.SearchResult(source="SharePoint", title="a-pdf",
+                             url="https://x/p.pdf", doc_type="pdf", rank=4),
         ]
         dsm._manager.providers[dsm.TARGET_SHAREPOINT].search = (
             lambda kw, mx: {"results": list(summary_rows), "total": len(summary_rows), "note": ""})
@@ -529,11 +531,12 @@ def main():
         page.wait_for_timeout(400)
 
         summary_buttons = page.query_selector_all("#resultBody button.mini")
-        check("要約ボタンが行数ぶん出る", len(summary_buttons) == 3, len(summary_buttons))
+        check("要約ボタンが行数ぶん出る", len(summary_buttons) == 4, len(summary_buttons))
         disabled_states = [b.is_disabled() for b in summary_buttons]
         check("docx行の要約ボタンは有効", disabled_states[0] is False, disabled_states)
         check("フォルダ行の要約ボタンは無効", disabled_states[1] is True, disabled_states)
-        check("pptx行の要約ボタンは無効（Phase Aはdocxのみ）", disabled_states[2] is True, disabled_states)
+        check("pptx行の要約ボタンは有効（Phase Bで追加）", disabled_states[2] is False, disabled_states)
+        check("pdf行の要約ボタンは無効（現状docx/pptxのみ対応）", disabled_states[3] is True, disabled_states)
 
         summary_buttons[0].click()
         check("クリックするとポップアップが開く", page.is_visible("#summaryOverlay"))
