@@ -59,7 +59,9 @@ def fake_gemini_response(executive_summary="要約です。",
         {"title": "第1章 概要", "overview": "概要の説明。"},
     ]
     insights = insights if insights is not None else {
-        "use": "活用点", "caution": "注意点", "questions": "問い",
+        "use": ["活用点1", "活用点2", "活用点3"],
+        "caution": ["注意点1", "注意点2", "注意点3"],
+        "questions": ["問い1", "問い2", "問い3"],
     }
     data = {"executive_summary": executive_summary, "chapters": chapters,
             "insights": insights}
@@ -154,7 +156,8 @@ try:
     result = dsm._generate_summary("Sample", "本文テキスト")
     check("executive_summaryを取得できる", result["executive_summary"] == "要約です。", result)
     check("chaptersを取得できる", result["chapters"][0]["title"] == "第1章 概要", result)
-    check("insightsを取得できる", result["insights"]["use"] == "活用点", result)
+    check("insightsを取得できる（箇条書きの配列）",
+          result["insights"]["use"] == ["活用点1", "活用点2", "活用点3"], result)
     check("モデル名が渡される", captured["model"] == dsm.GEMINI_MODEL_NAME, captured.get("model"))
     check("responseMimeTypeがJSON指定", captured["payload"]["generationConfig"]["responseMimeType"]
           == "application/json")
@@ -382,6 +385,8 @@ check("要約可否の判定ロジックがある（Phase Aの対象を絞る）
 check("ポップアップのDOM構造がある", "summaryOverlay" in html and "summary-modal" in html)
 check("/api/summarize を呼び出すfetchがある", '"/api/summarize"' in html)
 check("Escキーで閉じるハンドラがある", "summaryPopupKeyHandler" in html)
+check("示唆を箇条書き（配列）で描画するロジックがある（文章と箇条書きの混在対策）",
+      "summary-insight-list" in html)
 
 
 print(f"\n{'=' * 46}\n  成功 {ok} 件 / 失敗 {ng} 件\n{'=' * 46}")
