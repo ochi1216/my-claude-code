@@ -30,13 +30,18 @@ CFG = dict(dsm.DEFAULT_CFG)
 SCOPE = "https://nexperia.sharepoint.com/sites/SF_QualityDocumentsProd/Documents"
 
 # ── T1 片方が時間内に終わらなくても、全体を失敗にしない ──────
+# v20260904_01でEnoviaが実装済みになり TARGET_ALL の対象が3系統になったため、
+# 全体の待ち時間枠（provider_timeout_sec × 系統数）も3倍になった。
+# sleepの長さは系統数から動的に計算し、版が上がって系統が増えても
+# このテストが陳腐化しないようにする（仕様変更ではなく実装数の変化のため）。
 print("\n[T1] 並列実行の部分成功（v10で HTTP 500 になっていた不具合）")
 cfg_fast = dict(CFG, provider_timeout_sec=1)
 mgr = dsm.SearchManager(cfg_fast, DummyAuth())
+sleep_sec = cfg_fast["provider_timeout_sec"] * len(mgr.providers) + 1.5
 
 
 def slow_search(keyword, max_results):
-    time.sleep(2.5)      # provider_timeout_sec を超える
+    time.sleep(sleep_sec)      # 全体の待ち時間枠を確実に超える
     return {"results": [], "total": 0, "note": ""}
 
 
@@ -44,6 +49,10 @@ mgr.providers[dsm.TARGET_SHAREPOINT].search = (
     lambda kw, mx: {"results": [dsm.SearchResult(source="SharePoint", title="hit")],
                     "total": 1, "note": ""})
 mgr.providers[dsm.TARGET_NEXUS].search = slow_search
+# Enoviaは未ログインで例外を投げても検証に支障はないが、この検証の主眼は
+# Nexusのタイムアウトなので、即時0件を返すスタブにして明確にしておく。
+mgr.providers[dsm.TARGET_ENOVIA].search = (
+    lambda kw, mx: {"results": [], "total": 0, "note": ""})
 
 out = mgr.search("validation", dsm.TARGET_ALL, 10)
 check("例外を投げず結果を返す（部分成功）", isinstance(out, dict), str(type(out)))

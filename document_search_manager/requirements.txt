@@ -2,3 +2,9 @@ msal>=1.24
 requests>=2.31
 flask>=3.0
 openpyxl>=3.1
+
+# playwright は「Enoviaにログイン」ボタン（Cookie取得用のEdge起動）でのみ使う
+# 任意の依存。未インストールでも他の機能（SharePoint/Nexus検索、Enoviaの
+# 検索そのもの、config.jsonへのCookie手貼り運用）には影響しない。
+# 会社PCでは導入済み（pip install playwright, 2026-09-04確認）。
+# playwright>=1.40

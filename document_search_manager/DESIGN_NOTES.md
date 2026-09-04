@@ -373,24 +373,104 @@ Shareflexはドキュメントを `Documents/3E08-CD5F/` のような**内部ハ
 - **Graph（`graph.microsoft.com`）はMCASの経路外**なので、この問題を完全に回避できる。
   `po_database_organizer` でも実証済み。
 
-### 3-3. Enovia（Phase 3）— 未確認事項
+### 3-3. ★解決済★ Enovia（Phase 3）— 実装方式の確定と実装（v20260904_01）
 
-- URLの `emxNavigator.jsp` は **ENOVIA クラシック（V6系）Navigator UI**。
-  社内は2017年版。**IT責任者不在のため承認は不要**（越智さん確認済み）。
-- URL末尾の `ticket=ST-...` は **CASのService Ticket＝ワンタイム**で再利用不可。
-- 2017年版＋社内カスタマイズ環境のため、**公開ドキュメントは当てにならない。
-  推測で実装しない。**
-- **次にやること**：Enoviaで検索を1回実行し、F12 → Network → Fetch/XHR で
-  リクエスト（URL・メソッド・Payload・レスポンス形式）をキャプチャして共有してもらう。
-  これで実装方式が確定する（所要10分）。
-- 実装案:
-  - **A（第一候補）**：`requests.Session` で3DPassport(CAS)ログイン → セッション保持
-    → キャプチャした検索リクエストを再現 → パース
-  - **B（保険）**：Playwrightで会社PCのSSOを使いUI操作＋結果取得
-    （※会社PCでPlaywrightが使えるかは**未確認**）
-  - **C（最終手段）**：手動エクスポート → ローカル索引化
-- 検索対象は**ドキュメントのみ**でよい（越智さん確認済み）。
-- Enoviaプロバイダは独立したアダプタなので、**実装できなくても①②は無傷**。
+**当初の想定（案A: requests.Session でCASログインを再現）は的中し、
+Playwrightは「ログインでCookieを取るときだけ」使う形（案B'）に落ち着いた。**
+経緯と確定事項を残す。
+
+#### 調査の経緯（越智さんとの往復）
+
+1. **1回目のF12キャプチャは空振り**：`Keep log` 未チェック／検索実行後に
+   DevToolsを開いていたため、検索リクエストが記録されていなかった。
+   → 手順を「F12を先に開く→ Keep log ON → その後で検索」に修正して再依頼。
+2. **2回目のHARにも検索リクエストが無し**：別画面（Project Management）の
+   操作を録ってしまっていた。ただし副産物として、Enoviaのクラシック側の
+   表が `emxIndentedTable.jsp`（GET・HTML）で描画されていることが分かった。
+3. **3回目、同じキーワードで何度検索してもNetworkに何も出ない**：
+   「メモリから再描画しているのでは」と疑ったが誤りだった。件数もアイコンも
+   実際に変わっており、**検索は実行されていた**。原因はNetworkパネルの
+   フィルタや録画タイミングではなく、**検索の宛先がキャプチャ対象と
+   別ホスト（`federated.plm.nexperia.com`）だったため**、そもそもリストに
+   出ていなかった。
+4. **Consoleに `XMLHttpRequest.prototype.open/send` をフックするコードを
+   貼ってもらい、実行中に捕捉**：ここで初めて実際のエンドポイントと
+   リクエストボディの一部（`Show more` で省略された分含む）が判明した。
+5. **`window.fetch`/`XMLHttpRequest` をフックしてレスポンスまで含めて
+   JSONに保存するコードを実行してもらい**、リクエスト全文・レスポンス
+   全文（`infos.nhits` / `results[].attributes[]` の構造）を確定した。
+6. **越智さんが実際にEnoviaの画面上でURLを3つ試し**、
+   「Enoviaで開く」リンクの形式（`emxNavigator.jsp?objectId=<resourceid>`）と、
+   `WebPublish URL` によるダウンロードが**文書の状態次第で拒否される**
+   ことを実測で確定した。
+
+**教訓**：F12のNetworkタブは「今見えている画面と同じホストへの通信」
+   しか直感的には見つけられない。**別ホストへの通信は、Consoleでの
+   XHR/fetchフックの方が確実**（ホストをまたいでも捕まえられるため）。
+
+#### 確定した仕様
+
+- **検索の実体**：`POST https://federated.plm.nexperia.com/federated/search
+  ?xrequestedwith=xmlhttprequest`（Exalead系のJSON API）。
+  クラシックUI（`emxNavigator.jsp` 等）は結果表示にのみ関与し、
+  検索そのものには関与しない。
+- **認証はCookieのみ**。リクエストヘッダーは `Accept` / `Content-Type` の
+  2つだけで、トークン・CSRFの類は不要（実測で確認）。
+- **リクエスト本文**：`query`（キーワード）/ `nresults`（1ページの件数）/
+  1ページ目は `start`、2ページ目以降は前回応答の `infos.next_start` を
+  そのまま `next_start` に入れ `refine: {}` を追加（実測どおりの切り替え）。
+  `specific_source_parameter.3dspace.additional_query` に、対象タイプを
+  `flattenedtaxonomies:"types/<型名>"` のORで191種類列挙し、
+  `Person` / `Security Context` の2種は別枠の `AND NOT (...)` で除外、
+  末尾に `AND (latestrevision:true OR NOT listoffields:latestrevision)`
+  を付ける（すべてブラウザの実リクエストをそのまま転記）。
+- **レスポンス**：`infos.nhits` が総件数（**絞り込み前の全種別合計**。
+  Documentだけの件数ではない）。`results[].attributes[]` は
+  `{format, name, value}` の配列で、`ds6w:identifier`（文書番号）/
+  `ds6w:label`（タイトル）/ `ds6w:description` / `ds6wg:revision` /
+  `ds6w:what/ds6w:status`（状態）/ `ds6w:who/ds6w:responsible`（Doc Owner）/
+  `ds6w:who/ds6w:responsible/ds6w:originator`（作成者）/
+  `ds6w:who/ds6w:lastModifiedBy`（最終更新者。無い行もある）/
+  `ds6w:when/ds6w:modified` / `ds6w:when/ds6w:created`（いずれもUTC ISO8601）/
+  `ds6w:where/ds6w:context/ds6w:folder` / `ds6w:what/ds6w:docExtension` /
+  `resourceid`（internal）が実測で確認できた。
+- **`ds6w:what/ds6w:type`** で文書型を判定できる（`"Document"` / `"Issue"` 等）。
+  型のOR条件は緩いまま（Issueも含めて191種類）にし、**応答を受けてから
+  クライアント側で `Document` だけに絞る**設計にした
+  （`enovia_document_type_only`、既定true）。理由：型のOR条件を絞り込むと
+  Enovia画面の挙動と食い違うリスクがあるが、応答後の絞り込みなら
+  いつでも設定で戻せる。
+- **同一Document Numberでもリビジョン違いは別行のまま返る**（実機の
+  3DSearch画面でも同様。`latestrevision` 句はほとんど効いていない）。
+  → **D1（承認済み）**：全部表示する。Enovia画面と一致させることを優先。
+- **「Enoviaで開く」リンク**：`https://dspace.plm.nexperia.com/3dspace/
+  common/emxNavigator.jsp?objectId=<resourceid>` で実際に文書が開くことを
+  実機で確認済み（2026-09-04、`DOC-594838` 1件）。
+- **ダウンロードは実装しない**：詳細画面の `WebPublish URL`
+  （`.../nexwebpublish/download?type=Document&name=<番号>&fileName=<ファイル名>`）
+  は、`Allow Web publish: No` の文書では
+  `Document ... doesnt exist or not in valid state, Download is not possible`
+  で拒否されることを実機で確認した。`fileName` を省略しても同じ結果。
+  **一括ZIPダウンロードの対象からEnoviaは除外し**、「Enoviaで開く」から
+  Enovia画面上のDownload操作に委ねる設計にした。
+- **タイトル限定検索の構文は未確定のまま**。推測で `title:` 等の構文を
+  決め打ちせず、常に全文検索を行い、「Enovia検索診断」ボタン（Nexus検索
+  診断と同じ考え方）で候補（`title:`／`ds6w:label:`）の件数を実測して
+  確認できるようにした。
+
+#### 認証の実装（越智さんの回答を反映）
+
+- 「1日1回ログインすれば、その後はEnoviaのトップにそのまま入れる。
+  ログインが必要ならその場は手作業ログインで構わない」という回答から、
+  **Playwrightで会社PC既存のEdge（`channel="msedge"`。Chromiumの追加
+  ダウンロードは発生しない）をログイン時だけ起動し、越智さんが手動で
+  ログイン後にウィンドウを閉じたらCookieを保存する**方式にした
+  （画面の「Enoviaにログイン」ボタン）。
+- EnoviaのDOM構造やログイン後の遷移先URLを推測して自動判定すると、
+  UI変更に弱くなるため、**「ウィンドウを閉じる」という人間の意思表示**
+  を合図にした（タイムアウトした場合もその時点のCookieで保存を試みる）。
+- 保険として、Cookieを `config.json` に手で貼る方式
+  （`enovia_auth_mode="manual"`）も残した。
 
 ---
 
@@ -504,7 +584,7 @@ batやショートカットから起動するとパスがずれる。この弱�
 
 ```
 cd document_search_manager
-python tests/run_tests.py              # ネットワーク不要。570項目
+python tests/run_tests.py              # ネットワーク不要。663項目
 python tests/ui_check.py               # ブラウザ操作テスト（Playwright必要・任意）
 python tests/ui_check.py --shot ui.png # 画面のスクリーンショットを保存
 ```
@@ -531,7 +611,16 @@ python tests/ui_check.py --shot ui.png # 画面のスクリーンショットを
 - Nexusタブの有効期限の表示と期限切れバッジ ← **確認済み（2026-09-03）**
 
 **SharePoint / Nexus 側に、実機未確認の項目は残っていない。**
-残るのは Enovia（3-3）のみ。
+
+Enovia（Phase 3, v20260904_01）は実装は完了したが、以下は未確認：
+
+- 「Enoviaにログイン」ボタンでのEdge起動〜Cookie保存の一連の流れ
+  （Playwright自体が開発環境に無いため、開発環境では動作確認できない）
+- 実際のキーワードでの検索と、Enovia画面の件数・上位ヒットとの突き合わせ
+- 「Enovia検索診断」でのタイトル限定構文の確認
+- 「Enoviaで開く」リンクが、複数の文書・複数のリビジョンで正しく開くこと
+  （`DOC-594838` 1件では確認済み。3-3参照）
+- 疎通診断でEnoviaが 🟢 になること
 
 ---
 

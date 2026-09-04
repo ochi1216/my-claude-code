@@ -184,12 +184,13 @@ check("Phase2(true)ではSharePoint側のNexus文書を除外", len(kept) == 2 a
 check("除外後もNexus側の行は残る", any(r.source == "Nexus" for r in kept))
 
 # ── T5 系統ごとの扱い ────────────────────────────────────────
-# v09 で Nexus を実装したため、「Nexus＝未実装」を前提にしていた項目を
-# 実装済みの前提に更新した（機能の劣化ではなく、仕様変更に伴うテストの陳腐化）。
-# 未実装として残るのは Enovia のみ。
-# 実装済みの系統は Graph を呼びに行くため、ネットワークに出ないよう
+# v09 で Nexus を、v20260904_01(Phase 3) で Enovia を実装したため、
+# 「未実装＝pending」を前提にしていた項目を実装済みの前提に更新した
+# （機能の劣化ではなく、仕様変更に伴うテストの陳腐化）。
+# 現在、実装済みでない系統は無い。
+# 実装済みの系統は外部（Graph/Enovia）を呼びに行くため、ネットワークに出ないよう
 # search() をスタブに差し替えてから検証する。
-print("\n[T5] 系統ごとの扱い（Nexus=実装済み / Enovia=未実装）")
+print("\n[T5] 系統ごとの扱い（SharePoint / Nexus / Enovia、いずれも実装済み）")
 mgr = dsm.SearchManager(CFG, DummyAuth())
 
 
@@ -208,26 +209,36 @@ check("Nexus単独指定ではSharePointを呼ばない",
       [s["key"] for s in res["statuses"]] == ["nexus"],
       str([s["key"] for s in res["statuses"]]))
 
+# Enoviaはログイン情報（Cookie）が無い状態で呼ぶと、他系統同様
+# 「実装済みだが今回失敗した」という state=error で返る（黙って0件にしない）。
 res_e = mgr.search("validation", dsm.TARGET_ENOVIA, 100)
-check("Enovia単独指定は未実装として返る",
-      res_e["results"] == [] and res_e["statuses"][0]["implemented"] is False)
-check("未実装メッセージにPhase 3と明示する",
-      "Phase 3" in res_e["statuses"][0]["message"], res_e["statuses"][0]["message"])
+check("Enovia単独指定は実装済みとして返る（Phase 3）",
+      res_e["statuses"][0]["implemented"] is True, json.dumps(res_e["statuses"]))
+check("未ログイン状態ではエラーとして返り、ログイン方法を案内する",
+      res_e["statuses"][0]["state"] == "error"
+      and "Enoviaにログイン" in res_e["statuses"][0]["message"],
+      json.dumps(res_e["statuses"]))
 
-# All 実行（SharePoint・Nexusともスタブ化）
+mgr.providers[dsm.TARGET_ENOVIA].search = stub_hit("Enovia", "enovia-hit")
+res_e_ok = mgr.search("validation", dsm.TARGET_ENOVIA, 100)
+check("Enoviaもスタブ経由なら結果を返す",
+      len(res_e_ok["results"]) == 1 and res_e_ok["statuses"][0]["state"] == "ok",
+      json.dumps(res_e_ok["statuses"]))
+
+# All 実行（3系統ともスタブ化）
 mgr.providers[dsm.TARGET_SHAREPOINT].search = stub_hit("SharePoint", "hit1")
 res_all = mgr.search("validation", dsm.TARGET_ALL, 100)
 keys = sorted(s["key"] for s in res_all["statuses"])
 check("Allで3系統すべてのステータスを返す",
       keys == ["enovia", "nexus", "sharepoint"], str(keys))
-check("Allの結果はSharePointとNexusの2件", len(res_all["results"]) == 2,
+check("Allの結果はSharePoint・Nexus・Enoviaの3件", len(res_all["results"]) == 3,
       str(len(res_all["results"])))
 sp = [s for s in res_all["statuses"] if s["key"] == "sharepoint"][0]
 check("SharePointのstateがok", sp["state"] == "ok", sp["state"])
 nx = [s for s in res_all["statuses"] if s["key"] == "nexus"][0]
 check("Nexusのstateがok", nx["state"] == "ok", nx["state"])
 en = [s for s in res_all["statuses"] if s["key"] == "enovia"][0]
-check("Enoviaのstateがpending", en["state"] == "pending", en["state"])
+check("Enoviaのstateもok（スタブ経由）", en["state"] == "ok", en["state"])
 
 # プロバイダが例外を投げても他系統は生き残る
 mgr.providers[dsm.TARGET_SHAREPOINT].search = (
@@ -241,8 +252,12 @@ check("例外時はstate=errorで部分成功", sp_err["state"] == "error" and "
 print("\n[T6] Flaskエンドポイント")
 dsm._cfg = CFG
 dsm._manager = mgr
-# Nexusは0件を返すスタブにしておく（このブロックはSharePoint側の応答を検証する）
+# Nexus・Enoviaは0件を返すスタブにしておく（このブロックはSharePoint側の
+# 応答を検証する。Enoviaは[T5]で1件返すスタブに差し替えたままなので、
+# ここで明示的にリセットしないと0.Allの結果件数がずれる）。
 mgr.providers[dsm.TARGET_NEXUS].search = (
+    lambda kw, mx: {"results": [], "total": 0, "note": ""})
+mgr.providers[dsm.TARGET_ENOVIA].search = (
     lambda kw, mx: {"results": [], "total": 0, "note": ""})
 mgr.providers[dsm.TARGET_SHAREPOINT].search = (
     lambda kw, mx: {"results": [

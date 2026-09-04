@@ -32,3 +32,8 @@ document_search_manager/exports/
 document_search_manager/downloads/
 document_search_manager/session_state.json
 document_search_manager/tests/__pycache__/
+
+# Enovia（3DEXPERIENCE）のログインCookie・ブラウザプロファイル。
+# セッションCookieそのものなので、他ツールのconfig.json同様コミットしない。
+document_search_manager/enovia_session.json
+document_search_manager/enovia_profile/

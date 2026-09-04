@@ -1,5 +1,114 @@
 # Document Search Manager — CHANGELOG
 
+## VERSION 20260904_01
+
+Enovia（3DEXPERIENCE / ENOVIA）検索を追加した（Phase 3）。
+
+### 追加
+
+- **`EnoviaProvider` を実装し、`3. Enovia` タブと `0. All` からEnoviaの
+  ドキュメントを検索できるようにした。** 実装方式は越智さんに依頼した
+  F12キャプチャ（2026-09-04, Enoviaで "FMEA" / "validation" を検索したときの
+  実測データ）から確定し、**推測では実装していない**（DESIGN_NOTES 3-3参照）。
+  - 検索の実体は `POST https://federated.plm.nexperia.com/federated/search`
+    （Exalead系のJSON API）で、Graph API / Entra IDとは完全に独立している。
+    クラシックUIの `emxNavigator.jsp` 等は結果表示にのみ関与する。
+  - 認証はCookieのみで完結する（トークン・CSRF不要）。実測で確認済み。
+- **Enoviaへのログインは「Enoviaにログイン」ボタンで行う。** 会社PC既存の
+  Edge（`channel="msedge"`。Playwright用Chromiumの追加ダウンロードは
+  発生しない）をログイン時だけ起動し、越智さんが手動でログインした後に
+  そのウィンドウを閉じるとCookieが保存される（`enovia_session.json`、
+  `.gitignore`対象）。**そうした理由**: EnoviaのDOM構造やログイン後の
+  遷移先URLを推測して自動判定すると、UIの変更に弱くなるため、
+  「ウィンドウを閉じる」という人間の意思表示を合図にした。
+  - 保険として、Cookieを `config.json` の `enovia_manual_cookie` に直接
+    貼り付ける方式（`enovia_auth_mode="manual"`）も用意した。
+- **Enoviaタブの列構成**: Document Number / Title / Revision / State /
+  Description / 作成者 / Doc Owner / 最終更新者 / 最終更新日 / 作成日 /
+  フォルダ / 種別 / Enoviaで開く。**D1（承認済み）**により、同一Document
+  Numberでもリビジョン違いは別行のまま表示する（Enovia画面と一致させる）。
+  `0. All` タブでは、同じ理由でタイトルに `(Rev.N)` を併記して区別できる
+  ようにした（B5）。
+- **検索対象タイプの絞り込み**: ブラウザが実際に送っていた191種類の
+  タイプ（`config.json` の `enovia_types`）をそのままクエリに使い、
+  応答を受け取った後に `enovia_document_type_only`（既定true, **D2承認済み**）
+  で `Document` 型だけに絞る。件数（`nhits`）は絞り込み前の全種別合計に
+  なるため、画面・出力に注記を出す（黙って正確な件数のふりをしない）。
+- **「Enoviaで開く」リンク**（`emxNavigator.jsp?objectId=<resourceid>`）を
+  追加した。越智さんの実機確認で、このURL形式が実際に文書を開くことを
+  確認済み（2026-09-04）。
+- **「Enovia検索診断」ボタン**を追加した。Enoviaのタイトル限定検索の構文は
+  実機未確認のため、候補（全文検索 / `title:` / `ds6w:label:`）を実測して
+  件数を比較できるようにした（Nexus検索診断と同じ考え方）。それまでは
+  「タイトルだけを検索する」がオンでも常に全文検索を行い、その旨を
+  noteに明示する（推測で絞り込んだふりをしない）。
+- Excel / CSV 出力に、Enovia専用の列構成を追加した。
+
+### 変更しないこと（宣誓）
+
+- **SharePoint / Nexus の検索ロジック・列構成には一切手を入れていない。**
+  Enoviaは独立したプロバイダ（`SearchProvider` を直接継承。
+  `SharePointProvider` は継承しない）として追加した。
+- 既存の認証方式（Graph / MSAL）・要求スコープ（`Sites.Read.All`）は
+  変更していない。EnoviaはGraphとは無関係の別認証（Cookie）。
+- 旧バージョン `_20260903_16.py` は削除せず `old/` へ移動して保持する。
+
+### 未確定（実装は完了しているが、実機での確認が必要）
+
+- **Enoviaのタイトル限定検索の構文**（「Enovia検索診断」で確認する）。
+- **件数の突き合わせ**: `federated/search` の `nhits` と、Enovia画面の
+  表示件数が一致するか（型フィルタの粒度がEnovia画面と同じとは限らない）。
+- **一括ダウンロードは実装していない。** `WebPublish URL` によるダウンロードは、
+  文書の状態（`Allow Web publish: No` 等）次第で拒否されることを実機で
+  確認済みのため、設計から外した（DESIGN_NOTES 3-3）。「Enoviaで開く」から
+  Enovia画面上で操作する運用とする。
+- Playwrightでのログイン取得（Edge起動〜Cookie保存の一連の流れ）は、
+  開発環境ではPlaywright自体が未導入のため動作確認できていない
+  （import失敗時のフォールバックメッセージのみ検証済み）。
+
+### 検証結果
+
+- `python -m py_compile document_search_manager_20260904_01.py`: 合格。
+- **新規の検証 `tests/test_15_enovia.py`（92項目、すべて合格）。**
+  越智さんのF12キャプチャの実データ（DOC-594838のRevision 3 / 2）を
+  そのまま転記して検証に使った。
+  - `additional_query` の組み立てが実測の文字列と完全一致すること
+  - リクエスト本文の1ページ目(`start`)と2ページ目以降(`next_start`+`refine`)
+    の切り替え
+  - レスポンスの属性名（`ds6w:identifier` 等）から各列への対応づけ
+  - Document以外（Issue）の除外と、設定で戻せること
+  - ページングの部分成功、際限なく叩き続けない安全弁（`enovia_max_raw_pages`）
+  - Cookie/セッションの用意（playwright方式・manual方式・未ログイン時の案内）
+  - 疎通診断、タイトル限定検索の診断
+  - Excel / CSV の列構成、`config.example.json` との整合
+  - 画面表示（タブ・ボタン・列定義・一括ダウンロード対象外の除外ロジック）
+- **既存の検証ハーネスを再実行: 累計663項目すべて合格。**
+  Enoviaの実装に伴い、以下は「仕様変更に伴うテスト記述の陳腐化」として
+  期待値を更新した（機能の劣化ではない）。
+  - `test_01_search_core.py`: Enoviaが「未実装」から「実装済み」になった
+    ことに伴う期待値の更新。`0.All` の並列実行対象が3系統になったことに
+    伴う件数の更新。
+  - `test_10_nexus_index_and_tabs.py`: バージョン表示の文言
+    （`Phase 2.5` → `Phase 3`）の更新。
+  - `test_11_timeout_and_fields.py`: `0.All` の対象系統数が2→3になった
+    ことで、並列実行の待ち時間枠（`provider_timeout_sec × 系統数`）が
+    変わったため、タイムアウト検証用のsleep時間を系統数から動的に
+    算出するよう修正（版が上がって系統が増えても陳腐化しないように）。
+- `python tests/ui_check.py`（Playwright / Chromium）: **48項目すべて合格**
+  （既存34項目＋Enoviaタブの新規14項目）。Enoviaタブの列構成、
+  同一Document Numberのリビジョン違いが別行で並ぶこと、`0.All`タブでの
+  `(Rev.N)`併記、一括ダウンロードの選択チェックボックスが無効化される
+  ことを、実際の画面操作で確認した。
+
+### 未実施（実機でのみ確認可能）
+
+- **Enovia画面へのログイン〜「Enoviaにログイン」ボタンでのCookie取得。**
+- **実際のキーワードでの検索と、Enovia画面の件数・上位ヒットとの突き合わせ。**
+- 「Enovia検索診断」でのタイトル限定構文の確認。
+- 「Enoviaで開く」リンクが、複数の文書で正しく開くこと
+  （`DOC-594838` 1件では2026-09-04に確認済み）。
+- 疎通診断でEnoviaが 🟢 になること。
+
 ## VERSION 20260903_16
 
 Nexusタブに「有効期限」列を追加した（最終更新日の右）。

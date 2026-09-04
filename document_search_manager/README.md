@@ -4,12 +4,12 @@
 
 | 選択肢 | 対象 | 状態 |
 |---|---|---|
-| `0. All` | 有効な全系統を並列検索（既定） | ✅ 稼働（SharePoint ＋ Nexus） |
+| `0. All` | 有効な全系統を並列検索（既定） | ✅ 稼働（SharePoint ＋ Nexus ＋ Enovia） |
 | `1. SharePoint` | 社内SharePoint全社横断検索 | ✅ **Phase 1で実装済み** |
 | `2. Nexus` | Shareflex品質文書サイト（SF_QualityDocumentsProd） | ✅ **Phase 2で実装済み** |
-| `3. Enovia` | 3DEXPERIENCE / ENOVIA | ⏳ Phase 3で実装予定 |
+| `3. Enovia` | 3DEXPERIENCE / ENOVIA | ✅ **Phase 3で実装済み**（利用にはEnoviaへのログインが必要。後述） |
 
-未実装の系統は、UI上に「Phase 3で実装予定」と明示されます（黙って0件を返しません）。
+未実装の系統があれば、UI上に「実装予定」と明示されます（黙って0件を返しません）。
 
 **「タイトルだけを検索する」**（既定オン）をオフにすると、文書の本文まで
 検索します。オンのままのほうが目的の文書に辿り着きやすく、オフにすると
@@ -43,6 +43,32 @@ SharePointとNexusでは持っている情報が違うためです（Nexusの実
 - トークンキャッシュは本フォルダ内の `token_cache.json` に分離して保存します
   （`po_database_organizer` と同時に起動しても競合しません）。そのため初回だけ、
   本ツール用のデバイスコード認証が1回必要です。
+
+**EnoviaはGraph / Entra IDとは完全に別の認証**（3DEXPERIENCEのCAS・Cookie）
+です。詳しくは次の「Enoviaへのログイン」を参照してください。
+
+## Enoviaへのログイン（重要）
+
+Enovia検索を使うには、**画面の「Enoviaにログイン」ボタン**を1回押す必要があります。
+
+1. 「Enoviaにログイン」ボタンを押すと、**会社PCに入っているEdge**が別ウィンドウで
+   開きます（Playwright用の新しいブラウザをダウンロードすることはありません）。
+2. 開いた画面でEnoviaにログインします。**1日1回など、既にログイン済みであれば
+   そのままEnoviaのトップ画面が表示されます。**
+3. ログインできたら、**そのウィンドウを閉じてください。** 閉じたタイミングで
+   ログイン情報（Cookie）が `enovia_session.json` に保存され、以後の検索は
+   ブラウザを起動せず高速に行われます。
+4. Cookieには有効期限があります。検索がエラーになったら、もう一度
+   「Enoviaにログイン」を実行してください。
+
+**`enovia_session.json` は `.gitignore` で除外されており、リポジトリには
+コミットされません。** 会社PCのEdgeプロファイル（`enovia_profile/` フォルダ）も
+同様です。
+
+**Playwrightが使えない環境の場合**：`config.json` の `enovia_auth_mode` を
+`"manual"` にし、`enovia_manual_cookie` にブラウザのF12で確認した
+`Cookie` ヘッダーの値をそのまま貼り付けてください（Cookieが切れるたびに
+手で貼り直す必要があります）。
 
 ## セットアップ手順
 
@@ -108,6 +134,19 @@ SharePointとNexusでは持っている情報が違うためです（Nexusの実
 - **疎通診断**ボタンで、各系統が利用可能かを確認できます。
   キーワード不要・1件分の最小リクエストで、接続可否と動作モードだけを確認します
   （結果テーブルは更新されず、実行ログにのみ表示されます）。
+- **Enoviaにログイン**ボタンで、Enovia検索に必要なログイン情報を取得します
+  （前述「Enoviaへのログイン」参照）。
+- **Enovia検索診断**ボタンで、Enoviaのタイトル限定検索に使えそうな構文
+  （全文検索 / `title:` / `ds6w:label:`）の件数を比較できます。
+  Enoviaのタイトル限定構文は実機で未確定のため、確認できるまでは
+  「タイトルだけを検索する」がオンでもEnoviaは常に全文検索を行います。
+- **Enoviaタブ**では、Document Number / Title / Revision / State / Description /
+  作成者 / Doc Owner / 最終更新者 / 最終更新日 / 作成日 / フォルダ / 種別 /
+  Enoviaで開く、の列構成になります。**同じDocument Numberでもリビジョン違いは
+  別行のまま表示します**（Enovia画面と一致させるため）。`0. All` タブでは、
+  タイトルに `(Rev.N)` を添えて見分けられるようにしています。
+  **Enoviaは一括ZIPダウンロードの対象外です**（文書の状態によってはダウンロードURLが
+  拒否されるため）。「Enoviaで開く」からEnovia画面上で操作してください。
 - **Excel出力 / CSV出力**で結果を `exports/` フォルダに保存します。
   **画面で絞り込み・並べ替えた状態がそのまま出力されます。**
   - **Excel**：タイトル・サイト・フォルダの各セルが**ハイパーリンク**になっており、
@@ -134,8 +173,8 @@ SharePointとNexusでは持っている情報が違うためです（Nexusの実
 |---|---|
 | 🟢 | 検索成功（1件以上ヒット） |
 | 🟡 | 検索は成功したが0件 |
-| 🔴 | エラー（メッセージに理由を表示） |
-| ⚪ | 未実装（Phase 3で実装予定） |
+| 🔴 | エラー（メッセージに理由を表示）。Enoviaが未ログインのときもここに出ます |
+| ⚪ | 未実装 |
 
 1つの系統がエラーになっても、他の系統の結果は必ず表示されます（部分成功方式）。
 
@@ -183,6 +222,22 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 "credentials_from": "C:\\\\Users\\\\nx023836\\\\Documents\\\\PythonScripts\\\\my-claude-code\\\\po_database_organizer\\\\config.json"
 ```
 
+### Enoviaの検索がエラーになる（ログイン情報がありません 等）
+
+「Enoviaにログイン」を実行していないか、Cookieの有効期限が切れています。
+画面の「Enoviaにログイン」ボタンを押し、Edgeでログイン後にウィンドウを
+閉じてください。会社PCの制限で `channel="msedge"` が使えない場合は、
+`config.json` の `enovia_auth_mode` を `"manual"` にしてCookieを直接
+貼り付ける方式に切り替えてください（前述「Enoviaへのログイン」参照）。
+
+### Enoviaの件数がEnovia画面と合わない
+
+`federated/search` の `nhits` は、絞り込み前の全種別（Document以外を含む）の
+合計です。画面の行は `Document` 型だけに絞っているため、`nhits` より
+少なくなるのは仕様です（画面・出力にも注記が出ます）。それでも大きく
+食い違う場合は、`enovia_types`（対象タイプ一覧）がEnovia画面の検索範囲と
+一致しているかをご確認ください。
+
 ## 設定項目（`config.json`）
 
 | キー | 既定値 | 説明 |
@@ -214,6 +269,16 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 | `dedupe_nexus_from_sharepoint` | `true` | Nexusと同時に検索したときに、SharePoint側の重複行を除外するか。`1. SharePoint` 単独のときは（取りこぼしを防ぐため）除外しない |
 | `rewrite_host_to_mcas` | `false` | リンクを `.mcas.ms` 経由に書き換えるか |
 | `fallback_site_urls` | `[]` | 全社検索が使えない場合のサイト単位検索対象 |
+| `enovia_base_url` | `.../3dspace` | EnoviaのベースURL。「Enoviaで開く」リンクの土台にもなる |
+| `enovia_search_url` | `federated/search` のURL | Enoviaの検索APIエンドポイント |
+| `enovia_auth_mode` | `playwright` | `playwright`（Edgeでログイン）または `manual`（Cookie手貼り） |
+| `enovia_manual_cookie` | 空 | `enovia_auth_mode="manual"` のときに使うCookieヘッダーの値 |
+| `enovia_browser_channel` | `msedge` | ログイン時に起動するブラウザ（会社PC既存のEdgeを使う） |
+| `enovia_login_timeout_sec` | `300` | ログイン待ちの制限時間（秒）。超えてもその時点のCookieで保存を試みる |
+| `enovia_types` | 191種類 | 検索対象とするEnoviaのタイプ一覧。将来Project Space等を増やす場合はここに追記する |
+| `enovia_document_type_only` | `true` | 応答を `Document` 型だけに絞るか（`nhits` は絞り込み前の合計になる） |
+| `enovia_page_size` | `100` | Enovia検索の1ページあたりの取得件数 |
+| `enovia_max_raw_pages` | `20` | 型フィルタで大半が対象外になるキーワードでも、際限なく叩き続けないための上限ページ数 |
 
 ## 生成物とGit管理
 
@@ -223,6 +288,7 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 - `token_cache.json`（認証トークン）
 - `session_state.json`（前回の検索キーワード・絞り込み条件）
 - `cache/`, `exports/`, `downloads/`（検索キーワード・結果・取得したファイル本体）
+- `enovia_session.json`（EnoviaのログインCookie）, `enovia_profile/`（Edgeプロファイル）
 
 コミット対象は `config.example.json` のみです。
 
@@ -238,7 +304,13 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 
 ## 既知の制限（現時点のスコープ外）
 
-- Enovia検索は未実装（Phase 3）。
+- **Enoviaの一括ZIPダウンロードは未対応。** 詳細画面の `WebPublish URL` は
+  文書の状態（`Allow Web publish: No` 等）次第で拒否されることを実機で
+  確認済みのため、設計から外した。「Enoviaで開く」からEnovia画面上で
+  操作する。
+- **Enoviaのタイトル限定検索の構文は未確定。** 「タイトルだけを検索する」を
+  オンにしても、Enoviaは常に全文検索を行う（構文を推測で決め打ちしていない）。
+  「Enovia検索診断」ボタンで候補の件数を比較できる。
 - 検索結果に**本文スニペットは含めない**（一覧表示までが今回のスコープ）。
 - **Nexusの標準Indexは Nexusタブでのみ表示**します（SharePointには無い列のため）。
   列名の自動判別が外れた場合は、起動後の検索でコンソールに出る実在の列名を見て
@@ -266,7 +338,7 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 - **`tests/`** … 検証ハーネス（ネットワーク不要）。
 
   ```
-  python tests/run_tests.py     # 570項目の自動検証
+  python tests/run_tests.py     # 663項目の自動検証
   python tests/ui_check.py      # ブラウザ操作テスト（Playwright必要・任意）
   ```
 
@@ -282,5 +354,5 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 | Phase 1 | SharePoint全社検索 MVP | ✅ 完了（v20260903_08、実機動作確認済み） |
 | Phase 2 | Nexus検索追加（Graph Searchを `nexus_folder_path` に限定）＋重複排除の有効化 | ✅ 完了（件数はNexus画面と一致することを実測で確認） |
 | Phase 2.5 | 系統別タブ＋Nexus標準Index＋タイトル限定検索＋Nexusリンク | ✅ 完了（v20260903_15、実機で対応づけの一致まで確認済み） |
-| Phase 3 | Enovia検索追加（実装方式は調査後に確定） | 未着手 |
+| Phase 3 | Enovia検索追加（`federated/search` を実測して実装） | ✅ 実装完了（v20260904_01）。**実機での確認は未実施**（ログイン・件数突き合わせ等） |
 | Phase 4 | 3系統統合の磨き込み（名寄せ・検索履歴・お気に入り） | 未着手 |

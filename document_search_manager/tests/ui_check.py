@@ -296,6 +296,88 @@ def main():
                                            "e => e.map(x => x.innerText)")
         check("再起動後もソート状態が復元される", arrows == ["▼"], str(arrows))
 
+        # ── Enoviaタブ（Phase 3）── 既存のソート・絞り込み・状態復元の検証
+        # （SharePoint/Nexusの2系統・SAMPLE+2件を前提にしている）を巻き込まないよう、
+        # ここで最後にスタブを差し込んで単独で確認する。
+        enovia_rows = [
+            dsm.SearchResult(
+                source="Enovia", document_number="DOC-594838", title="NEH8100 V&V Plan",
+                description="NEH8100 Verification and Validation Plan", revision="3",
+                enovia_state="Document Release.IN_WORK", author="Sheribeth Bolanos",
+                doc_owner="Sheribeth Bolanos", last_modified="2026-09-04",
+                created_date="2026-09-03", folder="Release and Production",
+                doc_type="xlsm",
+                url="https://dspace.plm.nexperia.com/3dspace/common/emxNavigator.jsp?objectId=A",
+                enovia_url="https://dspace.plm.nexperia.com/3dspace/common/emxNavigator.jsp?objectId=A",
+                rank=1),
+            dsm.SearchResult(
+                source="Enovia", document_number="DOC-594838", title="NEH8100 V&V Plan",
+                description="NEH8100 Verification and Validation Plan", revision="2",
+                enovia_state="Document Release.RELEASED", author="Sheribeth Bolanos",
+                doc_owner="Sheribeth Bolanos", last_modified_by="Sheribeth Bolanos",
+                last_modified="2026-09-03", created_date="2026-01-14",
+                folder="Release and Production", doc_type="xlsm",
+                url="https://dspace.plm.nexperia.com/3dspace/common/emxNavigator.jsp?objectId=B",
+                enovia_url="https://dspace.plm.nexperia.com/3dspace/common/emxNavigator.jsp?objectId=B",
+                rank=2),
+        ]
+        dsm._manager.providers[dsm.TARGET_ENOVIA].search = (
+            lambda keyword, max_results: {"results": list(enovia_rows),
+                                          "total": len(enovia_rows), "note": ""})
+
+        page.click("#tabs button[data-target='enovia']")
+        page.wait_for_timeout(900)
+        en_headers = page.eval_on_selector_all("#resultHead th",
+                                               "e => e.map(x => x.innerText.trim())")
+        for label in ("Document Number", "Title", "Revision", "State", "Description",
+                      "Doc Owner", "Enoviaで開く"):
+            check(f"Enoviaタブに {label} 列がある",
+                  any(h.startswith(label) for h in en_headers), str(en_headers))
+        check("Enoviaタブにフォルダリンク列（SharePoint固有）を出さない",
+              not any(h.startswith("サイト") for h in en_headers), str(en_headers))
+
+        numbers_en = page.eval_on_selector_all("#resultBody tr td:nth-child(2)",
+                                               "e => e.map(x => x.innerText)")
+        check("Document Numberの値が並ぶ（Enovia）",
+              numbers_en == ["DOC-594838", "DOC-594838"], str(numbers_en))
+
+        rev_index = [i for i, h in enumerate(en_headers)
+                    if h.startswith("Revision")][0] + 1
+        revisions = page.eval_on_selector_all(
+            f"#resultBody tr td:nth-child({rev_index})", "e => e.map(x => x.innerText)")
+        check("同一Document Numberでもrevisionが別行のまま並ぶ（D1）",
+              revisions == ["3", "2"], str(revisions))
+
+        enovia_links = page.eval_on_selector_all(
+            "#resultBody tr td a[href*='emxNavigator.jsp']", "e => e.map(x => x.href)")
+        # タイトル列（クリックで開く）と「Enoviaで開く」列の両方にリンクが張られる
+        # ため、2行×2リンク=4本になる。
+        check("Enoviaで開くリンクが張られる（タイトル列＋専用列）",
+              len(enovia_links) == 4, str(enovia_links))
+
+        select_disabled = page.eval_on_selector_all(
+            "#resultBody tr td.selcol input", "e => e.map(x => x.disabled)")
+        check("Enoviaタブの選択チェックボックスは一括ダウンロード対象外で無効化される",
+              all(select_disabled), str(select_disabled))
+        if shot_path:
+            page.screenshot(path=shot_path.replace(".png", "_enovia.png"))
+
+        # 0.Allタブでは、同じDocument Numberでもリビジョンをタイトルに併記する（B5）
+        page.click("#tabs button[data-target='all']")
+        page.wait_for_timeout(900)
+        all_titles_with_enovia = page.eval_on_selector_all(
+            "#resultBody tr td.title", "e => e.map(x => x.innerText)")
+        check("0.AllタブでEnovia行のタイトルに(Rev.3)/(Rev.2)が付く",
+              any("(Rev.3)" in t for t in all_titles_with_enovia)
+              and any("(Rev.2)" in t for t in all_titles_with_enovia),
+              str(all_titles_with_enovia))
+        all_select_disabled = page.eval_on_selector_all(
+            "#resultBody tr:has-text('NEH8100') td.selcol input",
+            "e => e.map(x => x.disabled)")
+        check("0.AllタブでもEnovia行の選択チェックボックスは無効化される",
+              len(all_select_disabled) > 0 and all(all_select_disabled),
+              str(all_select_disabled))
+
         browser.close()
 
     print(f"\n{'=' * 46}")

@@ -264,9 +264,11 @@ dsm._manager = mgr
 client = dsm.flask_app.test_client()
 html = client.get("/").get_data(as_text=True)
 
-# 版数は本体のファイル名から導く（版を上げるたびにテストを直さずに済む）
+# 版数は本体のファイル名から導く（版を上げるたびにテストを直さずに済む）。
+# Phase表記の文言は版が上がるたびに変わるため、ここでは固定しない
+# （v20260904_01でPhase 2.5→Phase 3に変わった。仕様変更に伴う陳腐化）。
 VERSION = DSM_FILENAME.replace("document_search_manager_", "").replace(".py", "")
-check(f"版数表示が v{VERSION} (Phase 2.5)", f"v{VERSION} (Phase 2.5" in html, VERSION)
+check(f"版数表示が v{VERSION} (...)", f"v{VERSION} (" in html, VERSION)
 for target in ("all", "sharepoint", "nexus", "enovia"):
     check(f"{target} タブがある", f'data-target="{target}"' in html)
 check("既定は All タブ", 'class="on" data-target="all"' in html)
