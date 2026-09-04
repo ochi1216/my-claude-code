@@ -90,6 +90,21 @@ def make_pptx_bytes(slides):
     return buf.getvalue()
 
 
+def make_xlsx_bytes(sheets):
+    """[(シート名, [行, ...]), ...]（行は値のタプル）からxlsxのバイト列を作る。"""
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    wb.remove(wb.active)   # 既定の空シートは使わない
+    for name, rows in sheets:
+        ws = wb.create_sheet(title=name)
+        for row in rows:
+            ws.append(row)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
 def fake_gemini_response(executive_summary="要約です。",
                          chapters=None, insights=None):
     chapters = chapters if chapters is not None else [
@@ -140,9 +155,13 @@ pptx_row = mk(doc_type="pptx")
 check("pptxも要約可能（Phase Bで追加）",
       dsm._summarizable_reason(pptx_row) == (True, ""), dsm._summarizable_reason(pptx_row))
 
+xlsx_row = mk(doc_type="xlsx")
+check("xlsxも要約可能（Phase Cで追加）",
+      dsm._summarizable_reason(xlsx_row) == (True, ""), dsm._summarizable_reason(xlsx_row))
+
 pdf_row = mk(doc_type="pdf")
 reason = dsm._summarizable_reason(pdf_row)
-check("docx/pptx以外（pdf）は現状要約不可", reason[0] is False and "pdf" in reason[1], reason)
+check("docx/pptx/xlsx以外（pdf）は現状要約不可", reason[0] is False and "pdf" in reason[1], reason)
 
 nexus_row = mk(source="Nexus")
 check("Nexusのdocxも要約可能（SharePointProvider系統を継承）",
@@ -160,21 +179,24 @@ if HAS_DOCX:
         ("これは本文の2段落目です。", None),
         ("", None),   # 空段落は無視される
     ])
-    text, truncated = dsm._extract_docx_text(content, max_chars=10000)
+    text, truncated, total_chars = dsm._extract_docx_text(content, max_chars=10000)
     check("見出し段落に # が付く", "# 第1章 はじめに" in text, text)
     check("本文段落はそのまま", "これは本文の1段落目です。" in text, text)
     check("空段落は含まれない（連続する空行にならない）",
           "\n\n\n" not in text, repr(text))
     check("十分に短ければ切り詰められない", truncated is False)
+    check("切り詰め前の文字数が返る", total_chars == len(text), (total_chars, len(text)))
 
     long_content = make_docx_bytes([("あ" * 100, None)])
-    long_text, long_truncated = dsm._extract_docx_text(long_content, max_chars=50)
+    long_text, long_truncated, long_total = dsm._extract_docx_text(long_content, max_chars=50)
     check("上限を超えると切り詰められる", long_truncated is True)
     check("切り詰め後の長さが上限以下", len(long_text) <= 50, len(long_text))
+    check("切り詰め前の文字数は上限より大きい（confirm用）", long_total > 50, long_total)
 
     empty_content = make_docx_bytes([("", None)])
-    empty_text, _ = dsm._extract_docx_text(empty_content, max_chars=10000)
+    empty_text, _, empty_total = dsm._extract_docx_text(empty_content, max_chars=10000)
     check("本文が無ければ空文字", empty_text == "", repr(empty_text))
+    check("本文が無ければ切り詰め前の文字数も0", empty_total == 0, empty_total)
 else:
     print("\n[G2] python-docx未インストールのためスキップ（他機能には影響しない設計）")
 
@@ -187,7 +209,7 @@ if HAS_PPTX:
         ("スライド1のタイトル", ["本文1行目", "本文2行目"]),
         (None, ["タイトル無しスライドの本文"]),
     ])
-    text, truncated = dsm._extract_pptx_text(content, max_chars=10000)
+    text, truncated, total_chars = dsm._extract_pptx_text(content, max_chars=10000)
     check("スライドの区切りにタイトルが付く", "# Slide 1: スライド1のタイトル" in text, text)
     check("スライド本文が含まれる", "本文1行目" in text and "本文2行目" in text, text)
     check("タイトル無しスライドは番号のみの区切りになる", "# Slide 2" in text, text)
@@ -196,19 +218,56 @@ if HAS_PPTX:
     check("十分に短ければ切り詰められない", truncated is False)
 
     long_content = make_pptx_bytes([("長いスライド", ["あ" * 100])])
-    long_text, long_truncated = dsm._extract_pptx_text(long_content, max_chars=50)
+    long_text, long_truncated, long_total = dsm._extract_pptx_text(long_content, max_chars=50)
     check("上限を超えると切り詰められる", long_truncated is True)
     check("切り詰め後の長さが上限以下", len(long_text) <= 50, len(long_text))
+    check("切り詰め前の文字数は上限より大きい（confirm用）", long_total > 50, long_total)
+else:
+    print("\n[G2b] python-pptx未インストールのためスキップ（他機能には影響しない設計）")
 
+
+# ── G2d _extract_xlsx_text（本文抽出・シート区切り・切り詰め） ── Phase Cで追加
+print("\n[G2d] xlsx本文抽出（_extract_xlsx_text）── Phase Cで追加")
+
+xlsx_content = make_xlsx_bytes([
+    ("シート1", [("見出しA", "見出しB"), ("値1", 2), (None, None)]),
+    ("シート2", [("こちらはシート2",)]),
+])
+x_text, x_truncated, x_total = dsm._extract_xlsx_text(xlsx_content, max_chars=10000)
+check("シートの区切りに # Sheet: が付く",
+      "# Sheet: シート1" in x_text and "# Sheet: シート2" in x_text, x_text)
+check("セルの値が | 区切りで含まれる", "見出しA | 見出しB" in x_text, x_text)
+check("整数値はそのまま出る（.0が付かない）", "値1 | 2" in x_text, x_text)
+check("すべて空のセルの行は含まれない（連続する空行にならない）",
+      "\n\n" not in x_text, repr(x_text))
+check("十分に短ければ切り詰められない", x_truncated is False)
+
+xlsx_float_content = make_xlsx_bytes([("シート1", [(1.5,), (2.0,)])])
+xf_text, _, _ = dsm._extract_xlsx_text(xlsx_float_content, max_chars=10000)
+check("小数はそのまま、割り切れる小数は整数のように出る（1.5 / 2）",
+      "1.5" in xf_text and xf_text.splitlines()[-1] == "2", xf_text)
+
+long_xlsx = make_xlsx_bytes([("シート1", [("あ" * 100,)])])
+xlong_text, xlong_truncated, xlong_total = dsm._extract_xlsx_text(long_xlsx, max_chars=50)
+check("上限を超えると切り詰められる", xlong_truncated is True)
+check("切り詰め後の長さが上限以下", len(xlong_text) <= 50, len(xlong_text))
+check("切り詰め前の文字数は上限より大きい（confirm用）", xlong_total > 50, xlong_total)
+
+
+# ── G2c 拡張子による振り分け（_extract_text_for_summary） ───────
+if HAS_DOCX and HAS_PPTX:
     print("\n[G2c] 拡張子による振り分け（_extract_text_for_summary）")
     docx_bytes_for_dispatch = make_docx_bytes([("docxの本文", None)])
     pptx_bytes_for_dispatch = make_pptx_bytes([("見出し", ["pptxの本文"])])
-    d_text, _ = dsm._extract_text_for_summary("docx", docx_bytes_for_dispatch, 10000)
-    p_text, _ = dsm._extract_text_for_summary("pptx", pptx_bytes_for_dispatch, 10000)
+    xlsx_bytes_for_dispatch = make_xlsx_bytes([("シート1", [("xlsxの本文",)])])
+    d_text, _, _ = dsm._extract_text_for_summary("docx", docx_bytes_for_dispatch, 10000)
+    p_text, _, _ = dsm._extract_text_for_summary("pptx", pptx_bytes_for_dispatch, 10000)
+    x_text2, _, _ = dsm._extract_text_for_summary("xlsx", xlsx_bytes_for_dispatch, 10000)
     check("doc_type=docxならdocx抽出が使われる", "docxの本文" in d_text, d_text)
     check("doc_type=pptxならpptx抽出が使われる", "pptxの本文" in p_text, p_text)
+    check("doc_type=xlsxならxlsx抽出が使われる", "xlsxの本文" in x_text2, x_text2)
 else:
-    print("\n[G2b] python-pptx未インストールのためスキップ（他機能には影響しない設計）")
+    print("\n[G2c] python-docx/python-pptx未インストールのためスキップ")
 
 
 # ── G3 _generate_summary（Geminiレスポンスの解析） ──────────────
@@ -293,6 +352,8 @@ rows = [
     mk(title="PdfOne", doc_type="pdf", url="https://x/sites/S/Docs/C.pdf"),      # 未対応形式
     mk(title="PptxDoc", url="https://x/sites/S/Docs/D.pptx", doc_type="pptx",
        last_modified="2026-09-01"),                                             # 要約可（Phase B）
+    mk(title="XlsxDoc", url="https://x/sites/S/Docs/E.xlsx", doc_type="xlsx",
+       last_modified="2026-09-01"),                                             # 要約可（Phase C）
 ]
 mgr.providers[dsm.TARGET_SHAREPOINT].search = lambda kw, mx: {
     "results": list(rows), "total": len(rows), "note": ""}
@@ -301,6 +362,7 @@ client = dsm.flask_app.test_client()
 search_resp = client.post("/api/search", json={"keyword": "sample", "target": "sharepoint"}).get_json()
 idx_doc_a = idx_of(search_resp, "DocA")
 idx_pptx_doc = idx_of(search_resp, "PptxDoc")
+idx_xlsx_doc = idx_of(search_resp, "XlsxDoc")
 
 r = client.post("/api/summarize", json={})
 check("idx未指定は400", r.status_code == 400, r.status_code)
@@ -409,16 +471,39 @@ else:
         check("422のときGeminiは呼ばれない（無駄打ちしない）",
               len(gemini_calls) == 2, len(gemini_calls))
 
-        # ── 切り詰め（summary_max_charsで上限を絞る） ──
+        # ── 切り詰め（summary_max_charsで上限を絞る）→ 確認を挟む ──
+        # 越智さんのフィードバック：切り詰めに気づかず部分的な要約だけを
+        # 見てしまうのを防ぐため、既定では確認を返しGeminiを呼ばない。
         dsm.http_req.get = fake_get
         dsm._cfg = dict(CFG, summary_max_chars=20, summary_min_chars=5)
         rows[0].last_modified = "2026-09-04"
         mgr.providers[dsm.TARGET_SHAREPOINT].search = lambda kw, mx: {
             "results": list(rows), "total": len(rows), "note": ""}
         client.post("/api/search", json={"keyword": "sample", "target": "sharepoint"})
+
+        gemini_calls_before_confirm = len(gemini_calls)
         r5 = client.post("/api/summarize", json={"idx": idx_doc_a})
-        check("上限文字数を絞るとtruncated=True", r5.get_json().get("truncated") is True,
-              r5.get_json())
+        r5_data = r5.get_json()
+        check("確認無しでは200＋needs_confirmationが返る（要約はまだ実行しない）",
+              r5.status_code == 200 and r5_data.get("needs_confirmation") is True, r5_data)
+        check("needs_confirmationにtotal_charsが含まれる（元の文字数）",
+              r5_data.get("total_chars", 0) > 20, r5_data)
+        check("needs_confirmationにmax_charsが含まれる", r5_data.get("max_chars") == 20, r5_data)
+        check("確認を返す段階ではGeminiを呼ばない（無駄打ちしない）",
+              len(gemini_calls) == gemini_calls_before_confirm, len(gemini_calls))
+
+        r5b = client.post("/api/summarize", json={"idx": idx_doc_a, "confirm_truncated": True})
+        check("confirm_truncated=trueなら要約を実行しtruncated=True",
+              r5b.status_code == 200 and r5b.get_json().get("truncated") is True, r5b.get_json())
+        check("確認後はGeminiが呼ばれる",
+              len(gemini_calls) == gemini_calls_before_confirm + 1, len(gemini_calls))
+
+        r5c = client.post("/api/summarize", json={"idx": idx_doc_a})
+        check("確認して要約した後は、確認無しでもキャッシュから返る",
+              r5c.get_json().get("needs_confirmation") is None
+              and r5c.get_json().get("truncated") is True, r5c.get_json())
+        check("キャッシュから返るのでGeminiは再度呼ばれない",
+              len(gemini_calls) == gemini_calls_before_confirm + 1, len(gemini_calls))
         dsm._cfg = CFG
 
         # ── ダウンロード失敗時のエラー ──
@@ -459,6 +544,18 @@ else:
                   len(gemini_calls) == gemini_calls_before + 1, len(gemini_calls))
         else:
             print("  (python-pptx未インストールのため、pptxのエンドツーエンド検証はスキップ)")
+
+        # ── xlsx（Phase Cで追加）でも /api/summarize が一連で動く ──
+        xlsx_bytes = make_xlsx_bytes([
+            ("シート1", [("これはxlsxのテスト用の本文です。" * 5,)]),
+        ])
+        dsm.http_req.get = lambda *a, **k: FakeResp(200, xlsx_bytes)
+        dsm._generate_advanced = counting_gemini
+        gemini_calls_before_xlsx = len(gemini_calls)
+        r9 = client.post("/api/summarize", json={"idx": idx_xlsx_doc})
+        check("xlsxでも正常系は200", r9.status_code == 200, r9.status_code)
+        check("xlsxでもGeminiが呼ばれる（拡張子で抽出関数が振り分けられている）",
+              len(gemini_calls) == gemini_calls_before_xlsx + 1, len(gemini_calls))
     finally:
         dsm.http_req.get = orig_http_get
         dsm._generate_advanced = orig_generate_advanced
@@ -478,8 +575,10 @@ check("/api/summarize を呼び出すfetchがある", '"/api/summarize"' in html
 check("Escキーで閉じるハンドラがある", "summaryPopupKeyHandler" in html)
 check("示唆を箇条書き（配列）で描画するロジックがある（文章と箇条書きの混在対策）",
       "summary-insight-list" in html)
-check("画面側の対応形式判定にpptxが含まれる（Phase B）",
-      'SUMMARIZABLE_EXTENSIONS = ["docx", "pptx"]' in html)
+check("画面側の対応形式判定にpptx/xlsxが含まれる（Phase B/C）",
+      'SUMMARIZABLE_EXTENSIONS = ["docx", "pptx", "xlsx"]' in html)
+check("画面側に切り詰め確認の描画ロジックがある",
+      "renderTruncationConfirm" in html and "needs_confirmation" in html)
 
 
 print(f"\n{'=' * 46}\n  成功 {ok} 件 / 失敗 {ng} 件\n{'=' * 46}")

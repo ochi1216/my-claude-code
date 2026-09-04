@@ -11,6 +11,8 @@
 Playwright が入っていない環境ではスキップ扱いで終了する（合格扱い）。
 ブラウザの実行ファイルを指定したい場合は環境変数 CHROMIUM_PATH を設定する。
 """
+import io
+import json
 import os
 import sys
 import tempfile
@@ -521,8 +523,10 @@ def main():
                              is_folder=True, rank=2),
             dsm.SearchResult(source="SharePoint", title="a-slide",
                              url="https://x/s.pptx", doc_type="pptx", rank=3),
+            dsm.SearchResult(source="SharePoint", title="a-sheet",
+                             url="https://x/e.xlsx", doc_type="xlsx", rank=4),
             dsm.SearchResult(source="SharePoint", title="a-pdf",
-                             url="https://x/p.pdf", doc_type="pdf", rank=4),
+                             url="https://x/p.pdf", doc_type="pdf", rank=5),
         ]
         dsm._manager.providers[dsm.TARGET_SHAREPOINT].search = (
             lambda kw, mx: {"results": list(summary_rows), "total": len(summary_rows), "note": ""})
@@ -531,12 +535,13 @@ def main():
         page.wait_for_timeout(400)
 
         summary_buttons = page.query_selector_all("#resultBody button.mini")
-        check("要約ボタンが行数ぶん出る", len(summary_buttons) == 4, len(summary_buttons))
+        check("要約ボタンが行数ぶん出る", len(summary_buttons) == 5, len(summary_buttons))
         disabled_states = [b.is_disabled() for b in summary_buttons]
         check("docx行の要約ボタンは有効", disabled_states[0] is False, disabled_states)
         check("フォルダ行の要約ボタンは無効", disabled_states[1] is True, disabled_states)
         check("pptx行の要約ボタンは有効（Phase Bで追加）", disabled_states[2] is False, disabled_states)
-        check("pdf行の要約ボタンは無効（現状docx/pptxのみ対応）", disabled_states[3] is True, disabled_states)
+        check("xlsx行の要約ボタンは有効（Phase Cで追加）", disabled_states[3] is False, disabled_states)
+        check("pdf行の要約ボタンは無効（現状docx/pptx/xlsxのみ対応）", disabled_states[4] is True, disabled_states)
 
         summary_buttons[0].click()
         check("クリックするとポップアップが開く", page.is_visible("#summaryOverlay"))
@@ -556,6 +561,70 @@ def main():
         page.click(".summary-header button")
         page.wait_for_timeout(100)
         check("閉じるボタンでポップアップが消える", not page.is_visible("#summaryOverlay"))
+
+        # ── 切り詰め時の確認ダイアログ（Phase C） ─────────────────
+        # Gemini呼び出し等をスタブ化し、実ブラウザで
+        # 「確認→続ける→要約表示」の一連の流れを検証する。
+        from docx import Document as _ConfirmDocxDocument
+
+        class _FakeDownloadResp:
+            def __init__(self, code, content=b""):
+                self.status_code = code
+                self.content = content
+
+        _confirm_docx_paragraphs_doc = _ConfirmDocxDocument()
+        _confirm_docx_paragraphs_doc.add_paragraph("これは切り詰め確認テスト用の本文です。" * 5)
+        _confirm_docx_buf = io.BytesIO()
+        _confirm_docx_paragraphs_doc.save(_confirm_docx_buf)
+        confirm_docx_bytes = _confirm_docx_buf.getvalue()
+
+        def fake_gemini_for_confirm(payload, model=None):
+            data = {
+                "executive_summary": "確認後の要約です。",
+                "chapters": [{"title": "章1", "overview": "概要"}],
+                "insights": {"use": ["活用1", "活用2", "活用3"],
+                             "caution": ["注意1", "注意2", "注意3"],
+                             "questions": ["問い1", "問い2", "問い3"]},
+            }
+            return {"candidates": [{"content": {"parts": [
+                {"text": json.dumps(data, ensure_ascii=False)}
+            ]}}]}
+
+        orig_has_gemini_ui = dsm.HAS_GEMINI
+        orig_cred_ui = dsm.gemini_credentials_available
+        orig_http_get_ui = dsm.http_req.get
+        orig_generate_advanced_ui = dsm._generate_advanced
+        orig_cfg_ui = dsm._cfg
+        try:
+            dsm.HAS_GEMINI = True
+            dsm.gemini_credentials_available = lambda: True
+            dsm.http_req.get = lambda *a, **k: _FakeDownloadResp(200, confirm_docx_bytes)
+            dsm._generate_advanced = fake_gemini_for_confirm
+            dsm._cfg = dict(dsm._cfg, summary_max_chars=20, summary_min_chars=1)
+
+            summary_buttons2 = page.query_selector_all("#resultBody button.mini")
+            summary_buttons2[0].click()   # docx行（summarizable-doc）
+            page.wait_for_timeout(600)
+            check("上限超過時は確認メッセージが表示される（Geminiを黙って呼ばない）",
+                  "上限" in (page.text_content(".summary-body") or ""),
+                  page.text_content(".summary-body"))
+            check("「続ける」ボタンが表示される",
+                  page.is_visible("text=続ける（先頭部分だけで要約）"))
+
+            page.click("text=続ける（先頭部分だけで要約）")
+            page.wait_for_timeout(600)
+            check("続けるを押すと実際に要約結果が表示される",
+                  "確認後の要約です" in (page.text_content(".summary-body") or ""),
+                  page.text_content(".summary-body"))
+
+            page.click(".summary-header button")
+            page.wait_for_timeout(100)
+        finally:
+            dsm.HAS_GEMINI = orig_has_gemini_ui
+            dsm.gemini_credentials_available = orig_cred_ui
+            dsm.http_req.get = orig_http_get_ui
+            dsm._generate_advanced = orig_generate_advanced_ui
+            dsm._cfg = orig_cfg_ui
 
         browser.close()
 

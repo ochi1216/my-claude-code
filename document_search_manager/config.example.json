@@ -94,7 +94,7 @@
   "enovia_browser_channel": "msedge",
   "enovia_login_timeout_sec": 300,
 
-  "_comment_summary": "検索結果の「要約」ボタン（SharePoint/Nexusの.docx/.pptxに対応）で使う設定。要約の生成にはGemini API（環境変数 GEMINI_API_KEY または GEMINI_PROXY_URL のいずれかが必要。word_translator等と共通）を使う。summary_max_charsは本文の切り詰め上限（超えた場合は先頭のみを要約し、画面にその旨を表示する）。summary_min_charsはこれ未満しか本文を抽出できなかった場合に要約を行わない下限（画像のみのファイル等で誤った要約が出るのを防ぐガード）。",
+  "_comment_summary": "検索結果の「要約」ボタン（SharePoint/Nexusの.docx/.pptx/.xlsxに対応）で使う設定。要約の生成にはGemini API（環境変数 GEMINI_API_KEY または GEMINI_PROXY_URL のいずれかが必要。word_translator等と共通）を使う。summary_max_charsは本文の切り詰め上限（超えた場合は要約前に画面で確認を求め、続行を選ぶと先頭のみを要約する）。summary_min_charsはこれ未満しか本文を抽出できなかった場合に要約を行わない下限（画像のみのファイル等で誤った要約が出るのを防ぐガード）。",
   "summary_max_chars": 40000,
   "summary_min_chars": 50,
 
