@@ -8,3 +8,9 @@ openpyxl>=3.1
 # 検索そのもの、config.jsonへのCookie手貼り運用）には影響しない。
 # 会社PCでは導入済み（pip install playwright, 2026-09-04確認）。
 # playwright>=1.40
+
+# 会社のネットワーク（SSLインスペクション）環境で、Enoviaへの通信が
+# SSLCertVerificationError（unable to get local issuer certificate）に
+# なる場合に必要。WindowsのOS証明書ストアをPythonにも使わせる。
+# 会社PCで導入・動作確認済み（2026-09-04）。コード変更は不要。
+# pip-system-certs

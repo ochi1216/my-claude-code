@@ -230,6 +230,21 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 `config.json` の `enovia_auth_mode` を `"manual"` にしてCookieを直接
 貼り付ける方式に切り替えてください（前述「Enoviaへのログイン」参照）。
 
+### `SSLCertVerificationError` / `unable to get local issuer certificate` と出る
+
+**会社のネットワークにあるSSL検査（SSLインスペクション）が原因です。**
+社内向け通信（`federated.plm.nexperia.com`）の中身を検査するために、社内の
+証明書に差し替えられますが、Pythonはこの証明書を標準では信頼していません
+（Edgeなどのブラウザは、Windowsの設定を通じて信頼しています）。
+Graph API（SharePoint/Nexus）はこの検査の対象外のため、Enoviaだけで
+発生することがあります。以下のコマンドで解消します（コード変更は不要です）。
+
+```
+pip install pip-system-certs
+```
+
+インストール後、ツールを再起動してください。
+
 ### Enoviaの件数がEnovia画面と合わない
 
 `federated/search` の `nhits` は、絞り込み前の全種別（Document以外を含む）の
@@ -308,9 +323,10 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
   文書の状態（`Allow Web publish: No` 等）次第で拒否されることを実機で
   確認済みのため、設計から外した。「Enoviaで開く」からEnovia画面上で
   操作する。
-- **Enoviaのタイトル限定検索の構文は未確定。** 「タイトルだけを検索する」を
-  オンにしても、Enoviaは常に全文検索を行う（構文を推測で決め打ちしていない）。
-  「Enovia検索診断」ボタンで候補の件数を比較できる。
+- **Enoviaのタイトル限定検索は非対応と確定しました（実機確認済み、2026-09-04）。**
+  「タイトルだけを検索する」をオンにしても、Enoviaは常に全文検索を行います。
+  候補構文（`title:` / `ds6w:label:`）はいずれも0件で、フィールド名が
+  検索エンジンに認識されていないことを確認済みです（DESIGN_NOTES 3-3参照）。
 - 検索結果に**本文スニペットは含めない**（一覧表示までが今回のスコープ）。
 - **Nexusの標準Indexは Nexusタブでのみ表示**します（SharePointには無い列のため）。
   列名の自動判別が外れた場合は、起動後の検索でコンソールに出る実在の列名を見て
@@ -354,5 +370,5 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 | Phase 1 | SharePoint全社検索 MVP | ✅ 完了（v20260903_08、実機動作確認済み） |
 | Phase 2 | Nexus検索追加（Graph Searchを `nexus_folder_path` に限定）＋重複排除の有効化 | ✅ 完了（件数はNexus画面と一致することを実測で確認） |
 | Phase 2.5 | 系統別タブ＋Nexus標準Index＋タイトル限定検索＋Nexusリンク | ✅ 完了（v20260903_15、実機で対応づけの一致まで確認済み） |
-| Phase 3 | Enovia検索追加（`federated/search` を実測して実装） | ✅ 実装完了（v20260904_01）。**実機での確認は未実施**（ログイン・件数突き合わせ等） |
+| Phase 3 | Enovia検索追加（`federated/search` を実測して実装） | ✅ 完了（v20260904_01、実機でログイン・件数突き合わせ・リンク開通まで確認済み） |
 | Phase 4 | 3系統統合の磨き込み（名寄せ・検索履歴・お気に入り） | 未着手 |
