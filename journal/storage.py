@@ -2,7 +2,7 @@
 """
 storage.py
 学びジャーナル - Excel(SharePoint同期フォルダ)読み書きモジュール
-Version: 0.12.0
+Version: 0.13.0
 
 v0.12.0での変更点：
 タスク一覧の文字サイズ・並び順など、UIの好みをアプリの再起動後も
@@ -10,6 +10,15 @@ v0.12.0での変更点：
 get_setting()/set_setting()と、その型付きラッパーget_action_font_size()/
 set_action_font_size()/get_action_sort_order()/set_action_sort_order()を
 追加した。既存のシート・関数には変更を加えていない
+
+v0.13.0での変更点：
+Outlookの予定表と連携し、会議の時間を自動でTimeLog記録するための
+関数を追加した（outlook_calendar.pyと組み合わせて使う）。
+append_meeting_time_log()で、会議の時間帯をタグ未分類のまま
+（PENDING_MEETING_TAG）記録し、get_pending_meetings()で分類待ちの
+会議一覧を取得、classify_pending_meeting()で実際のタグに差し替える。
+自動記録の重複チェック用にget_last_meeting_check()/
+set_last_meeting_check()も追加。既存のシート・関数には変更を加えていない
 """
 
 import os
@@ -75,6 +84,13 @@ WORK_START_TIME = "08:00"
 # 残すことで、ダッシュボード上で「ここが埋まっていない」と見えるようにする。
 # TagMasterには登録しない（＝ポップアップの選択肢には出さない）
 UNRECORDED_TAG = "未記録"
+
+# Outlookの予定表から自動記録した会議の時間に、実際のタグ（R19/JP Site等）が
+# 確定するまで仮に入れておくタグ。UNRECORDED_TAGと同じ理由でTagMasterには
+# 登録しない。中項目には会議の件名を入れておく
+PENDING_MEETING_TAG = "会議(未分類)"
+# 会議終了の自動記録が、前回どこまでチェック済みかを覚えておくSettingsキー
+LAST_MEETING_CHECK_KEY = "last_meeting_check"
 
 DEFAULT_TAGS = [
     ("R19", "#d9ae23"),
@@ -1178,6 +1194,109 @@ def set_action_sort_order(order: str, path: str = EXCEL_PATH) -> bool:
     if order not in (ACTION_SORT_ORDER_ASC, ACTION_SORT_ORDER_DESC):
         raise ValueError(f"不正な並び順です: {order!r}")
     return set_setting(ACTION_SORT_ORDER_KEY, order, path)
+
+
+def get_last_meeting_check(default: datetime = None, path: str = EXCEL_PATH) -> datetime:
+    """
+    Outlookの会議自動記録が前回どこまでチェック済みかを読む。
+    未設定の場合はdefaultを返す（呼び出し側が「今日の勤務開始時刻」等の
+    妥当な初期値を渡す想定）。
+    """
+    value = get_setting(LAST_MEETING_CHECK_KEY, None, path)
+    parsed = _parse_excel_dt(value) if value else None
+    return parsed if parsed is not None else default
+
+
+def set_last_meeting_check(when: datetime, path: str = EXCEL_PATH) -> bool:
+    """Outlookの会議自動記録のチェック済み時刻を保存する。"""
+    return set_setting(LAST_MEETING_CHECK_KEY, when.strftime("%Y-%m-%d %H:%M"), path)
+
+
+def append_meeting_time_log(subject: str, start: datetime, end: datetime,
+                             path: str = EXCEL_PATH) -> tuple:
+    """
+    Outlookの会議予定の時間帯を、タグ未分類のままTimeLogへ自動記録する。
+    タグはこの時点では確定できないためPENDING_MEETING_TAGを仮に入れ、
+    中項目には会議の件名を入れる。あとでclassify_pending_meeting()で
+    実際のタグに差し替える想定。
+
+    前回チェックポイントからの「鎖」（_compute_time_range_v2）は使わず、
+    Outlookが返す実際の開始・終了時刻をそのまま1行として書き込む
+    （会議の時間は予定表という別の確かな情報源から分かっているため）。
+
+    Returns:
+        tuple[bool, int | None]: (保存に成功したか, 書き込んだ行番号)
+    """
+    ensure_workbook_exists(path)
+    wb = _load_with_retry(path)
+    _ensure_timelog_sheet(wb)
+    _ensure_timelog_subitem_column(wb)
+    ws = wb[TIMELOG_SHEET]
+    ws.append([start, end, PENDING_MEETING_TAG, str(subject)[:80]])
+    row_idx = ws.max_row
+
+    success = _save_with_retry(wb, path)
+    if success:
+        print(
+            f"📅 会議の時間を自動記録しました（分類待ち）: {subject} "
+            f"[{start.strftime('%H:%M')}-{end.strftime('%H:%M')}]"
+        )
+    return success, (row_idx if success else None)
+
+
+def get_pending_meetings(path: str = EXCEL_PATH) -> list:
+    """
+    タグが未分類のまま自動記録された会議のTimeLog行を一覧で返す
+    （登録順＝行番号順）。
+
+    Returns:
+        list[dict]: [{"row": int, "start": datetime, "end": datetime,
+                       "subject": str}, ...]
+    """
+    ensure_workbook_exists(path)
+    wb = _load_with_retry(path)
+    if TIMELOG_SHEET not in wb.sheetnames:
+        return []
+    ws = wb[TIMELOG_SHEET]
+    pending = []
+    for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        if len(row) > 2 and row[2] == PENDING_MEETING_TAG:
+            pending.append({
+                "row": row_idx,
+                "start": _parse_excel_dt(row[0]),
+                "end": _parse_excel_dt(row[1]),
+                "subject": row[3] if len(row) > 3 else "",
+            })
+    return pending
+
+
+def classify_pending_meeting(row: int, tag: str, expect_start: datetime,
+                              expect_end: datetime, path: str = EXCEL_PATH) -> bool:
+    """
+    分類待ちの会議行に、実際のタグ（R19/JP Site等）を設定する
+    （中項目＝会議の件名はそのまま残す）。update_time_log_row()と同じ
+    楽観ロックで、行がズレていないかを照合してから書き換える。
+    対象行が既にPENDING_MEETING_TAGでない場合（二重分類等）も何もしない。
+    """
+    ensure_workbook_exists(path)
+    wb = _load_with_retry(path)
+    if TIMELOG_SHEET not in wb.sheetnames:
+        print(f"❌ シート'{TIMELOG_SHEET}'が見つかりません。")
+        return False
+    ws = wb[TIMELOG_SHEET]
+
+    if not _timelog_row_matches(ws, row, expect_start, expect_end):
+        print(f"⚠️ TimeLogの行{row}が想定と異なるため、会議の分類を中止しました。")
+        return False
+    if ws.cell(row=row, column=3).value != PENDING_MEETING_TAG:
+        print(f"⚠️ 行{row}は分類待ちの会議ではないため、分類を中止しました。")
+        return False
+
+    ws.cell(row=row, column=3, value=tag)
+    success = _save_with_retry(wb, path)
+    if success:
+        print(f"✏️ 会議の分類を保存しました（行{row}）→ {tag}")
+    return success
 
 
 def add_tag(tag_name: str, color_code: str, path: str = EXCEL_PATH) -> bool:
