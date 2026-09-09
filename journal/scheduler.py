@@ -2,7 +2,19 @@
 """
 scheduler.py
 学びジャーナル - 定時強制リマインド＋ログオン時自動起動登録
-Version: 0.8.0
+Version: 0.9.0
+
+v0.9.0での変更点：
+分類ポップアップの声かけ判定(check_pending_meeting_classification)に、
+teams_window.py（新規）によるTeamsウィンドウ確認を追加した。Outlook
+予定表上の終了時刻は会議が延長されても更新されないため、「予定は
+終わっているが、実際はまだ会議が続いている」場合に分類ポップアップが
+出現してしまう不具合があった。対象の会議名を含むタイトルのTeams
+ウィンドウがまだ開いていれば、Outlook側の判定が「空いている」と
+言っていてもこの会議への声かけを見送るようにした。Outlook予定表
+（会議の存在・自動記録・次の会議の予定判定）は引き続き主たる情報源の
+まま変更していない。Teams連携が使えない環境ではこれまで通りOutlook
+予定表だけの判定に自動的にフォールバックする
 
 v0.8.0での変更点：
 Outlookの予定表と連携する3つの仕組みを追加した（outlook_calendar.py・
@@ -159,13 +171,30 @@ def check_and_record_ended_meetings(storage_path: str = None) -> None:
         print(f"⚠️ 会議の自動記録チェックに失敗しました: {e}")
 
 
+def _is_teams_meeting_window_open(subject: str) -> bool:
+    """
+    teams_window連携が使える場合だけ、指定した会議名のTeamsウィンドウが
+    今も開いているかを返す。連携が使えない・失敗する場合は常にFalse
+    （＝Outlook予定表の判定だけに従う、これまで通りの挙動）を返す。
+    Outlook予定表上の終了時刻は会議が延長されても更新されないため、
+    「予定は終わっているが実際はまだ続いている」場合の補助的な検知に使う
+    （詳しくはteams_window.pyのモジュールdocstringを参照）
+    """
+    try:
+        import teams_window
+        return teams_window.is_meeting_window_open(subject)
+    except Exception as e:
+        print(f"ℹ️ Teamsウィンドウ確認が使えないため、Outlookの判定だけに従います: {e}")
+        return False
+
+
 def check_pending_meeting_classification(trigger_callback, storage_path: str = None) -> None:
     """
     分類待ちの会議があり、かつ「今、声をかけてよい状況」（会議終了予定から
     CLASSIFY_AFTER_MINUTES分経過・今は会議中でない・数分以内に次の会議も
-    無い）なら、trigger_callback()を呼んでポップアップを開かせる。
-    実際の分類UIはポップアップ側(show())が持つため、ここでは開かせる
-    タイミングの判断だけを行う。
+    無い・その会議のTeamsウィンドウも閉じている）なら、trigger_callback()
+    を呼んでポップアップを開かせる。実際の分類UIはポップアップ側(show())
+    が持つため、ここでは開かせるタイミングの判断だけを行う。
 
     Args:
         trigger_callback: ポップアップを開かせる引数無しの関数
@@ -201,6 +230,13 @@ def check_pending_meeting_classification(trigger_callback, storage_path: str = N
             print(f"⚠️ 会議中判定に失敗しました（分類の声かけを見送ります）: {e}")
             continue
         if not free:
+            continue
+        # Outlook予定表上は「もう空いている」ことになっていても、会議が
+        # 延長されて実際にはまだ続いている場合がある。その会議のTeams
+        # ウィンドウ（会議名がタイトルになる）がまだ開いていれば、
+        # Outlookの判定より優先してこの会議への声かけを見送る
+        if _is_teams_meeting_window_open(meeting["subject"]):
+            print(f"⏸ 会議「{meeting['subject']}」はTeams上でまだ開いているため、分類の声かけを見送ります。")
             continue
         _already_nudged_rows.add(row)
         print(f"📅 会議「{meeting['subject']}」の分類を確認するため、ポップアップを開きます。")
