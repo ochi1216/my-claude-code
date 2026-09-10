@@ -144,10 +144,12 @@ with tempfile.TemporaryDirectory() as tmp:
     check("セッションCookieはそうと分かるように書く",
           "セッションCookie" in text)
     check("まだ有効なCookieは残り日数を出す", "残り" in text)
-    check("期限切れであれば、ログインし直しで直る旨を伝える",
-          "ログインし直せば直る" in text)
-    check("手動ログイン不可とは別事象であることを明記する",
-          "別の事象" in text, text[-400:])
+    # この見本には federated 宛の有効なCookieが含まれるため、判定は「有効」側。
+    # 「期限切れ」「ログイン未完了」の判定は H5 で個別に確認する。
+    check("有効なCookieがあるときは、その旨を判定として出す",
+          "まだ有効です" in text, text[text.find("【判定】"):][:300])
+    check("検索に使うCookieには印を付けて区別する",
+          "★検索に使う" in text)
 
     check("認証に関係する履歴は出す",
           "dpassport.plm.nexperia.com" in text)
@@ -214,5 +216,91 @@ check("書き込み用にファイルを開いている箇所が無い（-o の�
       source.count('"w"') == 0 and source.count("'w'") == 0, "書き込みがあります")
 check("ネットワークを使うライブラリを読み込んでいない",
       "requests" not in source and "urllib" not in source)
+
+# ── H5 判定：期限切れと「ログイン未完了」の区別 ─────────────
+print("\n[H5] 判定の区別（実データで誤判定した箇所）")
+
+check("親ドメインのCookieは配下のホストに送られる",
+      report.domain_covers(".plm.nexperia.com", "dspace.plm.nexperia.com"))
+check("ホスト指定のCookieは別ホストには送られない",
+      report.domain_covers("dpassport.plm.nexperia.com",
+                           "dspace.plm.nexperia.com") is False)
+check("同一ホストなら送られる",
+      report.domain_covers("dspace.plm.nexperia.com", "dspace.plm.nexperia.com"))
+check("空の値でも落ちない",
+      report.domain_covers("", "dspace.plm.nexperia.com") is False
+      and report.domain_covers(".plm.nexperia.com", "") is False)
+check("部分一致で誤判定しない（evil-plm.nexperia.com を配下と見なさない）",
+      report.domain_covers("plm.nexperia.com", "evilplm.nexperia.com") is False)
+
+
+def write_cookies(root: Path, cookies):
+    (root / "enovia_session.json").write_text(
+        json.dumps({"cookies": cookies, "saved_at": "2026-09-04 13:37:45"},
+                   ensure_ascii=False), encoding="utf-8")
+
+
+FUTURE = (datetime.now(timezone.utc) + timedelta(days=100)).timestamp()
+PAST = (datetime.now(timezone.utc) - timedelta(days=1)).timestamp()
+
+# 実データと同じ構成：Enovia本体のCookieが1件も無く、
+# 認証の途中経過（dpassport / microsoftonline）と無関係なもの（bing）だけがある
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp) / "loginfailed"
+    root.mkdir()
+    write_cookies(root, [
+        {"name": "MUID", "value": SECRET, "domain": ".bing.com", "expires": FUTURE},
+        {"name": "afs", "value": SECRET, "domain": "dpassport.plm.nexperia.com",
+         "expires": FUTURE},
+        {"name": "ESTSAUTHPERSISTENT", "value": SECRET,
+         "domain": ".login.microsoftonline.com", "expires": FUTURE},
+        {"name": "AAD_AT", "value": SECRET, "domain": "turbo.microsoft.com",
+         "expires": PAST},
+    ])
+    text = run(root)
+    check("★実データの構成で「ログイン自体が完了していない」と判定する",
+          "ログイン自体が完了していない" in text, text[text.find("【判定】"):][:400])
+    check("期限切れだけが理由だと**言わない**（以前の誤判定）",
+          "期限切れだけで" not in text and "ログインし直せば直る" not in text)
+    check("Microsoft側の認証までは通っていたことを示す",
+          "Microsoft側の認証までは通っていた" in text)
+    check("検索に使えるCookieの件数を0と数える",
+          "★検索に使えるCookie  : 0 件" in text, text[text.find("【まとめ】"):][:400])
+    check("認証の途中経過のCookieは2件と数える",
+          "認証の途中経過のCookie: 2 件" in text)
+    check("認証の途中経過のCookieは、行にもそうと分かる印を付ける",
+          "（認証の途中経過）" in text)
+    check("★秘密★ この構成でも値は出力されない", SECRET not in text)
+
+# 期限切れだけのケース：Enovia本体のCookieはあるが、すべて切れている
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp) / "expired"
+    root.mkdir()
+    write_cookies(root, [
+        {"name": "JSESSIONID", "value": SECRET,
+         "domain": "dspace.plm.nexperia.com", "expires": PAST},
+        {"name": "tok", "value": SECRET, "domain": ".plm.nexperia.com",
+         "expires": PAST},
+    ])
+    text = run(root)
+    check("Enovia本体のCookieが全て期限切れなら「押し直せば直る」と判定する",
+          "押し直せば直る" in text, text[text.find("【判定】"):][:300])
+    check("この場合は「ログイン未完了」とは言わない",
+          "ログイン自体が完了していない" not in text)
+    check("親ドメインのCookieも検索に使えるものとして数える",
+          "★検索に使えるCookie  : 2 件" in text)
+
+# 有効なケース
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp) / "alive"
+    root.mkdir()
+    write_cookies(root, [
+        {"name": "JSESSIONID", "value": SECRET,
+         "domain": "dspace.plm.nexperia.com", "expires": FUTURE},
+    ])
+    text = run(root)
+    check("有効なCookieがあれば、その旨と別の可能性を示す",
+          "まだ有効です" in text and "無効化されている可能性" in text,
+          text[text.find("【判定】"):][:300])
 
 check.finish()

@@ -37,6 +37,30 @@ _CHROME_EPOCH = datetime(1601, 1, 1, tzinfo=timezone.utc)
 AUTH_HOST_HINTS = ("3dpassport", "plm.nexperia.com", "dspace", "federated",
                    "login.microsoftonline.com", "sts.", "adfs")
 
+# ツールが実際にリクエストを投げる先。検索を通すには、この2つのホストへ
+# 送られるCookie（＝ログイン後に発行される3DSpaceのセッション）が要る。
+# config.json の enovia_base_url / enovia_search_url に対応する。
+ENOVIA_TARGET_HOSTS = ("dspace.plm.nexperia.com", "federated.plm.nexperia.com")
+
+# 認証の途中経過でしか使われないホスト。ここのCookieがあっても、
+# 「ログインが完了した」ことにはならない（重要な区別）。
+AUTH_ONLY_HOSTS = ("dpassport.plm.nexperia.com", "login.microsoftonline.com")
+
+
+def domain_covers(cookie_domain: str, host: str) -> bool:
+    """そのCookieが、指定ホストへのリクエストに送られるかを判定する。
+
+    ドメイン属性の先頭ドットは有無にかかわらず、そのドメインと配下の
+    サブドメインに送られる（ブラウザの挙動と同じ）。
+    例）.plm.nexperia.com は dspace.plm.nexperia.com に送られるが、
+        dpassport.plm.nexperia.com は送られない。
+    """
+    base = str(cookie_domain or "").strip().lower().lstrip(".")
+    target = str(host or "").strip().lower()
+    if not base or not target:
+        return False
+    return target == base or target.endswith("." + base)
+
 
 def jst(dt: datetime) -> str:
     return dt.astimezone(JST).strftime("%Y-%m-%d %H:%M:%S")
@@ -133,6 +157,10 @@ def report_session_json(path: Path, out) -> None:
     session_only = 0
     expired = 0
     earliest = None
+    # Enoviaの検索に効くCookie（＝ログインが完了した証拠）だけを別に数える
+    target_total = 0
+    target_alive = 0
+    auth_only_total = 0
 
     for cookie in cookies:
         name = str(cookie.get("name") or "")[:28]
@@ -151,22 +179,53 @@ def report_session_json(path: Path, out) -> None:
                 label += f"  （残り {remaining.days} 日）"
             if earliest is None or expires < earliest:
                 earliest = expires
-        out(f"  {name:<28} {domain:<26} {label}")
+
+        raw_domain = str(cookie.get("domain") or "")
+        if any(domain_covers(raw_domain, h) for h in ENOVIA_TARGET_HOSTS):
+            target_total += 1
+            if expires is not None and expires >= now:
+                target_alive += 1
+            mark = " ★検索に使う"
+        elif any(domain_covers(raw_domain, h) for h in AUTH_ONLY_HOSTS):
+            auth_only_total += 1
+            mark = " （認証の途中経過）"
+        else:
+            mark = ""
+        out(f"  {name:<28} {domain:<26} {label}{mark}")
 
     out("  " + "-" * 68)
     out("")
     out("  【まとめ】")
     out(f"    期限切れのCookie      : {expired} 件")
-    out(f"    セッションCookie      : {session_only} 件"
-        "（保存した時点で既に無効になっている可能性が高い）")
+    out(f"    セッションCookie      : {session_only} 件")
+    out(f"    ★検索に使えるCookie  : {target_total} 件"
+        f"（{'/'.join(ENOVIA_TARGET_HOSTS)} 宛）")
+    out(f"    認証の途中経過のCookie: {auth_only_total} 件"
+        f"（{'/'.join(AUTH_ONLY_HOSTS)} 宛）")
     if earliest:
         state = "既に切れています" if earliest < now else "まだ有効です"
         out(f"    最も早く切れるもの    : {jst(earliest)}（{state}）")
-    if expired or session_only:
-        out("")
-        out("    → ツールがEnoviaで invalid_grant になるのは、この期限切れだけで")
-        out("       説明が付きます。「ログインし直せば直る」種類の状態です。")
-        out("       手動ブラウザでのログイン不可（SAMLエラー）とは別の事象です。")
+
+    out("")
+    out("  【判定】")
+    if target_total == 0:
+        # ここが最も重要な分岐。「期限切れ」と混同してはいけない。
+        out("    ⛔ Enoviaの検索に使えるCookieが1件もありません。")
+        out("       これは期限切れではなく、**ログイン自体が完了していない**状態です。")
+        out("       ログイン画面までは進んだものの、3DSpaceのセッションが")
+        out("       発行される前に終わっています。")
+        if auth_only_total:
+            out("       認証の途中経過のCookie（3DPassport / Microsoft）は残っており、")
+            out("       **Microsoft側の認証までは通っていた**ことを示します。")
+            out("       つまり失敗したのは、その後の3DPassport側の処理です。")
+        out("       → 下の履歴で、どこで流れが止まったかを確認してください。")
+    elif target_alive == 0:
+        out("    ⚠️ 検索に使えるCookieはありますが、すべて期限切れです。")
+        out("       「Enoviaにログイン」を押し直せば直る種類の状態です。")
+    else:
+        out(f"    🟢 検索に使えるCookieが {target_alive} 件、まだ有効です。")
+        out("       それでも invalid_grant になる場合は、Cookieの期限とは別に")
+        out("       サーバー側でセッションが無効化されている可能性があります。")
 
 
 # ── 2. ブラウザ履歴（いつログイン画面を開いたか） ─────────────
