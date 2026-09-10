@@ -529,6 +529,8 @@ def main():
                              url="https://x/e2.xlsm", doc_type="xlsm", rank=5),
             dsm.SearchResult(source="SharePoint", title="a-pdf",
                              url="https://x/p.pdf", doc_type="pdf", rank=6),
+            dsm.SearchResult(source="SharePoint", title="a-mail",
+                             url="https://x/m.msg", doc_type="msg", rank=7),
         ]
         dsm._manager.providers[dsm.TARGET_SHAREPOINT].search = (
             lambda kw, mx: {"results": list(summary_rows), "total": len(summary_rows), "note": ""})
@@ -537,7 +539,7 @@ def main():
         page.wait_for_timeout(400)
 
         summary_buttons = page.query_selector_all("#resultBody button.mini")
-        check("要約ボタンが行数ぶん出る", len(summary_buttons) == 6, len(summary_buttons))
+        check("要約ボタンが行数ぶん出る", len(summary_buttons) == 7, len(summary_buttons))
         disabled_states = [b.is_disabled() for b in summary_buttons]
         check("docx行の要約ボタンは有効", disabled_states[0] is False, disabled_states)
         check("フォルダ行の要約ボタンは無効", disabled_states[1] is True, disabled_states)
@@ -545,8 +547,10 @@ def main():
         check("xlsx行の要約ボタンは有効（Phase Cで追加）", disabled_states[3] is False, disabled_states)
         check("xlsm行の要約ボタンは有効（マクロ有効ブックもxlsxと同様に対応）",
               disabled_states[4] is False, disabled_states)
-        check("pdf行の要約ボタンは無効（現状docx/pptx/xlsx/xlsmのみ対応）",
-              disabled_states[5] is True, disabled_states)
+        check("pdf行の要約ボタンは有効（v20260910_02で追加）",
+              disabled_states[5] is False, disabled_states)
+        check("対応外の形式(msg)の要約ボタンは無効",
+              disabled_states[6] is True, disabled_states)
 
         summary_buttons[0].click()
         check("クリックするとポップアップが開く", page.is_visible("#summaryOverlay"))
@@ -630,6 +634,212 @@ def main():
             dsm.http_req.get = orig_http_get_ui
             dsm._generate_advanced = orig_generate_advanced_ui
             dsm._cfg = orig_cfg_ui
+
+
+        # ── フォルダ探索（v20260910_02）───────────────────────
+        # 実際にチェックを付けて探索を実行し、ツリー表示・一覧表示・開閉・
+        # ファイル名のリンクまでを本物のブラウザで確認する。
+        # 単体テストでは見つからない不具合（CSSで [hidden] が効かない等、
+        # 過去に実際に起きた）を捕まえるのがこの節の役割。
+        explore_root = dsm.SearchResult(
+            source="SharePoint", title="03. Hardware", is_folder=True,
+            doc_type=dsm.FOLDER_TYPE_LABEL, site="Japan Design Center",
+            url="https://x/sites/S/Docs/03Hardware", last_modified="2026-08-21",
+            rank=1)
+        dsm._manager.providers[dsm.TARGET_SHAREPOINT].search = (
+            lambda kw, mx: {"results": [explore_root], "total": 1, "note": ""})
+
+        def _graph_item(item_id, name, folder=False, size=126976):
+            body = {"id": item_id, "name": name,
+                    "webUrl": "https://x/sites/S/Docs/" + name,
+                    "lastModifiedDateTime": "2026-08-21T05:00:00Z",
+                    "createdBy": {"user": {"displayName": "Ochi"}},
+                    "parentReference": {"driveId": "DRIVE01"}}
+            if folder:
+                body["folder"] = {"childCount": 2}
+            else:
+                body["file"] = {"mimeType": "application/octet-stream"}
+                body["size"] = size
+            return body
+
+        EXPLORE_TREE = {
+            "ROOT01": [_graph_item("SUB01", "01. Validation_Plan", folder=True),
+                       _graph_item("FILE01", "Overview.docx")],
+            "SUB01": [_graph_item("FILE02", "Plan_Rev3.pdf"),
+                      _graph_item("FILE03", "Data.xlsx", size=2516582)],
+        }
+
+        class _FakeGraphResp:
+            def __init__(self, payload):
+                self.status_code = 200
+                self._payload = payload
+                self.text = ""
+
+            def json(self):
+                return self._payload
+
+        def fake_graph_get(url, headers=None, timeout=None, **kwargs):
+            if "/driveItem" in url and "/children" not in url:
+                return _FakeGraphResp(_graph_item("ROOT01", "03. Hardware",
+                                                  folder=True))
+            if "/items/" in url and "/children" in url:
+                item_id = url.split("/items/", 1)[1].split("/children", 1)[0]
+                return _FakeGraphResp({"value": EXPLORE_TREE.get(item_id, [])})
+            return _FakeGraphResp({"value": []})
+
+        orig_http_get_explore = dsm.http_req.get
+        dsm.http_req.get = fake_graph_get
+        try:
+            page.click("#tabs button[data-target='sharepoint']")
+            page.wait_for_timeout(300)
+            page.fill("#keyword", "explore-test")
+            page.click("#btnSearch")
+            page.wait_for_timeout(700)
+
+            explore_boxes = page.query_selector_all(
+                "#resultBody input[title*='再帰的に探索']")
+            check("フォルダ行に「探索」のチェックが出る",
+                  len(explore_boxes) == 1, len(explore_boxes))
+            check("探索ボタンは、チェックを付ける前は押せない",
+                  page.is_visible("#btnExplore")
+                  and page.is_disabled("#btnExplore"))
+
+            check("ツリー／一覧の切替は、検索結果のタブには出さない",
+                  not page.is_visible("#viewToggle"))
+
+            explore_boxes[0].check()
+            page.wait_for_timeout(200)
+            check("チェックを付けると探索ボタンが押せるようになる",
+                  not page.is_disabled("#btnExplore"))
+            check("探索ボタンに選択件数が出る",
+                  "(1)" in (page.text_content("#btnExplore") or ""),
+                  page.text_content("#btnExplore"))
+
+            page.click("#btnExplore")
+            page.wait_for_timeout(3500)
+
+            check("探索が終わるとフォルダ探索タブが現れる",
+                  page.is_visible("#tabExplore"))
+            check("フォルダ探索タブが選択された状態になる",
+                  "on" in (page.get_attribute("#tabExplore", "class") or ""),
+                  page.get_attribute("#tabExplore", "class"))
+            check("件数の見出しが「探索結果」になる",
+                  "探索結果" in (page.text_content("#resultCount") or ""),
+                  page.text_content("#resultCount"))
+
+            tree_rows = page.eval_on_selector_all(
+                "#resultBody tr td.title", "e => e.map(x => x.innerText.trim())")
+            check("起点＋配下のすべてが行になる（4件＋起点）",
+                  len(tree_rows) == 5, tree_rows)
+            check("ツリー表示ではフォルダが先に並ぶ",
+                  tree_rows[1].endswith("01. Validation_Plan"), tree_rows)
+
+            indents = page.eval_on_selector_all(
+                "#resultBody tr td.title .tindent",
+                "e => e.map(x => x.style.width)")
+            check("階層の深さだけ字下げされる（0/18/36px…）",
+                  indents[0] == "0px" and indents[1] == "18px"
+                  and indents[2] == "36px", indents)
+
+            links = page.eval_on_selector_all(
+                "#resultBody tr td.title a", "e => e.map(x => x.getAttribute('href'))")
+            check("ツリー表示でもファイル名がリンクになっている（クリックで開ける）",
+                  len(links) == 5 and all(h and h.startswith("https://") for h in links),
+                  links)
+
+            toggles = page.query_selector_all("#resultBody .ttoggle:not(.empty)")
+            check("中身のあるフォルダには開閉の記号が出る",
+                  len(toggles) == 2, len(toggles))
+            toggles[1].click()   # 01. Validation_Plan を閉じる
+            page.wait_for_timeout(300)
+            check("フォルダを閉じるとその配下が隠れる",
+                  len(page.query_selector_all("#resultBody tr td.title")) == 3,
+                  len(page.query_selector_all("#resultBody tr td.title")))
+            page.query_selector_all("#resultBody .ttoggle:not(.empty)")[1].click()
+            page.wait_for_timeout(300)
+            check("もう一度押すと元に戻る",
+                  len(page.query_selector_all("#resultBody tr td.title")) == 5)
+
+            # 承認済み設計どおり、ツリー表示でも「種別」だけは絞り込める。
+            # 他の列は階層が壊れるため出さない。
+            check("ツリー表示の絞り込みは「種別」だけ",
+                  len(page.query_selector_all("#resultHead .filt")) == 1
+                  and page.eval_on_selector_all(
+                      "#resultHead th",
+                      "e => e.filter(x => x.querySelector('.filt'))"
+                      "      .every(x => x.innerText.indexOf('種別') >= 0)"),
+                  page.eval_on_selector_all(
+                      "#resultHead th",
+                      "e => e.filter(x => x.querySelector('.filt'))"
+                      "      .map(x => x.innerText.trim())"))
+
+            page.click("#resultHead .filt")
+            page.wait_for_timeout(200)
+            page.click(".fpanel button:has-text('すべて解除')")
+            page.wait_for_timeout(150)
+            page.check(".fpanel input[type=checkbox][value='pdf']")
+            page.wait_for_timeout(300)
+            filtered = page.eval_on_selector_all(
+                "#resultBody tr td.title", "e => e.map(x => x.innerText.trim())")
+            check("ツリー表示で種別を絞り込むと、該当ファイルとその親だけが残る",
+                  any("Plan_Rev3.pdf" in t for t in filtered)
+                  and not any("Overview.docx" in t for t in filtered)
+                  and any("01. Validation_Plan" in t for t in filtered),
+                  filtered)
+            page.click("#btnClearFilter")
+            page.wait_for_timeout(300)
+            check("絞り込みを解除すると全件に戻る",
+                  len(page.query_selector_all("#resultBody tr td.title")) == 5,
+                  len(page.query_selector_all("#resultBody tr td.title")))
+            check("検索専用のボタンは探索タブでは出さない（押すと結果が消えるため）",
+                  not page.is_visible("#btnRefresh")
+                  and not page.is_visible("#btnLoadMore"))
+
+            check("フォルダ探索タブではツリー／一覧の切替が出る",
+                  page.is_visible("#viewToggle"))
+
+            page.click("#btnFlatView")
+            page.wait_for_timeout(300)
+            check("一覧表示に切り替えると絞り込みの記号が出る",
+                  len(page.query_selector_all("#resultHead .filt")) > 0)
+            check("一覧表示では字下げしない",
+                  len(page.query_selector_all("#resultBody .tindent")) == 0)
+            flat_rows = page.eval_on_selector_all(
+                "#resultBody tr td.title", "e => e.map(x => x.innerText.trim())")
+            check("一覧表示でも全件見える", len(flat_rows) == 5, flat_rows)
+            flat_links = page.eval_on_selector_all(
+                "#resultBody tr td.title a", "e => e.map(x => x.getAttribute('href'))")
+            check("一覧表示でもファイル名がリンクになっている",
+                  len(flat_links) == 5, flat_links)
+
+            sizes = page.eval_on_selector_all(
+                "#resultBody tr td:nth-child(5)", "e => e.map(x => x.innerText.trim())")
+            check("サイズが読みやすい単位で出る（フォルダは空欄）",
+                  "" in sizes and any(v.endswith("KB") for v in sizes)
+                  and any(v.endswith("MB") for v in sizes), sizes)
+
+            headers_ex = page.eval_on_selector_all(
+                "#resultHead th", "e => e.map(x => x.innerText.trim())")
+            check("サイズ列には絞り込みを付けない（連続値のため並べ替えのみ）",
+                  page.eval_on_selector_all(
+                      "#resultHead th",
+                      "e => e.filter(x => x.innerText.indexOf('サイズ') >= 0)"
+                      "      .every(x => !x.querySelector('.filt'))"),
+                  headers_ex)
+
+            page.click("#tabs button[data-target='sharepoint']")
+            page.wait_for_timeout(800)
+            check("SharePointタブに戻ると検索結果の表示に戻る",
+                  "検索結果" in (page.text_content("#resultCount") or ""),
+                  page.text_content("#resultCount"))
+            page.click("#tabExplore")
+            page.wait_for_timeout(500)
+            check("フォルダ探索タブに戻すと、再探索せずに結果が出る",
+                  "探索結果" in (page.text_content("#resultCount") or "")
+                  and len(page.query_selector_all("#resultBody tr td.title")) == 5,
+                  page.text_content("#resultCount"))
+        finally:
+            dsm.http_req.get = orig_http_get_explore
 
         browser.close()
 

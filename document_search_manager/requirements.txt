@@ -3,13 +3,20 @@ requests>=2.31
 flask>=3.0
 openpyxl>=3.1
 
-# 検索結果の要約機能（対応形式: .docx / .pptx / .xlsx / .xlsm）で本文抽出に使用。
+# 検索結果の要約機能（対応形式: .docx / .pptx / .xlsx / .xlsm / .pdf）で本文抽出に使用。
 # 未インストールでも他の機能（検索・出力・ダウンロード等）には影響しないが、
 # 「要約」ボタンを押すと分かりやすいエラーメッセージで案内される。
 # xlsx/xlsmの抽出は上のopenpyxl（Excel出力機能で既に必須）をそのまま使うため、
 # 追加インストールは不要（xlsmはファイル形式自体がxlsxと同じ）。
 python-docx>=1.1
 python-pptx>=0.6.21
+
+# .pdf の本文抽出に使用（v20260910_02で対応形式に追加）。
+# 社内の pdf_translator で既に使用しており、会社PCには導入済みの想定。
+# 未インストールの場合、pdf以外の要約は従来どおり動き、pdfの要約だけが
+# エラーメッセージで案内される。しおり（目次）があれば章の見出しとして使う。
+# 文字情報を持たないスキャンPDFは本文を取り出せない（OCRは対象外）。
+PyMuPDF>=1.23
 
 # Gemini API呼び出しは共通モジュール gemini_client.py
 # （PythonScripts\common\gemini_client.py、word_translator等と共用）経由。

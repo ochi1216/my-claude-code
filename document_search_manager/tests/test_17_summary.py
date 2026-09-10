@@ -164,9 +164,13 @@ check("xlsmも要約可能（マクロ有効ブック、xlsxと同じ抽出）",
       dsm._summarizable_reason(xlsm_row) == (True, ""), dsm._summarizable_reason(xlsm_row))
 
 pdf_row = mk(doc_type="pdf")
-reason = dsm._summarizable_reason(pdf_row)
-check("docx/pptx/xlsx/xlsm以外（pdf）は現状要約不可",
-      reason[0] is False and "pdf" in reason[1], reason)
+check("pdfも要約可能（v20260910_02で追加。PyMuPDFで抽出）",
+      dsm._summarizable_reason(pdf_row) == (True, ""), dsm._summarizable_reason(pdf_row))
+
+unsupported_row = mk(doc_type="msg")
+reason = dsm._summarizable_reason(unsupported_row)
+check("対応形式以外（msg）は要約不可・理由に形式名が入る",
+      reason[0] is False and "msg" in reason[1], reason)
 
 nexus_row = mk(source="Nexus")
 check("Nexusのdocxも要約可能（SharePointProvider系統を継承）",
@@ -357,7 +361,7 @@ rows = [
     mk(title="FolderX", is_folder=True, doc_type=dsm.FOLDER_TYPE_LABEL,
        url="https://x/sites/S/Docs/Folder"),                                    # フォルダ
     mk(title="EnoviaDoc", source="Enovia", url="https://x/sites/S/Docs/B.docx"),  # Enovia
-    mk(title="PdfOne", doc_type="pdf", url="https://x/sites/S/Docs/C.pdf"),      # 未対応形式
+    mk(title="MsgOne", doc_type="msg", url="https://x/sites/S/Docs/C.msg"),      # 未対応形式
     mk(title="PptxDoc", url="https://x/sites/S/Docs/D.pptx", doc_type="pptx",
        last_modified="2026-09-01"),                                             # 要約可（Phase B）
     mk(title="XlsxDoc", url="https://x/sites/S/Docs/E.xlsx", doc_type="xlsx",
@@ -383,9 +387,9 @@ r = client.post("/api/summarize", json={"idx": idx_of(search_resp, "EnoviaDoc")}
 check("Enovia行は400（理由付き）",
       r.status_code == 400 and "Enovia" in r.get_json()["error"], r.get_json())
 
-r = client.post("/api/summarize", json={"idx": idx_of(search_resp, "PdfOne")})
-check("pdf行は400（理由付き・現状docx/pptxのみ対応）",
-      r.status_code == 400 and "pdf" in r.get_json()["error"], r.get_json())
+r = client.post("/api/summarize", json={"idx": idx_of(search_resp, "MsgOne")})
+check("未対応形式(msg)の行は400（理由付き）",
+      r.status_code == 400 and "msg" in r.get_json()["error"], r.get_json())
 
 r = client.post("/api/summarize", json={"idx": "999"})
 check("範囲外の索引は400", r.status_code == 400, r.status_code)
@@ -583,8 +587,8 @@ check("/api/summarize を呼び出すfetchがある", '"/api/summarize"' in html
 check("Escキーで閉じるハンドラがある", "summaryPopupKeyHandler" in html)
 check("示唆を箇条書き（配列）で描画するロジックがある（文章と箇条書きの混在対策）",
       "summary-insight-list" in html)
-check("画面側の対応形式判定にpptx/xlsx/xlsmが含まれる",
-      'SUMMARIZABLE_EXTENSIONS = ["docx", "pptx", "xlsx", "xlsm"]' in html)
+check("画面側の対応形式判定にpptx/xlsx/xlsm/pdfが含まれる",
+      'SUMMARIZABLE_EXTENSIONS = ["docx", "pptx", "xlsx", "xlsm", "pdf"]' in html)
 check("画面側に切り詰め確認の描画ロジックがある",
       "renderTruncationConfirm" in html and "needs_confirmation" in html)
 
