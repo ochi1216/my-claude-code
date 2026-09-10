@@ -636,6 +636,79 @@ def main():
             dsm._cfg = orig_cfg_ui
 
 
+        # ── 図面が主体のPDF（v20260910_03）─────────────────────
+        # 回路図PDFを要約しようとしたときに、Geminiを呼ばずに理由を伝え、
+        # そのままファイルを開ける状態になるかを本物のブラウザで確認する。
+        drawing_rows = [
+            dsm.SearchResult(source="SharePoint", title="Schematic_RevB",
+                             url="https://x/sites/S/Docs/sch.pdf",
+                             doc_type="pdf", last_modified="2026-09-01", rank=1),
+        ]
+        dsm._manager.providers[dsm.TARGET_SHAREPOINT].search = (
+            lambda kw, mx: {"results": list(drawing_rows), "total": 1, "note": ""})
+
+        drawing_labels = ["R23", "C104", "U5", "VDD_3V3", "SDA", "10k", "GND"]
+        drawing_text = "# Page 1\n" + "\n".join(
+            drawing_labels[i % len(drawing_labels)] for i in range(3000))
+
+        gemini_called = []
+
+        orig_dl_drawing = dsm._download_one
+        orig_ex_drawing = dsm._extract_text_for_summary
+        orig_gen_drawing = dsm._generate_summary
+        orig_has_drawing = dsm.HAS_GEMINI
+        orig_cred_drawing = dsm.gemini_credentials_available
+        try:
+            dsm.HAS_GEMINI = True
+            dsm.gemini_credentials_available = lambda: True
+            dsm._download_one = lambda t, r, to: ("sch.pdf", b"%PDF-dummy")
+            dsm._extract_text_for_summary = (
+                lambda dt, c, mx: (drawing_text, False, len(drawing_text)))
+
+            def _gen_drawing(title, text):
+                gemini_called.append(title)
+                return {"executive_summary": "羅列からの要約", "chapters": [],
+                        "insights": {"use": [], "caution": [], "questions": []}}
+
+            dsm._generate_summary = _gen_drawing
+            dsm._summary_cache.clear()
+
+            page.click("#tabs button[data-target='sharepoint']")
+            page.wait_for_timeout(300)
+            page.fill("#keyword", "schematic")
+            page.click("#btnSearch")
+            page.wait_for_timeout(700)
+
+            page.query_selector_all("#resultBody button.mini")[0].click()
+            page.wait_for_timeout(800)
+            notice = page.text_content(".summary-body") or ""
+            check("図面PDFでは要約の代わりに理由が表示される",
+                  "図面が主体" in notice, notice[:120])
+            check("判定の根拠（数字）も表示される",
+                  "1行あたり平均" in notice, notice[:200])
+            check("Geminiを呼んでいない（待たされない）",
+                  gemini_called == [], gemini_called)
+            check("「ファイルを開く」ボタンが出る",
+                  page.is_visible("text=ファイルを開く"))
+            check("「それでも要約する」ボタンが出る",
+                  page.is_visible("text=それでも要約する"))
+
+            page.click("text=それでも要約する")
+            page.wait_for_timeout(800)
+            check("「それでも要約する」を押せば実際に要約が実行される",
+                  gemini_called == ["Schematic_RevB"]
+                  and "羅列からの要約" in (page.text_content(".summary-body") or ""),
+                  (gemini_called, page.text_content(".summary-body")))
+            page.click(".summary-header button")
+            page.wait_for_timeout(100)
+        finally:
+            dsm._download_one = orig_dl_drawing
+            dsm._extract_text_for_summary = orig_ex_drawing
+            dsm._generate_summary = orig_gen_drawing
+            dsm.HAS_GEMINI = orig_has_drawing
+            dsm.gemini_credentials_available = orig_cred_drawing
+            dsm._summary_cache.clear()
+
         # ── フォルダ探索（v20260910_02）───────────────────────
         # 実際にチェックを付けて探索を実行し、ツリー表示・一覧表示・開閉・
         # ファイル名のリンクまでを本物のブラウザで確認する。
