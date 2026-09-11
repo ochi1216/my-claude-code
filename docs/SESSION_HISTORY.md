@@ -3,6 +3,13 @@
 セッション終了処理（ユーザーが明示的に指示した場合）のたびに、完了した
 セッションを1件だけ追記する。同一セッション内の途中経過は記録しない。
 
+> このリポジトリは複数プロジェクトを1つのリポジトリで管理しているため、
+> プロジェクトごとに節を分けて記載する。セッション番号もプロジェクトごとに数える。
+
+---
+
+# Outlook オーガナイザー開発
+
 ## Session Index
 
 | Session | Title | Date | Status | Main Files |
@@ -302,3 +309,212 @@
   2. ユーザー承認後、コミット・Push（本セッションの慣例により、明示的な指示があるまで実施しない）。
   3. 以降は未確定（ユーザーからの次のタスク指示を受ける）。
 * 次回の推奨タイトル: `Outlook オーガナイザー開発 S06 - 振り返りタブ手動追加日付バグ修正の完了と後続対応`
+
+
+---
+
+# Document Search Manager 開発
+
+## Session Index
+
+| Session | Title | Date | Status | Main Files |
+| ------- | ----- | ---- | ------ | ---------- |
+| S01 | Document Search Manager 開発 S01 - Phase 1 SharePoint全社検索の実装と開発資産の整備 | 2026-09-03 | 完了 | document_search_manager/document_search_manager_20260903_08.py, document_search_manager/DESIGN_NOTES.md, document_search_manager/tests/ 一式, document_search_manager/README.md, document_search_manager/CHANGELOG.md, .claude/skills/document-search-tool-dev/SKILL.md, docs/PROJECT_STATUS.md, docs/SESSION_HISTORY.md, docs/NEXT_TASK.md |
+| S02 | Document Search Manager 開発 S02 - Phase 2 Nexus検索の追加と系統別タブ化 | 2026-09-03 | 完了 | document_search_manager/document_search_manager_20260903_16.py, document_search_manager/old/ (_09〜_15), document_search_manager/tests/test_09〜test_14, document_search_manager/tests/ui_check.py, document_search_manager/README.md, document_search_manager/CHANGELOG.md, document_search_manager/DESIGN_NOTES.md, document_search_manager/config.example.json, document_search_manager/run_document_search_manager.bat, docs/PROJECT_STATUS.md, docs/SESSION_HISTORY.md, docs/NEXT_TASK.md |
+
+## S01 - Phase 1 SharePoint全社検索の実装と開発資産の整備
+
+### Purpose
+
+* 社内の3つのドキュメント管理系（SharePoint / Nexus / Enovia）を同一キーワードで
+  横断検索するツールを新規開発する。段階開発とし、本セッションでは
+  **Phase 1（SharePoint全社検索）** を完成させる。
+* あわせて、Phase 2以降で再利用できるよう、調査知見と検証資産を整備する。
+
+### Work Completed
+
+1. **Phase 1 設計提案 → Phase 2 設計監査 → Phase 3 実装**の3フェーズで進行。
+   越智さんの承認を得てから実装に着手した。
+2. 調査（越智さんの会社PCでのF12キャプチャ提供による）:
+   * Nexus（Shareflex）の全文検索が SharePoint標準の `RenderListDataAsStream` ＋
+     **`InplaceSearchQuery`** で実装されており、**SharePoint検索インデックス**を
+     参照していることを確認。Phase 2 は Graph Search で等価に実現できる見込みが立った。
+   * 同リクエストに MCAS が `McasUserAuth` 等を注入していることを確認。
+     SharePoint REST の直接呼び出しは非現実的かつ権限追加が必要なため却下した。
+3. 実装（`_20260903_01` 〜 `_08` の8リビジョン）:
+   * `_01`: Graph Search API による全社横断検索、Flask画面、Excel/CSV出力、疎通診断、
+     プロバイダ抽象と並列実行（部分成功方式）
+   * `_02`: 実機起動時の2件の不具合修正（batの文字化け、認証情報の流用元不足）
+   * `_03`: タイトル・種別が全件空になる不具合の修正、件数選択肢の追加
+   * `_04`: タイトル＝ファイルリンク、右端＝サイトリンクへのリンク配置変更
+   * `_05`: 列ごとのソート、複数選択フィルタ、日付範囲フィルタ、一括ZIPダウンロード、
+     作業状態の保持、旧バージョンの `old/` 自動退避
+   * `_06`: フォルダ列の追加、フォルダの区別（案A）、Document Number 列の削除
+   * `_07`: 拡張子誤認識の修正、フォルダ表示の短縮、OneDrive対応
+   * `_08`: Excel出力のハイパーリンク化、件数表記の明確化
+4. 開発資産の整備（`c8e4de4`）: 検証ハーネスのリポジトリ移設、`DESIGN_NOTES.md` の作成、
+   開発手順のスキル化。
+
+### Files Changed
+
+* 新規: `document_search_manager/` 一式（本体8リビジョン、README、CHANGELOG、
+  DESIGN_NOTES、config.example.json、requirements.txt、起動バッチ、tests/ 一式）
+* 新規: `.claude/skills/document-search-tool-dev/SKILL.md`
+* 変更: `.gitignore`（config.json / token_cache.json / session_state.json /
+  cache/ / exports/ / downloads/ / tests/__pycache__ を除外）
+* 変更: リポジトリ直下 `README.md`（本ツールの節を追加）
+
+### Decisions
+
+* **新規のEntra ID権限を申請しない**（越智さんの明確な指示）。既存アプリ登録を流用し
+  `Sites.Read.All` のみで実装する。実機で `POST /search/query` が通ることを確認できたため、
+  当初の最大リスクは解消した。
+* **フォルダを除外せず「種別=フォルダ」として区別する（案A）。** フォルダ名にのみ
+  キーワードが一致するケースを取りこぼさないため（越智さんの指摘により方針変更）。
+* **フォルダ表示は既定ライブラリ名を `/` に短縮する。** 単純削除では直下の場合に
+  空欄となり情報欠落と区別できないため（越智さんの指摘）。
+* **拡張子判定を「英字始まり1〜10文字の英数字」に限定する。** 社内の
+  `12. Validation` / `MRA2.0` のような命名規則との衝突を避けるため。
+* **旧バージョンはリポジトリ側でも `old/` に置く。** ローカルの自動退避と構成を
+  一致させないと `git pull` で旧版が復活して重複するため。
+* **検証ハーネスはリポジトリ内に置く。** 一時領域にあるとセッション終了で失われるため。
+  最新バージョンを自動検出する設計とし、版を上げてもテスト修正が不要にした。
+
+### Tests
+
+* `python tests/run_tests.py`: **268項目すべて合格**（ネットワーク・Graph API 非依存）。
+  内訳: 検索の中核56 / 設定9 / fields27 / サイトリンク26 / 状態と一括DL42 /
+  フォルダ41 / 拡張子とパス37 / Excel出力30。
+* `python tests/ui_check.py`（Playwright）: **14項目すべて合格**。
+  ソート、複数選択フィルタ、日付範囲、選択、再読み込み後の状態復元を実操作で確認。
+* 検証中に**実バグを5件検出し修正**した:
+  1. 未実装系統の単独指定がエラー扱いになる
+  2. 絞り込みパネルがチェックのたびに閉じて複数選択できない
+  3. 絞り込みパネルが横スクロール領域に切り取られ画面外にはみ出す
+  4. 一括ダウンロードで対象未指定のときに全件が取得される
+  5. （実機報告由来）拡張子の誤認識により番号付きフォルダがファイル扱いになる
+* 会社PCでの実機確認: Graph疎通（`search-api` モード）、キーワード `validation` での
+  検索、タイトル・種別・フォルダ列の表示までを越智さんに確認いただいた。
+
+### Open Items
+
+* **実機でのみ確認可能な未確認事項（2件）**:
+  1. フォルダリンク（`Forms/AllItems.aspx?id=...`）が正しくフォルダを開くか。
+     開かない場合は素のフォルダURL形式へ切り替える。
+  2. 一括ダウンロード（`/shares/{token}/driveItem/content`）が成功するか。
+     失敗時はZIP内の `_ダウンロード失敗一覧.txt` に理由が記録される。
+* Phase 3（Enovia）の実装方式は未確定。F12キャプチャの取得が必要。
+  会社PCでPlaywrightが使えるかも未確認。
+
+### Next Session
+
+* 次の作業: **Phase 2（Nexus検索の追加）**。設計は確定済み（`DESIGN_NOTES.md` 3-1）。
+* 次回の推奨タイトル: `Document Search Manager 開発 S02 - Phase 2 Nexus検索の追加`
+
+## S02 - Phase 2 Nexus検索の追加と系統別タブ化
+
+### Purpose
+
+* **Nexus（Shareflex / SF_QualityDocumentsProd）検索を実装**し、`2. Nexus` と
+  `0. All` から使えるようにする（Phase 2。設計は S01 で確定済み）。
+* セッション中に越智さんから追加要望を受け、**Phase 2.5** として
+  系統別タブ・Nexus標準Indexの表示・Nexusリンクの実用化・有効期限の表示まで実施した。
+
+### Work Completed
+
+`_20260903_09` 〜 `_16` の8リビジョン。
+
+1. `_09` **Nexus検索の実装**。`NexusProvider` を `SharePointProvider` の継承として
+   実装し、Graph の `/search/query` に `path:` 制限付きKQLを渡す方式。
+   親クラスに4つのフック（`_query_string` / `_search_fields` / `_fallback_sites` /
+   `_degrade_fields`）を設け、既知の罠への対策をNexus側にも自動的に効かせた。
+2. `_10` **系統別タブ構成**（越智さんの要望）。`COLUMN_SETS` をタブごとに切り替え、
+   Nexusタブに標準Indexの枠を用意。Nexus行のフォルダ・サイト列を廃止。
+   「Nexus検索診断」を追加。
+3. `_11` **件数不一致の原因確定**と **HTTP 500 の修正**。
+4. `_12` **人物列のID解決**と**「タイトルだけを検索する」**（既定オン）の追加。
+   各Index列に「値の出所（内部列名）」をツールチップ表示。
+5. `_13` **「Nexusで開く」を列フィルタ方式に修正**（`@qmDocumentNo=`）。
+6. `_14` **人物列が行によって空欄になる不具合の修正**（並行処理）。
+   「Nexus列診断」を追加。
+7. `_15` 実機の列診断結果を反映。**対応づけの確定**と、氏名が既に取れている列の
+   引き当て省略。
+8. `_16` **有効期限の列**を最終更新日の右に追加（期限切れ／まもなくのバッジ付き）。
+
+### Files Changed
+
+* 新規: `document_search_manager/document_search_manager_20260903_16.py`
+* 移動: `_09`〜`_15` を `old/` へ（削除せず保持）
+* 新規: `tests/test_09_nexus.py` / `test_10_nexus_index_and_tabs.py` /
+  `test_11_timeout_and_fields.py` / `test_12_people_resolution.py` /
+  `test_13_people_concurrency.py` / `test_14_expiry.py`
+* 変更: `tests/test_01` / `test_06` / `ui_check.py`（仕様変更に伴う期待値の更新）
+* 変更: `README.md` / `CHANGELOG.md` / `DESIGN_NOTES.md` /
+  `config.example.json` / `run_document_search_manager.bat`
+* 変更: `docs/PROJECT_STATUS.md` / `docs/SESSION_HISTORY.md` / `docs/NEXT_TASK.md`
+
+### Decisions
+
+* **Nexusの絞り込みは `path:` でフォルダ限定**。推測ではなく**実測で確定**した
+  （`validation plan`: ①フォルダ限定117件 ≒ Nexus画面116件、②サイト限定297件、
+  ③限定なし126,090件）。この比較のために「Nexus検索診断」を先に作った。
+* **件数不一致（14件 vs 116件）の原因は入力の非対称**だった。ツール側にだけ
+  引用符付きで入力されており、完全一致のフレーズ検索になっていた（④で14件を再現）。
+  **検索ロジックは変更せず**、引用符が含まれる場合に警告を出す形にした。
+* **タブは案A（列定義だけを切り替える）**。表を2本持つと保守コストが倍になり、
+  必ず片方が腐るため。列構成は「実際に検索した系統」に追従させる。
+* **Nexusタブにサイト・フォルダ列を出さない。** Shareflexのフォルダ名は
+  `3E08-CD5F` のような内部ハッシュで情報価値がゼロのため。
+* **標準Indexはリスト項目の `fields` から取る**（`/shares/.../driveItem?$expand=...`）。
+  検索マネージドプロパティ名はテナントごとに違い推測できず、外すと検索全体が
+  HTTP 400 になるため。内部名の揺れは正規化して突き合わせる。
+* **「Nexusで開く」は列フィルタ `@qmDocumentNo=`**。全文検索では他文書の本文に
+  ある参照文献番号にも当たり1件に絞れない（越智さんの指摘）。
+* **有効期限は日付から判定する。** `qmStatus = Expired` と `qmStatusEn = Valid` が
+  食い違っていたため。矛盾する2値のどちらかを選ぶのではなく、自分で導出できる
+  根拠に切り替え、元の値は参考として残す。
+* **重複排除はNexusを検索したときだけ。** `1. SharePoint` 単独で除外すると
+  Nexus文書がどこにも出ない取りこぼしになるため。
+
+### Tests
+
+* `python tests/run_tests.py`: **570項目すべて合格**（ネットワーク非依存）。
+  S01の268項目から302項目の増加。新規は
+  test_09(50) / test_10(96) / test_11(32) / test_12(46) / test_13(32) / test_14(42)。
+* `python tests/ui_check.py`（Playwright）: **34項目すべて合格**。
+  タブ切替による列構成の変化、Nexus標準Index、有効期限バッジを実操作で確認。
+* **検証・実機で実バグを6件検出し修正**した:
+  1. `ui_check.py` がNexus実装後に**実際のGraphを呼びに行く**状態だった
+     （会社PCで本物の結果がダミーに混ざる）
+  2. **HTTP 500 で検索結果が丸ごと失われる**（`as_completed` のタイムアウトを
+     捕まえておらず、間に合った系統の結果まで捨てていた）
+  3. **Nexus行のリンクが機能しない**（SharePoint標準のフォルダビューを張っており、
+     Shareflexが数秒後にトップへ強制遷移させていた）
+  4. **Doc Author / Doc Owner に別の役割の人が表示されていた**
+     （数値IDを採用しない判断が裏目に出て、`nxDocReviewer` / `qmApprover` に
+     フォールバックしていた）
+  5. **人物列が行によって空欄になる**（並行処理でキャッシュに「空の途中結果」を
+     置いていた。6スレッド中5本が空欄になることを再現確認）
+  6. 常に真になってしまう検証を1件（自分で書いたもの）発見し、書き直した
+* 会社PCでの実機確認: Nexus疎通🟢、`validation plan` で117件、`FMEA` で
+  タイトル限定7件、Index 7列の表示、NDS-00072 の Doc Author / Doc Owner が
+  Nexus画面と一致すること。
+
+### Open Items
+
+* **セッション末に、持ち越しの実機確認3件がすべて完了した**（越智さん確認、2026-09-03）:
+  1. v20260903_16 の有効期限の表示と期限切れバッジ
+  2. SharePointタブのフォルダリンク（`Forms/AllItems.aspx?id=...`）の到達性
+  3. 一括ダウンロード（`/shares/{token}/driveItem/content`）の成否
+  → **SharePoint / Nexus 側に実機未確認の項目は残っていない。**
+* Phase 3（Enovia）の実装方式は未確定。**F12キャプチャの取得が必要。**
+* ユーザー情報リスト（`User Information List`）は HTTP 404 で参照できない。
+  現状は人物列の氏名が直接返るため影響しないが、氏名が返らない列が出た場合は
+  空欄のままになる。
+
+### Next Session
+
+* 次の作業: **Phase 3（Enovia検索の追加）**。
+  **実装前に、Enoviaで検索を1回実行したときのF12キャプチャを越智さんに依頼する。**
+* 次回の推奨タイトル: `Document Search Manager 開発 S03 - Phase 3 Enovia検索の追加`
+

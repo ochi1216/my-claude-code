@@ -42,3 +42,19 @@ onenote_report_generator/reports/*.html
 
 # ツールランチャーの実行ログ（実行のたびに追記される実行時生成物）
 tool_launcher/launcher_log.txt
+# Document Search Manager のローカル設定・認証キャッシュ・生成物
+# config.jsonにはテナントID/クライアントID、exports/には検索キーワードと
+# 実際の社内文書名が含まれるため、リポジトリには含めない
+# （コミット対象は config.example.json のみ）。
+document_search_manager/config.json
+document_search_manager/token_cache.json
+document_search_manager/cache/
+document_search_manager/exports/
+document_search_manager/downloads/
+document_search_manager/session_state.json
+document_search_manager/tests/__pycache__/
+
+# Enovia（3DEXPERIENCE）のログインCookie・ブラウザプロファイル。
+# セッションCookieそのものなので、他ツールのconfig.json同様コミットしない。
+document_search_manager/enovia_session.json
+document_search_manager/enovia_profile/
