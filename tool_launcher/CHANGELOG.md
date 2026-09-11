@@ -3,6 +3,69 @@
 このフォルダ内の変更履歴。バージョンアップ時は旧ファイルを残したまま新ファイルを追加し、
 ここに変更点を追記する。
 
+## [20260911_03] - 2026-09-11
+
+**追加ファイル:** `tool_launcher_20260911_03.py`
+
+**更新ファイル:** `tools.json`（17→27ツール・6→7カテゴリ）, `CHANGELOG.md`, `README.md`
+
+リポジトリ統合（28ブランチのうち16本を main 系へマージ）に伴い、登録ツールを全面的に
+見直した。`_20260911_02.py` は削除せず併存させている。
+
+### 1. 自動検出の判定単位を「.batファイル」から「フォルダ」へ変更
+
+`status: "hidden"` にしたツールの `.bat` が、自動検出で「⚙ 未登録」に**復活してしまう
+不具合**があった。非表示にしたはずのものが結局表示されるため、`hidden` が機能していなかった。
+
+あわせて、判定単位もフォルダに変えた。`po_database_organizer` のように補助用の `.bat` が
+同居しているフォルダ（`run_po_pdf_merge.bat` / `run_po_query_import.bat`）では、
+ファイル単位で判定すると毎回それらが「未登録」に並んでしまうため。
+
+- `scan_unregistered_bats()` の引数を `registered_paths`（.batの絶対パス集合）から
+  `known_folders`（フォルダの絶対パス集合）へ変更
+- 除外対象を「表示中のツール」から「`tools.json` に載っている全ツール（hidden含む）」へ変更
+
+### 2. 登録ツールを 17 → 27（表示は25）に拡張
+
+リポジトリ統合で11ツールが `main` 系に加わったため、登録内容を更新した。
+
+| 変更 | 内容 |
+| --- | --- |
+| **新規登録（10件）** | 文書横断検索、会議録画 文字起こし、Weekly PDF差分、プロジェクト原価分析、安否確認（Power Automate）、緊急連絡ツール、BBT講義スクリプト、デイリージャーナル、PO Database Organizer（非表示）、Shareflex Dashboard（非表示） |
+| **root 変更（1件）** | R19 SharePointツール: `legacy` → `repo`。統合により `r19_site_organizer/` がリポジトリ内に入ったため。旧 `PythonScripts\SharePoint\SharePoint_QuicLink\` は参照しなくなった |
+| **カテゴリ追加（1件）** | 🚨 安全・緊急（安否確認・緊急連絡の2ツール） |
+| **カテゴリ改称（1件）** | 🔗 SharePoint → 🔗 SharePoint・文書管理 |
+
+**内訳**: bat起動 14 / py起動 12 / streamlit起動 1 ＝ 27件（うち `hidden` 2件）。
+root は repo 20 / legacy 7。
+
+### 判断の根拠
+
+- **Gemini の `■/□` は実コードから判定した。** 各フォルダを `gemini_client` の
+  使用有無で走査し、使っていれば `proxy`、`google.genai` / `GEMINI_API_KEY` の
+  直接参照のみなら `direct`、どちらも無ければ `none` とした。推測していない。
+- **`outlook_search_folder_view_toggle` は登録していない。** 中身がVBAコードと設計文書
+  のみで、起動できる実行ファイルが無いため（ランチャーの対象外）。
+- **`po_database_organizer` / `shareflex_dashboard` は `hidden`。** 越智さんから
+  「ランチャー登録は不要」との指示があったため。削除ではなく `hidden` にしたのは、
+  自動検出の「未登録」にも出さないため（上記1の修正とセット）。
+
+### 動作確認
+
+- スタンドアロンハーネス **85項目**（`_02` の69項目に、`tools.json` の件数整合と
+  自動検出のフォルダ単位判定の検証16項目を追加）。全件合格。
+- `py_compile` 構文チェック合格。
+
+### 申し送り
+
+- **`journal` の用途が未確認。** `README.md` が無く、`daily_journal_*.py` と5本の `.bat`
+  （`RunConsole` / `RunSilent` / `RegisterForecasts` / `RegisterFuturePull1` /
+  `SetupAutoStart`）で構成される。暫定で `RunConsole.bat` を割り当てた。
+  `SetupAutoStart.bat` はタスクスケジューラを変更する可能性があるため割り当てていない。
+  **越智さんへの確認が必要。**
+- `r19_site_organizer` / `bbt_lecture_organizer` / `excel_translation` /
+  `onenote_report_generator` は `.bat` 未整備のため `kind: py` のまま。S03で整備する。
+
 ## [20260911_02] - 2026-09-11
 
 **追加ファイル:** `tool_launcher_20260911_02.py`
