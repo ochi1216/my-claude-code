@@ -1,0 +1,20 @@
+{
+  "_comment": "テナント全体のSharePointサイト一覧マスター。実データは実際の全サイト名・サイトID・URLを含むためGitにコミットしないこと（.gitignoreで除外済み）。このファイルはスキーマ例のみ。",
+  "_comment2": "現行コードはこのファイルを読み込む（load_sites）のみで、生成する機能は含まれていない。取得方法（Graph API /sites?search= 等の別スクリプト、または手動エクスポート）は未確認のため、移管元に確認が必要。",
+  "retrieved_at": "2026-05-13 10:44:43 JST",
+  "total_count": 2,
+  "sites": [
+    {
+      "displayName": "P0001_SampleProject",
+      "webUrl": "https://contoso.sharepoint.com/sites/P0001_SampleProject",
+      "id": "contoso.sharepoint.com,00000000-0000-0000-0000-000000000001,00000000-0000-0000-0000-000000000002",
+      "createdDateTime": "2022-01-01T00:00:00Z"
+    },
+    {
+      "displayName": "PS0001_SampleSite",
+      "webUrl": "https://contoso.sharepoint.com/sites/PS0001_SampleSite",
+      "id": "contoso.sharepoint.com,00000000-0000-0000-0000-000000000003,00000000-0000-0000-0000-000000000004",
+      "createdDateTime": "2022-01-01T00:00:00Z"
+    }
+  ]
+}
