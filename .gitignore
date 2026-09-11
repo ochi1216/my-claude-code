@@ -58,3 +58,21 @@ document_search_manager/tests/__pycache__/
 # セッションCookieそのものなので、他ツールのconfig.json同様コミットしない。
 document_search_manager/enovia_session.json
 document_search_manager/enovia_profile/
+# 緊急連絡ツールのローカル設定・DB
+emergency_alert_tool/config.json
+emergency_alert_tool/*.db
+
+# Power Automate版: pac CLIの作業用一時フォルダ、実メンバー情報
+power_automate_safety_checkin/.pac-work/
+power_automate_safety_checkin/config/members.json
+
+# Power Automate安否確認PoC: デプロイ用の実値設定と生成物。
+# Team ID・Channel ID・SharePointサイトURL・リストGUIDを含むため、
+# リポジトリには含めない（deploy_config.example.json のみコミット）。
+# deploy_config.json 本体に加え、その写し（動作確認用の deploy_config_errortest.json 等）と
+# 自動で作られる控え（deploy_config.json.bak_<日時>）も除外する。example のみ例外。
+power_automate_safety_checkin/solution/deploy_config*.json
+!power_automate_safety_checkin/solution/deploy_config.example.json
+power_automate_safety_checkin/solution/deploy_config.json.bak_*
+power_automate_safety_checkin/solution/src/
+power_automate_safety_checkin/solution/*.zip
