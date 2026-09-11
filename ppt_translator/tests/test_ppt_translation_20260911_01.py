@@ -620,6 +620,33 @@ try:
           os.path.isfile(out_pptx), f"exists={os.path.isfile(out_pptx)}")
     check("旧仕様の長い名前(_gemini_japanese.pptx)では出力されない",
           not os.path.isfile(os.path.join(_ppt_dir, "sample_gemini_japanese.pptx")))
+
+    # --- 言語コードの変換 (20260911_01 の変更点) ------------------------
+    for lang, expected in [("Japanese", "ja"), ("English", "en"),
+                           ("Chinese Simplified", "cn"), ("Korean", "ko")]:
+        check(f"lang_to_suffix: {lang} -> {expected}",
+              mod.lang_to_suffix(lang) == expected,
+              f"got={mod.lang_to_suffix(lang)}")
+    check("lang_to_suffix: 未知の言語は先頭2文字を小文字で使う",
+          mod.lang_to_suffix("Portuguese") == "po",
+          f"got={mod.lang_to_suffix('Portuguese')}")
+    check("lang_to_suffix: 前後の空白を落としてから2文字にする",
+          mod.lang_to_suffix("  Thai  ") == "th",
+          f"got={mod.lang_to_suffix('  Thai  ')}")
+
+    # --- 英語・中国語でもエンドツーエンドで出力名を確認 -----------------
+    for lang, suffix in [("English", "en"), ("Chinese Simplified", "cn")]:
+        src_other = os.path.join(_ppt_dir, f"sample_{suffix}_src.pptx")
+        _build_sample_pptx(src_other)
+        MESSAGEBOX.CALLS.clear()
+        mod.translate_ppt_document_thread(src_other, lang, _FakeProgressWindow())
+        expected_out = os.path.join(_ppt_dir, f"sample_{suffix}_src_{suffix}.pptx")
+        check(f"{lang} の出力ファイル名が _{suffix}.pptx になる",
+              os.path.isfile(expected_out),
+              f"exists={os.path.isfile(expected_out)}")
+        check(f"{lang} ではフォント名を 游ゴシック に変えない",
+              all(s["name"] != "游ゴシック" for s in _run_signature(expected_out)),
+              f"names={sorted({s['name'] for s in _run_signature(expected_out)})}")
     check("エラーダイアログが出ていない",
           not any(c[0] == "error" for c in MESSAGEBOX.CALLS), f"{MESSAGEBOX.CALLS}")
     check("完了ダイアログが出る", any(c[0] == "info" for c in MESSAGEBOX.CALLS))

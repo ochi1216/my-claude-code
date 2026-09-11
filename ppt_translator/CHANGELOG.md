@@ -7,6 +7,74 @@
 > （専用フォルダ）へ移した。フォルダ名は `ppt_translator`、スクリプトのファイル名の接頭辞は
 > `ppt_translation` のままである（起動用バッチのワイルドカードを書くときに間違えやすい）。
 
+## [20260911_01] - 2026-09-11
+
+**追加ファイル:** `ppt_translation_20260911_01.py`
+
+**更新ファイル:** `README.md`, `CHANGELOG.md`
+
+**リネームしたファイル:** `tests/test_ppt_translation_20260812_01.py` →
+`tests/test_ppt_translation_20260911_01.py`（テストは常に最新版を対象にする運用のため。
+`pdf_translator` もスクリプトは2版併存・テストは1つという構成になっている）
+
+翻訳後のファイル名に付く言語部分を、翻訳先言語そのままから**2文字の言語コードへ短縮**した
+（ユーザー依頼による）。
+
+```
+旧: 資料_gemini_japanese.pptx / 資料_gemini_english.pptx / 資料_gemini_chinese.pptx
+新: 資料_ja.pptx            / 資料_en.pptx            / 資料_cn.pptx
+```
+
+- `LANGUAGE_SUFFIX_MAP`（日本語 `ja` / 英語 `en` / 中国語簡体字 `cn` / 韓国語 `ko`）と
+  `lang_to_suffix()` を新規追加した。表に無い言語は先頭2文字を小文字にして使う。
+  `pdf_translator` の同名関数と同じ考え方に揃えてある。
+- 変更したのは `translate_ppt_document_thread` の出力パス組み立て2行だけ。
+  旧: `lang_code = target_language.split()[0].lower()` →
+  新: `lang_suffix = lang_to_suffix(target_language)`
+- **翻訳処理・書式保持・Gemini呼び出しには一切手を入れていない。** ASTによる関数単位の
+  ハッシュ比較で、24個の関数・クラス（`_CommonGeminiClient` / `gemini_credentials_available` /
+  `init_gemini` / `translate_batch_gemini` / `translate_super_fast_parallel` /
+  `WordProgressWindow` / `select_file` など）が `20260812_01` と**完全一致**することを確認済み。
+  変更は `translate_ppt_document_thread` 1つ、新規は `lang_to_suffix` 1つだけ。
+
+### 申し送り
+
+- **出力ファイル名が変わる。** 旧版で作った `_gemini_japanese.pptx` は消えないので、
+  同じ資料を新版で翻訳すると `_ja.pptx` が別ファイルとしてできる（上書きはされない）。
+  過去の翻訳済みファイルを参照している手順書やリンクがあれば、影響を確認すること。
+- **中国語簡体字は `cn` にした（ユーザー指定）。** `pdf_translator` は同じ言語に `zh`
+  （ISO 639-1）を使っているため、ツール間で綴りが揃っていない。
+  また `excel_translation` は日本語に `jp`、中国語簡体字に `zh` を使っている。
+  揃えるかどうかは未決（依頼があれば対応する）。
+- `run_ppt_translator.bat` は変更不要。フォルダ内で最も新しい
+  `ppt_translation_????????_??.py` を自動で選ぶため、`20260911_01` が起動対象になる。
+
+### テスト
+
+`tests/test_ppt_translation_20260911_01.py`（**106項目、すべて合格**）。
+`20260812_01` の95項目に、今回の変更ぶん11項目を追加した。
+
+- `lang_to_suffix()` の変換（`Japanese`→`ja` / `English`→`en` /
+  `Chinese Simplified`→`cn` / `Korean`→`ko`）、未知の言語のフォールバック、前後空白の除去
+- 日本語・英語・中国語簡体字それぞれで、**実際に合成PPTXを翻訳して出力ファイル名を確認**
+  （`_ja.pptx` / `_en.pptx` / `_cn.pptx`）
+- **旧仕様の長い名前（`_gemini_japanese.pptx`）では出力されない**こと
+- 日本語以外ではフォント名を `游ゴシック` に変えないこと（既存仕様の回帰確認）
+- 移行前の `ppt_translation_20260309_03.py` と新版に同じ翻訳文を与えると、**出力PPTXの
+  run 構成・テキスト・書式・フォント名が完全一致する**こと
+  （＝ファイル名だけが変わり、中身は変わっていないことの証明）
+
+### 未検証（実機での確認が必要）
+
+Linuxコンテナからは共通モジュールにも自宅PCプロキシにも到達できないため、**実際にプロキシ経由で
+Geminiの応答が返るところは未確認**。ただし Gemini 呼び出し部分は `20260812_01`（実機確認済み）から
+1文字も変えていない。実機では次を確認すること。
+
+1. `PythonScripts\Powerpoint\ppt_translator\` に `ppt_translation_20260911_01.py` を追加する
+   （既存の `20260812_01` は消さなくてよい）
+2. `run_ppt_translator.bat` から起動し、`Target script:` に `20260911_01` が表示されること
+3. 翻訳結果が `元ファイル名_ja.pptx` で保存されること
+
 ## [20260812_01] - 2026-08-12
 
 **追加ファイル:** `ppt_translation_20260812_01.py`, `tests/test_ppt_translation_20260812_01.py`

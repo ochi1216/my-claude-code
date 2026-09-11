@@ -36,7 +36,7 @@ PowerPointファイル（.pptx）をGoogle Gemini APIで翻訳し、**フォン�
   │   └── gemini_client.py
   └── Powerpoint\
       └── ppt_translator\
-          └── ppt_translation_20260812_01.py   ← ここから見て common は「2つ上」
+          └── ppt_translation_20260911_01.py   ← ここから見て common は「2つ上」
   ```
 
   1つ上・2つ上・3つ上を順に探すため、移行前の置き場所（`PythonScripts\excel\`）に
@@ -100,18 +100,23 @@ PowerPointファイル（.pptx）をGoogle Gemini APIで翻訳し、**フォン�
 4. スクリプトを実行する（`ppt_translation_yyyymmdd_NN.py` の最新版）。
 
    ```
-   python ppt_translation_20260812_01.py
+   python ppt_translation_20260911_01.py
    ```
 
 ### 使い方
 
 1. 「ファイル選択」から翻訳したい `.pptx` を選び、翻訳先言語（日本語／英語／中国語簡体字）を
    選んで「翻訳開始」を押す。
-2. 完了すると同じフォルダに `元ファイル名_gemini_japanese.pptx` のように保存される
-   （英語なら `_gemini_english.pptx`、中国語簡体字なら `_gemini_chinese.pptx`）。
+2. 完了すると同じフォルダに `元ファイル名_ja.pptx` のように、末尾2文字の言語コード付きで
+   保存される（英語なら `_en.pptx`、中国語簡体字なら `_cn.pptx`）。
    元のファイルは変更されない。
 
-## 処理の仕組み（20260812_01 時点）
+> **20260911_01 で出力ファイル名が変わりました。**
+> 20260812_01 までは `_gemini_japanese.pptx` のように言語名がそのまま入っていました。
+> 旧版で作ったファイルは消えないので、同じ資料を新版で翻訳すると `_ja.pptx` が
+> 別ファイルとしてできます（上書きはされません）。
+
+## 処理の仕組み（20260911_01 時点）
 
 1. 選択された `.pptx` を出力先へコピーし、そのコピーを `python-pptx` で開く
    （元ファイルには一切書き込まない）。
@@ -136,9 +141,12 @@ PowerPointファイル（.pptx）をGoogle Gemini APIで翻訳し、**フォン�
 ## 既知の制限・仕様
 
 - **対応形式は `.pptx` のみ**（旧形式 `.ppt` は非対応）。
-- 出力ファイル名は `_gemini_japanese.pptx` のように**言語名がそのまま入る**
-  （`pdf_translator` の `_ja.pdf` のような2文字コードではない）。既存の運用に
-  影響するため、依頼が無い限り変更しない。
+- 出力ファイル名の言語コードは `LANGUAGE_SUFFIX_MAP` で決まる（日本語 `ja` /
+  英語 `en` / 中国語簡体字 `cn` / 韓国語 `ko`）。表に無い言語は先頭2文字を小文字に
+  したものを使う。
+  **中国語簡体字は `cn` にしている。** `pdf_translator` は同じ言語に `zh`
+  （ISO 639-1）を使っているため、2つのツールで綴りが揃っていない。揃える場合は
+  どちらかの `LANGUAGE_SUFFIX_MAP` を直す。
 - run 単位で翻訳するため、1つの文が書式の切れ目で複数 run に分割されている場合は
   文脈が失われ、不自然な訳になることがある（PowerPointの構造上の制約）。
 - SmartArt・グラフ内のテキスト・画像内の文字は翻訳対象外（python-pptx から run として
@@ -167,10 +175,11 @@ PowerPointファイル（.pptx）をGoogle Gemini APIで翻訳し、**フォン�
 
 ```
 pip install python-pptx
-python3 tests/test_ppt_translation_20260812_01.py
+python3 tests/test_ppt_translation_20260911_01.py
 ```
 
 実際のGemini APIには接続せず、偽の `gemini_client` を注入してpayloadを検証する。
 `python-pptx` は本物を使い、合成PPTX（タイトル・本文・表・スピーカーノート）を生成して
-翻訳の書き戻しまでエンドツーエンドで確認する。旧版 `ppt_translation_20260309_03.py` と
-新版に同じ翻訳文を与えて出力を比較し、テキスト・書式が完全一致することも検証している。
+翻訳の書き戻しまでエンドツーエンドで確認する。移行前の `ppt_translation_20260309_03.py` と
+新版に同じ翻訳文を与えて出力を比較し、テキスト・書式が完全一致することも検証している
+（＝ファイル名だけが変わり、中身は変わっていないことの証明）。
