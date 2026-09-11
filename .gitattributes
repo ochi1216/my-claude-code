@@ -1,3 +1,4 @@
 # Shift_JIS(CP932)で保存しているバッチファイル。文字コード・改行コードを
 # gitに変換させない（autocrlf等による意図しない書き換えを防ぐ）。
 *.bat -text
+*.bat text eol=crlf

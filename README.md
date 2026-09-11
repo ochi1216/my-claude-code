@@ -29,6 +29,9 @@ Outlookメール解析・アクションダッシュボードツール。詳細�
 ## BBT レクチャーオーガナイザー（BBTサマリ）
 
 セットアップ手順は [`bbt_lecture_organizer/README.md`](bbt_lecture_organizer/README.md) を参照。
+## 会議録画 文字起こし・要約ツール
+
+セットアップ手順は [`meeting_transcript_summarizer/README.md`](meeting_transcript_summarizer/README.md) を参照。
 
 ## BBT RTOCS Organizer
 
