@@ -4,9 +4,9 @@ Excelファイル(`.xlsx` / `.xlsm` / `.xls`)のセルをGemini APIで翻訳し�
 
 ## 最新版
 
-`excel_translation_20260817_01.py`
+`excel_translation_20260911_01.py`
 
-バージョンごとの変更点は [`CHANGELOG.md`](CHANGELOG.md) を参照。旧版(`excel_translation_20260616_03.py` / `excel_translation_20260812_01.py`)は削除せず残してある。
+バージョンごとの変更点は [`CHANGELOG.md`](CHANGELOG.md) を参照。旧版(`excel_translation_20260616_03.py` / `excel_translation_20260812_01.py` / `excel_translation_20260817_01.py`)は削除せず残してある。
 
 ## セットアップ
 
@@ -32,7 +32,7 @@ PythonScripts\
 │   └── gemini_client.py
 └── excel\
     └── excel_transrate\
-        └── excel_translation_20260817_01.py
+        └── excel_translation_20260911_01.py
 ```
 
 `GEMINI_COMMON_DIR` 未設定時は、スクリプトから見て 1つ上 → 2つ上 → 3つ上 の順に
@@ -59,12 +59,19 @@ PythonScripts\
 ## 実行
 
 ```
-python excel_translation_20260817_01.py
+python excel_translation_20260911_01.py
 ```
 
 翻訳対象のExcelファイルは事前に閉じておくこと。出力は
 `<元のファイル名>_<言語略号>_<yyyymmdd_HHMMSS>.xlsx`(マクロ有効ブックは`.xlsm`)として
-元ファイルと同じフォルダに保存される。
+元ファイルと同じフォルダに保存される。言語略号は以下のとおり(`_20260911_01`以降):
+
+| 翻訳先言語 | 略号 |
+|---|---|
+| 英語 (English) | `en` |
+| 中国語簡体字 (Chinese Simplified) | `cn` |
+| 中国語繁体字 (Chinese Traditional) | `tc` |
+| 日本語 (Japanese) | `jp` |
 
 ## テスト
 
