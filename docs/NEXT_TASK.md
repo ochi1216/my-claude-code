@@ -125,112 +125,140 @@ CLAUDE.md, docs/PROJECT_STATUS.md, docs/SESSION_HISTORY.md, docs/NEXT_TASK.md �
 * Project Name: Document Search Manager 開発
 * Previous Session: S03 - Phase 3 Enovia検索・AI要約・フォルダ探索の実装とEnovia認証障害の解決
 * Next Session Number: S04
-* Recommended Session Title: Document Search Manager 開発 S04 - Enovia認証の再発防止と探索結果の一括要約
+* Recommended Session Title: Document Search Manager 開発 S04 - Enovia検索拡張（Document以外の項目に対応）
 
 ## Objective
 
-1. **最優先: Enovia認証の再発防止。** 9/4〜9/11の障害では、ツールに認証ログが
-   無かったため復旧後に何も確かめられなかった。同じことを繰り返さないための記録と
-   可視化を入れる。
-2. **探索結果の一括要約**（越智さん承認済み・S03では切り離した）。
-3. 余裕があれば、リポジトリの小さな片付け（下記 Scope 参照）。
+* **Enoviaで、Document以外の項目（ECO / 問題 / スケッチ / 変更指示 /
+  プロジェクトスペース / Basic Type 等）も検索・表示できるようにする。**
+* 越智さんの指示（2026-09-11）：「Document以外の項目を検索できる状態を目指す」。
 
 ## Background
 
-* **Phase 1〜3（SharePoint / Nexus / Enovia）と、AI要約・フォルダ探索は完了済み。**
-  2026-09-11に会社PCで実機確認し、すべて合格している。
-* 最新リビジョンは `document_search_manager/document_search_manager_20260911_02.py`
-  （コミット `068bda2`、ブランチ `claude/document-search-enovia-phase3-5p33ci`）。
-* **着手前に必ず `document_search_manager/DESIGN_NOTES.md` を読むこと。**
-  特に **3-8（9/4のEnovia障害の事象記録）**、**3-9（セッションCookieの取り逃がし）**、
-  **5-8（hidden属性とdisplay指定）**、**5-10（Windowsのポート二重起動）**。
-  スキル `document-search-tool-dev` も参照する。
+### ★重要★ 新しいAPI連携は不要。既に応答に含まれている
 
-### Enovia障害の要点（引き継ぎ事項）
+* Enoviaへ投げるクエリは、**既に191種類すべての型を要求している**
+  （`additional_query` の `flattenedtaxonomies:"types/..."` を OR で列挙）。
+* つまり **Document以外の項目は、応答に既に入っている。**
+* それを `_item_to_result()` が **クライアント側で捨てている**:
 
-* 障害期間は **2026-09-04 08:42 〜 2026-09-11 17:51**（両端とも実測）。
-* **Microsoft（Entra ID）側の認証は成功していた。** 失敗したのは**3DPassport側の
-  SAML処理**。`/3dpassport/saml/SSO/alias/...` に到達した後、記録が途切れている。
-* **原因不明のまま自然復旧した。IT調査は継続中。こちらから取り下げないこと。**
-* ツール側の不具合（セッションCookieの取り逃がし）は `_20260911_01` で修正済み。
-  これは障害とは**別の問題**で、混同しないこと。
+```python
+enovia_type = _field_text(attrs.get("ds6w:what/ds6w:type"))
+if self.cfg.get("enovia_document_type_only", True) and enovia_type != "Document":
+    return None   # ← ここで捨てている
+```
 
-### S03で得た「効いた進め方」
+* 設定 `enovia_document_type_only`（既定 `True`）がこの動作を決めている。
+* **したがってS04の主題は、API連携ではなく「絞り込みの見せ方」と「列構成」。**
+  想定より小さく収まる可能性が高い。
 
-* **推測で実装に入らない。** フォルダ探索は、本体の前に**診断だけ**を出して
-  会社PCで1回確かめてから実装した。これが正しく働いた。
-* **診断ツールの判定は断定しすぎない。** S03では自作のレポートが実データに対して
-  2回誤った結論を出した（「期限切れ」「ログイン未完了」）。原因が複数あり得るときは、
-  **候補を挙げて見分け方を示す**方が実用的。
-* **画面を追加したらスクリーンショットを目で見る。** `hidden` が効かない不具合は、
-  単体テストを全部通過したうえでスクリーンショットで発見した。
+### 実機で観測済みの型と件数（2026-09-11・Enovia画面のファセット）
+
+キーワード `Application` で検索したときの内訳。**日本語のラベルで表示されていた。**
+
+| 型（画面表示） | 件数 |
+|---|---|
+| ドキュメント | 263 |
+| ECO | 256 |
+| スケッチ | 59 |
+| 問題 | 47 |
+| 変更指示 | 37 |
+| プロジェクトスペース | 19 |
+| Basic Type | 10 |
+| （その他） | 8 |
+
+* ツール側の `ds6w:what/ds6w:type` は英語名（`Document` / `Issue` 等）で返る。
+  **画面表示の日本語ラベルとの対応は未確認。**
+
+### 現状の表示との関係
+
+* `3. Enovia` タブの件数表示には既に注記が出ている:
+  「件数はEnoviaの検索対象全種別（Document以外を含む）の合計です。
+  表の行はDocumentのみに絞っているため、件数より少なくなります。」
+* この注記は、S04で絞り込みを実装したら**実態に合わせて書き換えること。**
+
+### 着手前に必ず読むもの
+
+* **`document_search_manager/DESIGN_NOTES.md`**
+  特に **3-3（Enoviaの確定仕様）** / **3-9（セッションcookie）** /
+  **5-8（hidden属性）** / **5-10（ポート二重起動）**。
+* スキル **`document-search-tool-dev`**（S03の実績を反映済み。
+  3-2「不明点の潰し方」と 8「実機確認の依頼の仕方」を必ず読む）。
+
+## ★未確認事項（推測で実装しない）★
+
+**実装前に、診断機能を1つ作って会社PCで確かめる**（S03で確立した型）。
+
+1. **Document以外の型で、どの属性が返るか。**
+   `ENOVIA_SELECT_PREDICATE` は固定で、Document向けの項目を要求している。
+   ECOや問題に `ds6w:identifier`（文書番号）や `ds6wg:revision` が有るのか**未確認**。
+   → 返った属性をそのまま一覧にする診断を先に作る。
+2. **`emxNavigator.jsp?objectId=<resourceid>` が Document以外でも開くか。**
+   Documentでは実機確認済み（2026-09-04）。他の型は**未確認**。
+3. **型の英語名と、Enovia画面の日本語ラベルの対応。**
+   推測で訳さない。診断で実際の値を集めてから決める。
+4. **型ごとに列構成を変えるべきか、共通列で足りるか。**
+   実際に返る属性を見てから判断する。
 
 ## Scope
 
 ### Files That May Be Changed
 
 * `document_search_manager/` 配下（**新バージョンファイルとして追加**。
-  既存版は `old/` へ移動）
-* `document_search_manager/tools/`（調査ツールの改良）
-* `document_search_manager/CHANGELOG.md` / `README.md` / `DESIGN_NOTES.md`
+  既存版は `old/` へ `git mv`）
+* `document_search_manager/CHANGELOG.md` / `README.md` / `DESIGN_NOTES.md` /
+  `config.example.json`
 * `document_search_manager/tests/`（新規テストの追加、期待値の更新）
-* `.gitignore`（`translation_debug.log` 等の追記）
+* `run_document_search_manager.bat`（呼び出し先の更新）
 
 ### Files That Must Not Be Changed
 
 * 他ツール一式
 * `document_search_manager/old/` 配下の全リビジョン
-* SharePoint / Nexus / Enovia の**検索ロジックと列構成**
-  （再発防止の巻き添えにしない）
+* **SharePoint / Nexus の検索ロジックと列構成**（Enovia拡張の巻き添えにしない）
+* **Enoviaの検索リクエストの組み立て**（`additional_query` は実測どおりの転記。
+  型を減らす・増やすなどの変更は、必要性が実測で確認できるまで行わない）
 * 要約のプロンプトと出力形式（`SUMMARY_PROMPT_VERSION`）
 
-## Planned Work
+## Planned Work（3フェーズで進める）
 
-### 1. Enovia認証の再発防止
-
-* **Cookie有効期限の画面表示。** 「あと何日でログインし直しが必要か」が分かるようにする。
-  セッションCookieには期限が無いため、**取得時刻からの経過**で表すこと。
-* **認証ログの記録**（`logs/enovia_auth.log`、追記形式）。記録するのは
-  日時・成否・HTTPステータス・`error` と `error_description`・
-  検索に使えるCookieの件数・応答ヘッダの相関ID。
-  **Cookieの値は絶対に書かない。** `.gitignore` にも追加する。
-* **ログイン待機中の表示と中止ボタン。** 現状は「Edgeの窓が閉じられるのを待っている」
-  ことが分からず、固まったように見える。
-* **VPN接続直後のタイムアウト時の案内。** S03の実機確認で、VPN接続直後に
-  60秒タイムアウトを2回繰り返した。「数分待ってから再試行」を案内する。
-* **失敗時の案内の具体化。** `invalid_grant` を検出したら「ログの該当行を添えて
-  ITへ依頼してください」と、行そのものを示す。
-
-### 2. 探索結果の一括要約
-
-* 複数ファイルを選択してまとめて要約する。**逐次実行**（並列にしない）、
-  **部分成功**（1件失敗しても続行）、**進捗表示**が要件。
-* フォルダ探索のジョブ方式（`/api/explore` + `/api/explore_status`）が
-  そのまま参考になる。
-* 一覧表示に要約列を設け、結果をその場で確認できるようにする。
-
-### 3. 片付け（時間があれば）
-
-* `.gitignore` に `ppt_translator/translation_debug.log` /
-  `word_translator/translation_debug.log` を追加。
-* リポジトリ直下の不要ファイル `tatus` の削除（中身を確認してから）。
-* 会社PCのローカル `main` ブランチの巻き戻し（越智さんの操作。独自の作業が
-  含まれていないことは確認済み）。
+1. **Phase 1 — 設計提案**（コード生成なし）
+   * 型の絞り込みUIの案（チェックボックス方式 / 既定はDocumentのみ 等）
+   * 列構成の方針（共通列＋型別の追加列 / 型列の追加）
+   * 未確認事項をどう潰すか（診断機能の内容）
+2. **Phase 2 — 設計監査**（問題点の洗い出し・承認待ち）
+3. **Phase 3 — 実装**（越智さんの承認後）
+   * **まず診断機能だけを出し、会社PCで1回実行してもらう**
+   * 結果を見てから本実装に入る
 
 ## Completion Criteria
 
-* Enoviaのログイン状態が画面から分かり、認証ログが記録されていること。
-* 探索結果から複数ファイルをまとめて要約でき、進捗が見えること。
+* `3. Enovia` タブで、Document以外の型が表示・絞り込みできること。
+* 型ごとに必要な情報が欠けずに表示されること（欠ける場合はその旨が分かること）。
+* 件数表示の注記が実態と一致していること。
 * `python tests/run_tests.py` と `python tests/ui_check.py` が全項目合格。
 * `CHANGELOG.md` / `README.md` / `DESIGN_NOTES.md` が更新されていること。
-* 会社PCでの実機確認が完了していること。
+* 会社PCでの実機確認が完了し、CHANGELOGの「未実施」が実測結果に置き換わっていること。
 
-## Open Questions
+## Open Questions（着手時に越智さんへ確認する）
 
-* 一括要約の**上限件数**をいくつにするか（1件あたり数十秒かかるため、
-  10件で10分近くになる）。着手時に越智さんへ確認する。
-* Cookieの有効期限をどう見せるか。セッションCookieには期限が無いため、
-  「取得から○時間経過」という表示になる。実用上どの粒度が良いか確認する。
+* **既定はどれにするか。** 「Documentのみ（現状維持）」か「全種別」か。
+  全種別を既定にすると件数が跳ね上がる（`Application` で263→700件超）。
+* **よく使う型はどれか。** ECO・問題あたりが業務上重要か、それとも全部見たいか。
+* **型は日本語で表示するか。** 画面と揃えるなら日本語だが、対応表を作る必要がある。
+
+## Carried-Over Items（S03からの持ち越し・S04では扱わない）
+
+以下はS03で承認済み／課題として残っているが、**S04の主題ではない**。
+越智さんの指示があれば着手する。
+
+* 探索結果の**一括要約**（承認済み・未実装）
+* Enoviaの**再発防止**（認証ログの記録 / cookie有効期限の表示 /
+  ログイン待機中の表示と中止ボタン / VPN接続直後のタイムアウト時の案内）
+* **9/4のEnovia障害はIT調査が継続中。こちらから取り下げないこと。**
+  実測時刻は `DESIGN_NOTES.md` 3-8 に記録済み。
+* リポジトリの片付け（`.gitignore` へ `translation_debug.log` を追加、
+  不要ファイル `tatus` の削除）
 
 ## Carried-Over Real-Machine Checks
 

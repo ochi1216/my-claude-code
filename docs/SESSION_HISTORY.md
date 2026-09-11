@@ -652,9 +652,13 @@
 
 ### Next Session
 
-* 次の作業: **Enoviaの再発防止と、探索結果の一括要約**。
+* 次の作業: **Enovia検索拡張（Document以外の項目に対応）**。
+  越智さんの指示（2026-09-11）により、再発防止・一括要約より優先する。
+* **要点**: Enoviaへのクエリは既に191種類すべての型を要求しており、
+  **Document以外も応答に含まれている**。`enovia_document_type_only`（既定true）が
+  クライアント側で捨てているだけなので、**新しいAPI連携は不要**。
 * 次回の推奨タイトル:
-  `Document Search Manager 開発 S04 - Enovia認証の再発防止と探索結果の一括要約`
+  `Document Search Manager 開発 S04 - Enovia検索拡張（Document以外の項目に対応）`
 
 | S01 | 緊急連絡ツールの開発 S01 - 自動送信機能を持たせる | 2026-07-29〜2026-07-31 | 完了 | `CLAUDE.md`, `docs/*.md`, `emergency_alert_tool/*`, `power_automate_safety_checkin/*` |
 | S02 | 緊急連絡ツールの開発 S02 - Power AutomateフローのGUI構築とGate B/D検証 | 2026-09-01 | 完了 | `power_automate_safety_checkin/solution/*`, `power_automate_safety_checkin/evidence/*`, `power_automate_safety_checkin/cards/*`, `power_automate_safety_checkin/docs/*` |
