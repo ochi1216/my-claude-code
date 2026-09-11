@@ -1,5 +1,84 @@
 # Document Search Manager — CHANGELOG
 
+## VERSION 20260911_03
+
+S04（Enovia検索拡張：Document以外の型にも対応）の**Phase3-0**として、
+「Enovia型診断」機能だけを追加した。**本実装（型の絞り込みUI・列構成・
+注記の変更）はまだ行っていない**。
+
+### 背景
+
+Enoviaへのクエリは既に191種類すべての型（Document / ECO / 問題 / スケッチ /
+変更指示 / プロジェクトスペース / Basic Type 等）を要求しており、
+Document以外は応答に既に含まれている。`enovia_document_type_only`
+（既定true）が `_item_to_result()` でクライアント側から捨てているだけで、
+新しいAPI連携は不要（越智さんの調査済み前提）。
+
+ただし、Document以外の型で
+
+1. どの属性が返るか
+2. `emxNavigator.jsp?objectId=` がDocument以外でも開くか
+3. 型の英語名とEnovia画面の日本語ラベルの対応
+4. 型ごとに列構成を変えるべきか
+
+は**未確認**のため、Phase2設計監査（越智さん承認済み）の手順どおり、
+まず診断機能だけを出し、会社PCで1回実行した結果を見てから本実装に入る
+（S03で確立した「不明点の潰し方」と同じ型）。
+
+### 追加
+
+- 「Enovia型診断」ボタン（`Enovia検索診断`の隣）。既定の
+  `enovia_document_type_only` の値には関係なく、常に**全種別**を対象に
+  検索を実行し、以下を実行ログにそのまま表示する（判定は断定しない）。
+  1. 型別の件数内訳（**取得できた範囲のサンプル集計**であり、Enovia画面の
+     ファセット（絞り込み欄）のような全件集計ではないことを明示する）
+  2. 型ごとに、ツールが実際に使っている属性（Document Number / Title /
+     Revision / State / 作成者 / Doc Owner / 最終更新者 / 最終更新日 /
+     作成日 / フォルダ / 拡張子 / resourceid）が何件中何件で値を持つか
+  3. 型ごとの代表1件について、**返ってきた属性をそのまま全部**表示
+  4. 型ごとに `emxNavigator.jsp?objectId=` のURLを1本表示（クリックして
+     開けるかどうかを越智さんに確認いただく）
+  5. ページ上限（既定5ページ）で打ち切った場合はその旨を明示する
+- `EnoviaProvider.diagnose_types()`（新規メソッド）、
+  `/api/enovia_type_diag`（新規エンドポイント）。
+
+### 変更しないこと（宣誓）
+
+- `additional_query` の191型リスト・`ENOVIA_EXCLUDE_TYPES` の組み立ては
+  変更していない（この診断も既存の `_build_body` をそのまま使う）。
+- `_item_to_result()` の絞り込みロジック（`enovia_document_type_only`）は
+  変更していない。既定表示は引き続きDocumentのみ。
+- 型の絞り込みUI・列構成（Type列の追加）・件数注記の出し分けは、
+  **この診断結果を見てから**次バージョンで実装する（Phase2設計監査で
+  越智さんに提示済みの方針）。
+- SharePoint / Nexus の検索ロジックと列構成、Enoviaの認証、要約プロンプト
+  （`SUMMARY_PROMPT_VERSION`）には手を入れていない。
+- 旧バージョンファイル（`old/document_search_manager_20260911_02.py`）は
+  削除していない。
+
+### 検証結果
+
+- `python -m py_compile document_search_manager_20260911_03.py`: 合格
+- 新規テスト `tests/test_24_enovia_type_diag.py`（22項目）:
+  型ごとの件数・充足率・生属性ダンプ・URL生成（resourceidが無い場合は
+  生成しない）・複数ページにまたがる集計・ページ上限での打ち切り・
+  1ページ目からの失敗、をネットワーク非依存のスタブで検証した。
+- 既存テストを含め、全24ファイル**1060項目すべて合格**。
+- `tests/ui_check.py`（Playwright、既存112項目）もすべて合格。加えて、
+  ダミーの型混在データ（Document / Project Space×2 / ECO）で
+  「Enovia型診断」ボタンを実際にクリックし、ログ出力とボタン配置の描画を
+  スクリーンショットで目視確認した（DESIGN_NOTES 5-8の再発防止）。
+
+### 未実施（実機でのみ確認可能）
+
+- 会社PCで「Enovia型診断」を実行し、以下を確認する。
+  - 実際にどの属性が型ごとに返るか（未確認事項①）
+  - `emxNavigator.jsp?objectId=` がDocument以外の型でも開くか（未確認事項②）
+  - 型の英語名とEnovia画面の日本語ラベルファセットの対応（未確認事項③）
+  - この結果を踏まえた列構成の要否判断（未確認事項④）
+
+---
+
 ## VERSION 20260911_02
 
 Enoviaログインの失敗を、**原因ごとに切り分けて案内する**ようにした。
