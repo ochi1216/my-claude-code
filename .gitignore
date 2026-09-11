@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 venv/
 .venv/
+.pytest_cache/
 
 # 実行時に生成される起動ログ（run_latest.pyが追記する）
 startup.log
