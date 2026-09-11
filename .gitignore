@@ -39,3 +39,6 @@ onenote_report_generator/token_cache.bin
 onenote_report_generator/bookmarks.json
 onenote_report_generator/bookmarks.json.bak
 onenote_report_generator/reports/*.html
+
+# ツールランチャーの実行ログ（実行のたびに追記される実行時生成物）
+tool_launcher/launcher_log.txt

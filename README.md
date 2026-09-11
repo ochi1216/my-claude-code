@@ -10,6 +10,14 @@ git clone --recurse-submodules https://github.com/ochi1216/my-claude-code.git
 git submodule update --init common
 ```
 
+## Tool Launcher
+
+このリポジトリ内の各ツールと、旧 `PythonScripts` に残っているツールを1画面から起動する
+ランチャー。デスクトップショートカットのリンク先を
+`tool_launcher/run_tool_launcher.bat` に設定して使う。起動対象の追加・変更は
+`tool_launcher/tools.json` を編集するだけでよい。セットアップ手順は
+[`tool_launcher/README.md`](tool_launcher/README.md) を参照。
+
 ## Outlook Total Organizer
 
 Outlookメール解析・アクションダッシュボードツール。詳細は [`outlook_total_organizer/CHANGELOG.md`](outlook_total_organizer/CHANGELOG.md) を参照（README.md は未整備）。
