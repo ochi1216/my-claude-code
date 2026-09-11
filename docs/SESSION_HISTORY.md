@@ -321,6 +321,7 @@
 | ------- | ----- | ---- | ------ | ---------- |
 | S01 | Document Search Manager 開発 S01 - Phase 1 SharePoint全社検索の実装と開発資産の整備 | 2026-09-03 | 完了 | document_search_manager/document_search_manager_20260903_08.py, document_search_manager/DESIGN_NOTES.md, document_search_manager/tests/ 一式, document_search_manager/README.md, document_search_manager/CHANGELOG.md, .claude/skills/document-search-tool-dev/SKILL.md, docs/PROJECT_STATUS.md, docs/SESSION_HISTORY.md, docs/NEXT_TASK.md |
 | S02 | Document Search Manager 開発 S02 - Phase 2 Nexus検索の追加と系統別タブ化 | 2026-09-03 | 完了 | document_search_manager/document_search_manager_20260903_16.py, document_search_manager/old/ (_09〜_15), document_search_manager/tests/test_09〜test_14, document_search_manager/tests/ui_check.py, document_search_manager/README.md, document_search_manager/CHANGELOG.md, document_search_manager/DESIGN_NOTES.md, document_search_manager/config.example.json, document_search_manager/run_document_search_manager.bat, docs/PROJECT_STATUS.md, docs/SESSION_HISTORY.md, docs/NEXT_TASK.md |
+| S03 | Document Search Manager 開発 S03 - Phase 3 Enovia検索・AI要約・フォルダ探索の実装とEnovia認証障害の解決 | 2026-09-04〜09-11 | 完了 | document_search_manager/document_search_manager_20260911_02.py, document_search_manager/old/ (_20260904_01〜_20260911_01), document_search_manager/tools/enovia_evidence_report.py, document_search_manager/tests/test_15〜test_23, document_search_manager/tests/ui_check.py, document_search_manager/README.md, document_search_manager/CHANGELOG.md, document_search_manager/DESIGN_NOTES.md, document_search_manager/requirements.txt, document_search_manager/run_document_search_manager.bat, docs/PROJECT_STATUS.md, docs/SESSION_HISTORY.md, docs/NEXT_TASK.md |
 
 ## S01 - Phase 1 SharePoint全社検索の実装と開発資産の整備
 
@@ -518,3 +519,139 @@
   **実装前に、Enoviaで検索を1回実行したときのF12キャプチャを越智さんに依頼する。**
 * 次回の推奨タイトル: `Document Search Manager 開発 S03 - Phase 3 Enovia検索の追加`
 
+## S03 - Phase 3 Enovia検索・AI要約・フォルダ探索の実装とEnovia認証障害の解決
+
+### Purpose
+
+* **Phase 3（Enovia検索）を実装**し、3系統すべてを横断検索できる状態にする。
+* セッション中に越智さんから複数の追加要望を受け、**AI要約機能**と
+  **フォルダ探索機能**まで実装した。
+* 会期中にEnoviaが**ログイン不能**になり、その調査と解決も本セッションで行った。
+
+### Work Completed
+
+`_20260904_01` 〜 `_20260911_02` の12リビジョン。大きく4つの塊。
+
+**(1) Phase 3 — Enovia検索（`_20260904_01`）**
+
+* 検索の実体は `POST federated.plm.nexperia.com/federated/search`（Exalead系JSON API）
+  であることを、**Consoleでの XHR/fetch フックにより実測で確定**した。
+  F12のNetworkタブでは別ホストへの通信が見つからず、3回空振りしている。
+* 認証は **Playwrightで会社PCのEdgeを起動 → 越智さんが手動ログイン →
+  ウィンドウを閉じたらCookieを保存**する方式。
+* タイトル限定検索は**非対応と確定**（`title:` / `ds6w:label:` とも実機で0件）。
+  推測で3個目の構文を試すことはせず、Enoviaは常に全文検索とした。
+* 一括ZIPダウンロードは**対象外**（WebPublish URLが文書の状態次第で拒否される）。
+
+**(2) AI要約機能（`_20260904_02`〜`_07`, `_20260910_03`）**
+
+* 検索結果の行から1クリックで、**3段階の要約**をポップアップ表示する。
+  ①300字のExecutive Summary ②章立てと概要 ③Japan Site Managerへの示唆
+  （活用すべきこと／考慮すべき注意点／さらに問いを深めるべき方向性）。
+* AI呼び出しは既存の共通モジュール `gemini_client.py` を流用。
+  **新規のAPI契約・Entra ID権限は発生していない。**
+* 対応形式を段階的に拡大：`.docx` → `.pptx` → `.xlsx` → `.xlsm` → `.pdf`。
+  **見出しを `# ` で統一する規約**を設けたことで、プロンプトを形式ごとに
+  分岐させずに済んだ。
+* 本文が上限を超える場合は、**Geminiを呼ぶ前に確認**する（越智さんの要望）。
+* **図面が主体のPDFは要約しない**（`_20260910_03`）。回路図PDFは部品番号・
+  ネット名がすべて文字として埋め込まれており、数十万字取れるが文章ではない。
+  文末記号の密度と1行あたりの文字数で判定し、理由とファイルを開くボタンを出す。
+
+**(3) フォルダ探索機能（`_20260910_01`〜`_02`）**
+
+* `_20260910_01` で**事前診断だけを先に実装**し、`Sites.Read.All` のまま
+  `/children` による再帰探索が可能かを会社PCで確認した（①②③すべて成功）。
+* `_20260910_02` で本体を実装。SharePointタブの「探索」列でフォルダを複数選択し、
+  配下を**幅優先**で再帰的にたどる（深さ5階層 / 2000件で打ち切り）。
+* `4. フォルダ探索` タブに**ツリー表示と一覧表示**を用意。ツリーでも種別での
+  絞り込みは使える（該当行の祖先フォルダは残す）。
+* 探索結果を**検索結果と同じ `SearchResult` 型**で組み立てたため、
+  選択→ZIP取得・Excel/CSV出力・要約が**無改修でそのまま動く**。
+
+**(4) Enovia認証障害の調査と解決（`_20260911_01`〜`_02` ＋ 調査ツール）**
+
+* 9/4から Enovia が `invalid_grant` になり、手動ブラウザでもSAMLエラーになった。
+  他ユーザーは正常、PC再起動でも変わらず。ITに連絡し、いったん保留とした。
+* 9/11、**原因不明のまま自然復旧**。調査のため
+  `tools/enovia_evidence_report.py`（読み取り専用・Cookieの値を出力しない）を作成し、
+  残っていたCookieとブラウザ履歴から**時系列を復元**した。
+* **障害期間を実測で確定**：`2026-09-04 08:42 〜 2026-09-11 17:51`。
+  Microsoft側の認証は成功しており、失敗は**3DPassport側のSAML処理**だった。
+* 復旧後も検索が通らず、**DevToolsでCookieを直接確認**したところ、
+  3DSpace / federated のセッションが**すべてセッションCookie**であることが判明。
+  ツールは**ウィンドウを閉じた後**に取り出しており、既に破棄されていた。
+  `_20260911_01` で**開いている間に取り続ける**方式に修正。
+* `federated` は `dspace` とは**別のセッション**で、**Enovia画面で1回検索して
+  初めて発行される**ことも判明。ログイン手順に組み込んだ。
+* `_20260911_02` でログイン失敗の原因（DNS / タイムアウト / 証明書 等）を
+  切り分けて案内するようにした。自宅からVPN未接続で試した際、実際はDNSの
+  失敗なのに「Edgeの起動に失敗」と誤案内していたため。
+
+### Files Changed
+
+* 新規: `document_search_manager/document_search_manager_20260911_02.py`（約6,560行）
+* 移動: `_20260904_01`〜`_20260911_01` を `old/` へ（削除せず保持）
+* 新規: `document_search_manager/tools/enovia_evidence_report.py`（調査用・読み取り専用）
+* 新規: `tests/test_15_enovia.py` 〜 `test_23_login_error_messages.py`（9ファイル）
+* 変更: `tests/test_17` ほか（仕様変更に伴う期待値の更新）/ `tests/ui_check.py`
+* 変更: `README.md` / `CHANGELOG.md` / `DESIGN_NOTES.md` /
+  `requirements.txt` / `run_document_search_manager.bat`
+* 変更: `docs/PROJECT_STATUS.md` / `docs/SESSION_HISTORY.md` / `docs/NEXT_TASK.md`
+
+### Decisions
+
+* **Enoviaのタイトル限定検索は実装しない。** 実機で2つの構文がいずれも0件。
+  「そのフィールド名が検索エンジンに認識されていない」と判断し、
+  **3個目を当てずっぽうで試さない**と決めた。
+* **要約は M365 Copilot ではなく既存の `gemini_client.py` を使う。**
+  Copilotは新規のEntra ID権限が必要になり、プロジェクトの前提に反するため。
+* **図面PDFは「画像としてGeminiに渡す」案を採らなかった**（案A/B）。
+  解像度を落とすと部品番号が読めず、プロキシ経由で送れる枚数も限られ、
+  中途半端な結果になる。**越智さんの判断で案C**（要約せず理由を伝える）を採用。
+* **フォルダ探索は、実装前に診断だけを先に出した。** `/children` が現在の権限で
+  通るかを開発環境からは確認できず、**推測で本実装に入らない**ため。
+* **探索結果を `SearchResult` 型で返す。** これにより既存のUI機構が全て再利用できた。
+* **ツリー表示では並べ替えを行わない。** 階層と並べ替えは本質的に相反するため、
+  絞り込み・並べ替えは一覧表示の役割とした（種別だけは両方で使える）。
+
+### Tests
+
+* `python tests/run_tests.py`: **1038項目すべて合格**（ネットワーク非依存）。
+  S02の570項目から468項目の増加。新規は test_15(92) / test_16(32) / test_17(95) /
+  test_18(40) / test_19(73) / test_20(35) / test_21(47) / test_22(25) / test_23(27)。
+* `python tests/ui_check.py`（Playwright）: **112項目すべて合格**。
+  S02の34項目から78項目の増加。要約ポップアップ、切り詰め確認、図面PDFの案内、
+  フォルダ探索の実行からツリー／一覧の切替までを実操作で確認。
+* **検証・実機で実バグを検出し修正した**（主なもの）:
+  1. **CSSの `display` 指定に `hidden` 属性が負ける**（S01の 5-8 と同じ原因が再発）。
+     単体テストでは検出できず、**スクリーンショットを目で見て**気付いた。
+  2. **Windowsで同じポートに2つ目のサーバーが「成功」して起動する**
+     （`SO_REUSEADDR`）。古い版の画面が出続ける事故の原因。起動前に検出して止める。
+  3. **セッションCookieを取り逃がしていた**（上記(4)）。
+  4. **ログイン失敗の原因を1つにまとめて誤案内していた**（上記(4)）。
+  5. 自分で書いた診断レポートの判定が、実データに対して**2回誤った結論**を出した
+     （「期限切れ」「ログイン未完了」）。ホスト別・種類別に数えるよう修正。
+* 会社PCでの実機確認（2026-09-11、すべて合格）:
+  フォルダ探索（フォルダ10件 / ファイル22件）、図面PDFの判定、`.pdf` の要約、
+  Enovia検索（`validation` で10件 / 該当6927件）。
+
+### Open Items
+
+* **9/4のEnovia障害は、原因不明のまま自然復旧している。** 3DPassport側の
+  SAML処理が失敗した理由は未確定で、**IT調査が継続中**。再発の可能性が残るため、
+  こちらから取り下げないこと。依頼に使う実測時刻は `DESIGN_NOTES.md` 3-8 に記録済み。
+* 探索結果の**一括要約**は承認済みだが未実装（逐次実行・部分成功・進捗表示の
+  設計が要約1件とは別物のため、探索本体と切り離した）。
+* Enoviaの再発防止（Cookie有効期限の画面表示、認証ログの記録、ログイン待機中の
+  表示と中止ボタン、VPN接続直後のタイムアウト時の案内）は未実装。
+* 会社PCのローカル `main` ブランチに、リモートに無いマージコミットが2つある。
+  独自の作業は含まれておらず、巻き戻して差し支えないことは確認済み。
+* リポジトリ直下に不要ファイル `tatus`、`ppt_translator/` と `word_translator/` に
+  `translation_debug.log` が未追跡のまま残っている。`.gitignore` への追記が必要。
+
+### Next Session
+
+* 次の作業: **Enoviaの再発防止と、探索結果の一括要約**。
+* 次回の推奨タイトル:
+  `Document Search Manager 開発 S04 - Enovia認証の再発防止と探索結果の一括要約`
