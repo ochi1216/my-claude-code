@@ -160,7 +160,9 @@ def report_session_json(path: Path, out) -> None:
     # Enoviaの検索に効くCookie（＝ログインが完了した証拠）だけを別に数える
     target_total = 0
     target_alive = 0
+    target_session = 0
     auth_only_total = 0
+    has_federated = False
 
     for cookie in cookies:
         name = str(cookie.get("name") or "")[:28]
@@ -183,8 +185,13 @@ def report_session_json(path: Path, out) -> None:
         raw_domain = str(cookie.get("domain") or "")
         if any(domain_covers(raw_domain, h) for h in ENOVIA_TARGET_HOSTS):
             target_total += 1
-            if expires is not None and expires >= now:
+            if expires is None:
+                # セッションCookie。3DSpace/federated のセッションはこの形。
+                target_session += 1
+            elif expires >= now:
                 target_alive += 1
+            if domain_covers(raw_domain, "federated.plm.nexperia.com"):
+                has_federated = True
             mark = " ★検索に使う"
         elif any(domain_covers(raw_domain, h) for h in AUTH_ONLY_HOSTS):
             auth_only_total += 1
@@ -199,7 +206,7 @@ def report_session_json(path: Path, out) -> None:
     out(f"    期限切れのCookie      : {expired} 件")
     out(f"    セッションCookie      : {session_only} 件")
     out(f"    ★検索に使えるCookie  : {target_total} 件"
-        f"（{'/'.join(ENOVIA_TARGET_HOSTS)} 宛）")
+        f"（うちセッションCookie {target_session} 件）")
     out(f"    認証の途中経過のCookie: {auth_only_total} 件"
         f"（{'/'.join(AUTH_ONLY_HOSTS)} 宛）")
     if earliest:
@@ -209,23 +216,35 @@ def report_session_json(path: Path, out) -> None:
     out("")
     out("  【判定】")
     if target_total == 0:
-        # ここが最も重要な分岐。「期限切れ」と混同してはいけない。
-        out("    ⛔ Enoviaの検索に使えるCookieが1件もありません。")
-        out("       これは期限切れではなく、**ログイン自体が完了していない**状態です。")
-        out("       ログイン画面までは進んだものの、3DSpaceのセッションが")
-        out("       発行される前に終わっています。")
+        # 「期限切れ」と混同してはいけない。さらに、原因は2通りある。
+        out("    ⛔ Enoviaの検索に使えるCookieが1件もありません。期限切れではありません。")
+        out("       原因は次の2つのどちらかです。下の履歴で見分けられます。")
+        out("")
+        out("       (a) ログイン自体が完了していない")
+        out("           … 履歴が saml/SSO/alias で止まっていて、その先が無い場合。")
+        out("             サーバー側（3DPassport）の問題です。")
+        out("")
+        out("       (b) ログインは完了したが、Cookieを取り出す前に閉じられた")
+        out("           … 履歴に「?ticket=...」と「emxNavigator.jsp」がある場合。")
+        out("             3DSpace/federated のセッションは**セッションCookie**で、")
+        out("             ウィンドウを閉じた時点でメモリから消えます。")
+        out("             v20260911_01 でツール側を修正済みです。")
         if auth_only_total:
-            out("       認証の途中経過のCookie（3DPassport / Microsoft）は残っており、")
-            out("       **Microsoft側の認証までは通っていた**ことを示します。")
-            out("       つまり失敗したのは、その後の3DPassport側の処理です。")
-        out("       → 下の履歴で、どこで流れが止まったかを確認してください。")
-    elif target_alive == 0:
+            out("")
+            out("       なお、認証の途中経過のCookie（3DPassport / Microsoft）は")
+            out("       残っており、**Microsoft側の認証までは通っていた**ことを示します。")
+    elif target_alive == 0 and target_session == 0:
         out("    ⚠️ 検索に使えるCookieはありますが、すべて期限切れです。")
         out("       「Enoviaにログイン」を押し直せば直る種類の状態です。")
     else:
-        out(f"    🟢 検索に使えるCookieが {target_alive} 件、まだ有効です。")
-        out("       それでも invalid_grant になる場合は、Cookieの期限とは別に")
-        out("       サーバー側でセッションが無効化されている可能性があります。")
+        out(f"    🟢 検索に使えるCookieを {target_total} 件（うちセッションCookie "
+            f"{target_session} 件）取得できています。")
+        if not has_federated:
+            out("       ⚠️ ただし federated.plm.nexperia.com 宛がありません。")
+            out("          検索APIは3DSpaceとは別のセッションを使うため、")
+            out("          Enoviaの画面で1回検索してから閉じる必要があります。")
+        else:
+            out("       dspace / federated の両方がそろっています。検索できる状態です。")
 
 
 # ── 2. ブラウザ履歴（いつログイン画面を開いたか） ─────────────
