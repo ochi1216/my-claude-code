@@ -40,6 +40,11 @@ Graph API等での自動取得は社内ポリシーでブロックされる可�
    python shareflex_dashboard_20260713_01.py export.xlsx -o dashboard.html
    ```
 
+   もしくは `run_shareflex_dashboard.bat` にエクスポートしたExcelファイルをドラッグ&ドロップ
+   する（Windows）。このバッチファイルは、同じフォルダ内で最もファイル名(日付)が新しい
+   `shareflex_dashboard_*.py` を自動検出して実行するので、スクリプトが更新されて
+   ファイル名(日付)が変わっても `run_shareflex_dashboard.bat` 自体は変更不要。
+
 4. 生成された `dashboard.html` をブラウザで開く。外部リソースを一切読み込まないため、
    社内ネットワーク外・オフラインでも表示できる。
 
