@@ -11,7 +11,10 @@ SharePoint上でプロジェクトごと・業者ごとにフォルダ管理さ�
 確立していないため、**無理な自動分類はしない**方針とした。
 
 - ファイル名が `PO` で始まるファイルのみを確実にPO本体として認識し、PO番号を抽出する
-  （正規表現は `config.json` の `po_number_pattern` で調整可能。デフォルト `^PO[-_]?(\d{3,})`）
+  （正規表現は `config.json` の `po_number_pattern` で調整可能。デフォルト
+  `^PO[-_# ]?(\d{3,})` — "PO12345.pdf" の他 "PO#12345_説明.pdf" "PO 12345.pdf" にも対応。
+  既存の `config.json` に古いパターンを明示的に設定済みの場合はコード側のデフォルト値が
+  上書きされないため、`config.example.json` を参考に手動で更新すること）
 - それ以外のファイル（メール履歴・エビデンス等）はPO番号に紐付けず、Project/Vendor単位
   までの情報を保持したまま「未分類書類」として一覧化する（＝見えていなかった漏れの可視化）
 - 発注/検収/請求/支払などの**ステータス判定はここでは行わない**。「PO一覧」シートに空の
@@ -57,8 +60,19 @@ SharePoint上でプロジェクトごと・業者ごとにフォルダ管理さ�
 
 3. スクリプトを実行する。
 
+   Windowsの場合は `run_po_database_organizer.bat` をダブルクリックする。同じフォルダ内の
+   `po_database_organizer_*.py` のうち最新版（ファイル名の日付_連番が一番大きいもの）を
+   自動選択して起動する。バージョンアップ時は新しい `po_database_organizer_YYYYMMDD_NN.py`
+   をこのフォルダに追加するだけでよく、バッチファイル自体の修正は不要。
+   `config.json` が無い場合や `python` が見つからない場合はエラーメッセージを表示して
+   終了する。初回は依存ライブラリ（`msal`）の有無を確認し、無ければ自動で
+   `pip install -r requirements.txt` を実行する。
+
+   コマンドラインから直接実行する場合は、フォルダ内にある最新版のファイル名を指定する
+   （更新のたびにファイル名の連番が上がるため、実際に存在するファイル名に読み替える）。
+
    ```
-   python po_database_organizer_20260713_01.py
+   python po_database_organizer_20260713_07.py
    ```
 
    初回はターミナルにDevice Code Flowの認証コード（URLとコード）が表示されるので、
@@ -79,10 +93,15 @@ SharePoint上でプロジェクトごと・業者ごとにフォルダ管理さ�
 
 | シート | 内容 |
 |---|---|
-| PO一覧 | Project / Vendor / PO番号 / 代表ファイル / 関連書類数 / 最終更新日 / リンク / Status(空列) |
-| 関連書類 | PO番号ごとに紐付いたファイルの明細（同一PO番号で複数リビジョンがある場合は全件） |
-| 未分類書類 | PO番号を特定できなかったファイル一覧（Project/Vendor/サブフォルダ単位） |
-| Projects / Vendors | 名寄せ用マスタ（他Excelとの結合キーとして利用） |
+| PO一覧 | Project ID / Project / Vendor / PO関連フォルダ / PO番号 / ファイル名 / 最終更新日 / Status(空列)。1書類=1行で、同一PO番号に複数の関連ファイル（改訂版等）がある場合はその数だけ行が並ぶ |
+| 未分類書類 | PO番号を特定できなかったファイル一覧（Project ID/Project/Vendor/PO関連フォルダ単位） |
+
+`Project` / `Vendor` / `PO関連フォルダ` / ファイル名 の各セルには、対応するSharePoint上の
+フォルダ・ファイルへのハイパーリンクが直接埋め込まれている（別列の「リンク」は廃止）。
+「PO関連フォルダ」は Project > Vendor > **PO関連フォルダ** > 書類群 という3階層目のフォルダで、
+PO本体だけでなく関連書類全体をまとめて確認したい場合の起点として使う。
+「Project ID」は各行の先頭列にあり、他Excelとの結合キーとしても利用できる
+（v03でマスタ用の「Projects」「Vendors」シートは廃止）。
 
 `PO番号` 列をキーに、契約管理表・検収管理表など他の管理Excelと VLOOKUP / Power Query で
 結合できる構成にしている。
@@ -101,3 +120,57 @@ SharePoint上でプロジェクトごと・業者ごとにフォルダ管理さ�
   結果をもとに、Phase 2でルールを設計する。
 - Vendorフォルダ配下の再帰探索は `config.json` の `max_depth`（デフォルト6階層）で
   打ち切る。極端に深いフォルダ構成では取りこぼしが発生し得る。
+- アクセストークンはリクエストのたびに取得し直すため（v04以降）、スキャンが長時間に
+  及んでも認証切れ（401）で残りのProject/Vendorが取得できなくなることはない。
+  それでもスキャンが正常終了しなかった場合は、途中経過は保存されないため、
+  「キャッシュ無視で再スキャン」ではなく通常の「スキャン開始」で再実行すれば、
+  `cache/scan_cache.json` に既にキャッシュ済みのVendorはAPIを呼ばずスキップされる。
+
+## 関連ツール（PO本体PDFの中身を読み取る）
+
+PO一覧はフォルダ構造からの一次情報（Project/Vendor/PO番号/リンク等）のみで、PDFの中身
+（発注金額・明細行）までは読み取っていない。これを追加するのが以下の2ツール（同じフォルダに
+同梱、config.jsonも共用）。
+
+- **`po_pdf_extractor_YYYYMMDD_NN.py`**：ローカルに保存済みのPO PDFが入ったフォルダを
+  指定すると、各PDFのヘッダーPO番号・発注金額・明細行（Line/数量/単価/金額/Description）を
+  読み取り、Excelサマリー（サマリー/明細の2シート）にまとめる調査用ツール。
+  `python po_pdf_extractor_YYYYMMDD_NN.py <PDFフォルダ> [-o summary.xlsx]`
+- **`po_pdf_merge_YYYYMMDD_NN.py`**（および `run_po_pdf_merge.bat`）：
+  po_database_organizer が出力した「PO一覧」Excelを読み込み、各行のPO本体PDFを
+  SharePointから直接ダウンロードして本文を解析し、`PDFヘッダーPO番号` `ヘッダー接頭辞`
+  `PDF種別` `PO番号一致` `発注金額` `通貨` `明細行数` `抽出エラー` の列と
+  「PO明細(PDF抽出)」シートを追加した `<入力ファイル名>_detail.xlsx` を生成する。
+  ブラウザ（Chrome/Edge）は使わず、po_database_organizer と同じGraph API認証で
+  ファイル本体を取得するため、SharePointのMCAS確認画面は経由しない。バッチファイル起動時、
+  またはExcelファイルを引数なしで実行するとファイル選択ダイアログが開く。処理は10件ごとに
+  一時停止し、次の10件へ進む/最後まで自動で進める/中断して保存する、を選べる。
+  「PO一覧」の `PDFヘッダーPO番号` セルと「PO明細(PDF抽出)」の該当PO番号・Line 00010行は
+  相互にハイパーリンクでジャンプできる（同一PO番号で複数行ある場合も、行ごとに正しく
+  対応する明細へリンクする）。「Changed Purchase Order」（変更発注書）にも対応。
+  アクセストークンはリクエストのたびに取得し直すため、処理が長時間に及んでも
+  途中で認証切れ（401 Unauthorized）になりにくい。万一エラーで止まった場合は、
+  出力された `_detail.xlsx` をそのまま入力に指定して再実行すれば、既に成功した行は
+  自動的にスキップされ、失敗した行・未処理の行だけ再処理される
+  （`--start-row N` で開始行を明示的に指定することもできる）。
+- **`po_query_import_YYYYMMDD_NN.py`**：SharePointの検索/クエリ機能から書き出した
+  Excel（列: `Name` / `Item Type` / `Path` 等）を読み込み、Graph APIでライブスキャンする
+  ことなく（オフラインで）po_database_organizer と同じ「PO一覧」「未分類書類」の2シート
+  構成のExcelを生成するツール。大規模サイトのライブスキャンは時間がかかる／API制限に
+  当たりやすいため、SharePointの検索結果（Query export）が既に手元にある場合はこちらの
+  方が高速。`Path` 列（サイトルートからの相対フォルダパス）からProject/Vendor/PO関連
+  フォルダの階層とPO番号を判定するロジックは po_database_organizer と共通で、
+  ファイル名の正規表現（`^PO[-_# ]?(\d{3,})`）もそのまま流用している。
+  クエリExcelには更新日時やSharePoint上のURLが含まれないため、「最終更新日」列は空欄になり、
+  各セルのハイパーリンクは `Path` + ファイル名からURLを再構築して埋め込んでいる
+  （実際のGraph API由来のURLと一致する形式で組み立てているが、フォルダ名に含まれる
+  記号の扱い等、稀に完全一致しないケースがあり得る点に留意）。またクエリExcelは
+  ファイル行のみが対象のため、ファイルが1件も無い空のVendorフォルダはVendor数の
+  カウントに現れない（ライブスキャンとの差異が生じ得るが、カタログの内容自体には
+  影響しない）。
+  `python po_query_import_YYYYMMDD_NN.py <クエリExcel> [-o output.xlsx]`
+  （引数なしで実行するとファイル選択ダイアログが開く）。Windowsの場合は
+  `run_po_query_import.bat` から起動できる（同じフォルダ内の最新版を自動選択）。
+  SharePointに接続しないため `config.json` の `tenant_id`/`client_id` は不要だが、
+  `site_host`/`site_path`/`library_name`/`po_number_pattern` は使用するので
+  `config.json` 自体は用意しておく必要がある。

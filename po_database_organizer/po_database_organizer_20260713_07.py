@@ -3,7 +3,7 @@
 """
 PO Database Organizer
 
-version : 20260713_01
+version : 20260713_07
 purpose : SharePoint上のPOフォルダ（Project > Vendor > 書類）をスキャンし、
           PO番号を軸にしたカタログをExcel/JSONで出力する。
 
@@ -15,11 +15,50 @@ Phase 1のスコープ:
     - 発注/検収/請求などのステータス判定はここでは行わない。Excel出力の「PO一覧」シートに
       空の Status 列を用意し、他の管理Excelと PO番号 キーで結合して後付けできるようにする
 
+v03での変更:
+    - Excel出力を「PO一覧」「未分類書類」の2シートに整理（従来の「関連書類」は
+      「PO一覧」に統合、「Projects」「Vendors」マスタシートは廃止）。
+      「PO一覧」は1PO=1行から1書類=1行に変更し、同一PO番号に複数の関連ファイル
+      （改訂版等）がある場合はその分だけ行が並ぶ。
+    - 「PO一覧」「未分類書類」の先頭列に Project ID を追加。
+
+v04での修正:
+    - アクセストークンをスキャン開始時に1回だけ取得して使い回していたのを、
+      Graph APIリクエストのたびに取得し直すよう修正（MSALはキャッシュが有効なら
+      即座に返すため速度への影響はない）。大規模サイトのスキャンが1時間を超えると
+      トークンの有効期限切れで401 Unauthorizedになり、残りのProject/Vendorが
+      一切取得できなくなる（かつ失敗時は結果を保存しないため、古いスキャン結果が
+      そのまま残ってしまう）問題への対応。
+
+v05での修正:
+    - v04より前のバージョンで作成された `cache/scan_cache.json`（"po_folder_name"
+      フィールドが無い旧形式）を読み込むと `[エラー] 'po_folder_name'` で
+      スキャンが即座に失敗していたのを修正。キャッシュされたVendorのファイル一覧が
+      旧形式だった場合は、そのVendorだけ自動的にキャッシュを無効化して再取得する
+      （他のVendorのキャッシュはそのまま活用されるので、全件の再スキャンは不要）。
+
+v06での修正:
+    - Vendorフォルダを介さず、プロジェクト直下に直接置かれているファイルを
+      完全に無視していた不具合を修正。実サイトとの突き合わせ調査で発覚（サイト全体
+      5,172ファイル中18件が該当）。このようなファイルは Vendor欄 "(プロジェクト直下)"
+      として「PO一覧」「未分類書類」に取り込まれる。
+
+v07での修正（重要）:
+    - PO番号抽出の正規表現が "PO12345.pdf" 形式にしか対応しておらず、
+      "PO#12345_説明.pdf"（#区切り）・"PO 12345.pdf"（半角スペース区切り）
+      形式のファイルを全て「未分類」に落としていた不具合を修正。
+      実サイトとの突き合わせ調査で発覚し、対象ファイル数は 210件 → 599件
+      （サイト全体5,172ファイル中）に増加した。
+      デフォルトパターンを `^PO[-_]?(\d{3,})` から `^PO[-_# ]?(\d{3,})` に変更。
+      ※ 既に config.json を作成済みで `po_number_pattern` を明示的に設定して
+      いる場合は、コードのデフォルト値ではなくconfig.jsonの値が優先されるため、
+      config.example.json を参考に手動で更新すること。
+
 使い方:
     1. config.example.json を config.json にコピーし、tenant_id/client_id/
        site_host/site_path/library_name を環境に合わせて設定する
     2. pip install -r requirements.txt
-    3. python po_database_organizer_20260713_01.py
+    3. python po_database_organizer_20260713_07.py
     4. 初回はターミナルにDevice Code Flowの認証コードが表示されるので、
        表示されたURLをブラウザで開いてサインインする
     5. http://127.0.0.1:5010 が自動で開くので、「スキャン開始」を押す
@@ -64,14 +103,25 @@ def _load_config(path: str = "config.json") -> dict:
         return json.load(f)
 
 
+def _check_placeholder(value: str, key: str) -> None:
+    """config.json の値がexample由来のプレースホルダーのままでないか確認する。"""
+    if not value or value.startswith("<") or value.endswith(">"):
+        print(f"[エラー] config.json の \"{key}\" がプレースホルダーのままです"
+              f"（現在の値: {value!r}）。")
+        print(f"         実際の {key} の値に書き換えてから再実行してください。")
+        raise SystemExit(1)
+
+
 _CFG              = _load_config()
 TENANT_ID         = _CFG["tenant_id"]
 CLIENT_ID         = _CFG["client_id"]
+_check_placeholder(TENANT_ID, "tenant_id")
+_check_placeholder(CLIENT_ID, "client_id")
 TOKEN_CACHE_PATH  = _CFG.get("token_cache_path", "token_cache.json")
 SITE_HOST         = _CFG["site_host"]
 SITE_PATH         = _CFG["site_path"]
 LIBRARY_NAME      = _CFG.get("library_name", "")
-PO_NUMBER_PATTERN = _CFG.get("po_number_pattern", r"^PO[-_]?(\d{3,})")
+PO_NUMBER_PATTERN = _CFG.get("po_number_pattern", r"^PO[-_# ]?(\d{3,})")
 MAX_DEPTH         = _CFG.get("max_depth", 6)
 MAX_ITEMS         = _CFG.get("max_items_per_folder", 1000)
 SKIP_FOLDER_NAMES = {n.lower() for n in _CFG.get("skip_folder_names", ["old"])}
@@ -151,15 +201,25 @@ class GraphAuthManager:
 # Class: SharePointClient
 # ─────────────────────────────────────────────────────────────
 class SharePointClient:
-    """Graph API 経由でサイト・ドライブ・フォルダ内容を取得するクラス"""
+    """
+    Graph API 経由でサイト・ドライブ・フォルダ内容を取得するクラス。
+    アクセストークンは有効期限が切れる（通常1時間程度）ため、リクエストのたびに
+    auth.get_token() を呼び直して最新のトークンを使う。大規模サイトのスキャンは
+    1時間を超えることがあり、固定トークンのままだと途中から401 Unauthorizedで
+    失敗し、残りのProject/Vendorが一切取得できなくなる（かつ失敗時は結果を保存
+    しないため、古いスキャン結果がそのまま残ってしまう）。MSALは有効なキャッシュが
+    あればネットワーク通信なしで即座に返すため、毎回呼び出しても速度への影響はない。
+    """
 
-    def __init__(self, token: str, site_host: str, site_path: str):
-        self.headers = {
-            "Authorization": f"Bearer {token}",
-            "Accept":        "application/json",
-        }
+    def __init__(self, auth: "GraphAuthManager", site_host: str, site_path: str):
+        self.auth = auth
         self.site_host = site_host
         self.site_path = site_path
+
+    def _headers(self) -> dict:
+        with _lock:
+            token = self.auth.get_token(SCOPES)
+        return {"Authorization": f"Bearer {token}", "Accept": "application/json"}
 
     def _request(self, url: str) -> dict:
         """GETリクエストを実行する。403は即raise、400/404は_not_found、他は3回リトライ。"""
@@ -167,7 +227,7 @@ class SharePointClient:
         last_error = None
         for attempt in range(1, MAX_RETRY + 1):
             try:
-                resp = http_req.get(url, headers=self.headers, timeout=30)
+                resp = http_req.get(url, headers=self._headers(), timeout=30)
                 if resp.status_code == 403:
                     raise PermissionError(
                         "403 Forbidden: Sites.Read.All の"
@@ -299,6 +359,61 @@ class POScanner:
         self.client = client
         self.cache  = cache
 
+    def _ingest_files(self, files: list, project_id: str, project_name: str,
+                       vendor_id: str, vendor_name: str,
+                       pos: list, documents: list, po_index: dict) -> None:
+        """ファイル一覧をPO/未分類のdocuments・posレコードに変換して追記する。"""
+        for f in files:
+            doc_type, po_number = classify_filename(f["name"])
+            doc_id = f"{vendor_id}-D{len(documents) + 1:04d}"
+            po_id  = None
+
+            if po_number:
+                key = (vendor_id, po_number)
+                if key not in po_index:
+                    po_id = f"{vendor_id}-PO{len(pos) + 1:04d}"
+                    po_index[key] = po_id
+                    pos.append({
+                        "po_id":               po_id,
+                        "po_number":           po_number,
+                        "project_id":          project_id,
+                        "project_name":        project_name,
+                        "vendor_id":           vendor_id,
+                        "vendor_name":         vendor_name,
+                        "po_folder_name":      f["po_folder_name"],
+                        "po_folder_web_url":   f["po_folder_web_url"],
+                        "representative_file": f["name"],
+                        "web_url":             f["web_url"],
+                        "last_modified":       f["last_modified"],
+                        "doc_count":           0,
+                    })
+                po_id = po_index[key]
+                po_rec = next(p for p in pos if p["po_id"] == po_id)
+                po_rec["doc_count"] += 1
+                if f["last_modified"] > po_rec["last_modified"]:
+                    po_rec["last_modified"]       = f["last_modified"]
+                    po_rec["representative_file"] = f["name"]
+                    po_rec["web_url"]              = f["web_url"]
+                    po_rec["po_folder_name"]       = f["po_folder_name"]
+                    po_rec["po_folder_web_url"]    = f["po_folder_web_url"]
+
+            documents.append({
+                "doc_id":            doc_id,
+                "po_id":             po_id,
+                "project_id":        project_id,
+                "project_name":      project_name,
+                "vendor_id":         vendor_id,
+                "vendor_name":       vendor_name,
+                "po_folder_name":    f["po_folder_name"],
+                "po_folder_web_url": f["po_folder_web_url"],
+                "filename":          f["name"],
+                "relative_path":     f["relative_path"],
+                "web_url":           f["web_url"],
+                "last_modified":     f["last_modified"],
+                "size":              f["size"],
+                "doc_type":          doc_type,
+            })
+
     def scan(self, drive_id: str, event_q: "queue.Queue", state: dict) -> dict:
         projects, vendors, pos, documents = [], [], [], []
         po_index: dict = {}  # (vendor_id, po_number) -> po_id
@@ -318,11 +433,32 @@ class POScanner:
             })
             event_q.put({"type": "exploring", "path": project_name})
 
-            vendor_children = self.client.fetch_all_children(drive_id, pf["id"])
-            vendor_folders  = [
-                c for c in vendor_children
+            project_children = self.client.fetch_all_children(drive_id, pf["id"])
+            vendor_folders    = [
+                c for c in project_children
                 if "folder" in c and c.get("name", "").lower() not in SKIP_FOLDER_NAMES
             ]
+            # Vendorフォルダを介さず、プロジェクト直下に直接置かれているファイル。
+            # 従来は「Vendorフォルダの中身しか見ない」設計だったため無視されていた。
+            project_root_files_raw = [c for c in project_children if "file" in c]
+            if project_root_files_raw:
+                root_vendor_id   = f"{project_id}-ROOT"
+                root_vendor_name = "(プロジェクト直下)"
+                root_files = [
+                    {
+                        "name":              f.get("name", ""),
+                        "web_url":           f.get("webUrl", ""),
+                        "size":              f.get("size", 0),
+                        "last_modified":     f.get("lastModifiedDateTime", ""),
+                        "relative_path":     "",
+                        "po_folder_name":    "",
+                        "po_folder_web_url": "",
+                    }
+                    for f in project_root_files_raw
+                ]
+                self._ingest_files(root_files, project_id, project_name,
+                                    root_vendor_id, root_vendor_name,
+                                    pos, documents, po_index)
 
             for v_idx, vf in enumerate(vendor_folders):
                 if state.get("cancelled"):
@@ -338,54 +474,16 @@ class POScanner:
 
                 vendor_path = f"{project_name}/{vendor_name}"
                 files = self.cache.get_vendor(vendor_path)
+                if files is not None and files and "po_folder_name" not in files[0]:
+                    # 「PO関連フォルダ」対応前の古い形式のキャッシュは無効化して再取得する
+                    files = None
                 if files is None:
                     files = self._collect_files(drive_id, vf["id"], "", 0)
                     self.cache.set_vendor(vendor_path, files)
 
-                for f in files:
-                    doc_type, po_number = classify_filename(f["name"])
-                    doc_id = f"{vendor_id}-D{len(documents) + 1:04d}"
-                    po_id  = None
-
-                    if po_number:
-                        key = (vendor_id, po_number)
-                        if key not in po_index:
-                            po_id = f"{vendor_id}-PO{len(pos) + 1:04d}"
-                            po_index[key] = po_id
-                            pos.append({
-                                "po_id":               po_id,
-                                "po_number":           po_number,
-                                "project_id":          project_id,
-                                "project_name":        project_name,
-                                "vendor_id":           vendor_id,
-                                "vendor_name":         vendor_name,
-                                "representative_file": f["name"],
-                                "web_url":             f["web_url"],
-                                "last_modified":       f["last_modified"],
-                                "doc_count":           0,
-                            })
-                        po_id = po_index[key]
-                        po_rec = next(p for p in pos if p["po_id"] == po_id)
-                        po_rec["doc_count"] += 1
-                        if f["last_modified"] > po_rec["last_modified"]:
-                            po_rec["last_modified"]       = f["last_modified"]
-                            po_rec["representative_file"] = f["name"]
-                            po_rec["web_url"]              = f["web_url"]
-
-                    documents.append({
-                        "doc_id":         doc_id,
-                        "po_id":          po_id,
-                        "project_id":     project_id,
-                        "project_name":   project_name,
-                        "vendor_id":      vendor_id,
-                        "vendor_name":    vendor_name,
-                        "filename":       f["name"],
-                        "relative_path":  f["relative_path"],
-                        "web_url":        f["web_url"],
-                        "last_modified":  f["last_modified"],
-                        "size":           f["size"],
-                        "doc_type":       doc_type,
-                    })
+                self._ingest_files(files, project_id, project_name,
+                                    vendor_id, vendor_name,
+                                    pos, documents, po_index)
 
                 state["count"] += 1
                 event_q.put({
@@ -404,8 +502,14 @@ class POScanner:
         }
 
     def _collect_files(self, drive_id: str, folder_id: str,
-                        rel_path: str, depth: int) -> list:
-        """Vendorフォルダ配下を再帰的に走査し、ファイル一覧をフラットに集める。"""
+                        rel_path: str, depth: int,
+                        po_folder_name: str = "", po_folder_web_url: str = "") -> list:
+        """
+        Vendorフォルダ配下を再帰的に走査し、ファイル一覧をフラットに集める。
+        depth==0（Vendorフォルダ直下）で見つかったサブフォルダを「PO関連フォルダ」
+        （Project > Vendor > PO関連フォルダ > 書類 の3階層目）とみなし、
+        その名前とURLを配下の全ファイルに伝播させる。
+        """
         if depth >= MAX_DEPTH:
             return []
         children    = self.client.fetch_all_children(drive_id, folder_id)
@@ -417,17 +521,28 @@ class POScanner:
 
         result = [
             {
-                "name":          f.get("name", ""),
-                "web_url":       f.get("webUrl", ""),
-                "size":          f.get("size", 0),
-                "last_modified": f.get("lastModifiedDateTime", ""),
-                "relative_path": rel_path,
+                "name":              f.get("name", ""),
+                "web_url":           f.get("webUrl", ""),
+                "size":              f.get("size", 0),
+                "last_modified":     f.get("lastModifiedDateTime", ""),
+                "relative_path":     rel_path,
+                "po_folder_name":    po_folder_name,
+                "po_folder_web_url": po_folder_web_url,
             }
             for f in files_raw
         ]
         for sub in folders_raw:
             sub_rel = f"{rel_path}/{sub.get('name', '')}" if rel_path else sub.get("name", "")
-            result.extend(self._collect_files(drive_id, sub["id"], sub_rel, depth + 1))
+            if depth == 0:
+                sub_po_folder_name    = sub.get("name", "")
+                sub_po_folder_web_url = sub.get("webUrl", "")
+            else:
+                sub_po_folder_name    = po_folder_name
+                sub_po_folder_web_url = po_folder_web_url
+            result.extend(self._collect_files(
+                drive_id, sub["id"], sub_rel, depth + 1,
+                sub_po_folder_name, sub_po_folder_web_url,
+            ))
         return result
 
 
@@ -438,70 +553,66 @@ def export_excel(result: dict, out_path: Path) -> None:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill
 
-    wb          = Workbook()
-    header_font = Font(bold=True, color="FFFFFF")
-    header_fill = PatternFill("solid", fgColor="1E3A5F")
+    wb             = Workbook()
+    header_font    = Font(bold=True, color="FFFFFF")
+    header_fill    = PatternFill("solid", fgColor="1E3A5F")
+    hyperlink_font = Font(color="0563C1", underline="single")
 
     def _sheet(ws, headers, rows):
+        """
+        rows の各セルは通常の値、または (表示値, リンク先URL) のタプルを渡せる。
+        タプルの場合はハイパーリンクを設定し、下線付きの青字にする。
+        """
         ws.append(headers)
         for cell in ws[1]:
             cell.font = header_font
             cell.fill = header_fill
         for row in rows:
-            ws.append(row)
+            values = [item[0] if isinstance(item, tuple) else item for item in row]
+            ws.append(values)
+            r = ws.max_row
+            for col_idx, item in enumerate(row, start=1):
+                if isinstance(item, tuple) and item[1]:
+                    cell = ws.cell(row=r, column=col_idx)
+                    cell.hyperlink = item[1]
+                    cell.font = hyperlink_font
         for col in ws.columns:
             length = max((len(str(c.value)) for c in col if c.value is not None), default=8)
             ws.column_dimensions[col[0].column_letter].width = min(length + 2, 60)
 
-    po_number_by_id = {p["po_id"]: p["po_number"] for p in result["pos"]}
+    po_number_by_id  = {p["po_id"]: p["po_number"] for p in result["pos"]}
+    project_web_url  = {p["project_id"]: p["web_url"] for p in result["projects"]}
+    vendor_web_url   = {v["vendor_id"]: v["web_url"] for v in result["vendors"]}
 
     ws1 = wb.active
     ws1.title = "PO一覧"
     _sheet(
         ws1,
-        ["Project", "Vendor", "PO番号", "代表ファイル", "関連書類数",
-         "最終更新日", "リンク", "Status(未定義)"],
+        ["Project ID", "Project", "Vendor", "PO関連フォルダ", "PO番号", "ファイル名",
+         "最終更新日", "Status(未定義)"],
         [
-            [po["project_name"], po["vendor_name"], po["po_number"],
-             po["representative_file"], po["doc_count"], po["last_modified"],
-             po["web_url"], ""]
-            for po in result["pos"]
-        ],
-    )
-
-    ws2 = wb.create_sheet("関連書類")
-    _sheet(
-        ws2,
-        ["Project", "Vendor", "PO番号", "ファイル名", "最終更新日", "リンク"],
-        [
-            [d["project_name"], d["vendor_name"], po_number_by_id.get(d["po_id"], ""),
-             d["filename"], d["last_modified"], d["web_url"]]
+            [d["project_id"],
+             (d["project_name"], project_web_url.get(d["project_id"])),
+             (d["vendor_name"], vendor_web_url.get(d["vendor_id"])),
+             (d["po_folder_name"], d["po_folder_web_url"]),
+             po_number_by_id.get(d["po_id"], ""),
+             (d["filename"], d["web_url"]), d["last_modified"], ""]
             for d in result["documents"] if d["po_id"]
         ],
     )
 
-    ws3 = wb.create_sheet("未分類書類")
+    ws2 = wb.create_sheet("未分類書類")
     _sheet(
-        ws3,
-        ["Project", "Vendor", "サブフォルダ", "ファイル名", "最終更新日", "リンク"],
+        ws2,
+        ["Project ID", "Project", "Vendor", "PO関連フォルダ", "ファイル名", "最終更新日"],
         [
-            [d["project_name"], d["vendor_name"], d["relative_path"],
-             d["filename"], d["last_modified"], d["web_url"]]
+            [d["project_id"],
+             (d["project_name"], project_web_url.get(d["project_id"])),
+             (d["vendor_name"], vendor_web_url.get(d["vendor_id"])),
+             (d["po_folder_name"], d["po_folder_web_url"]),
+             (d["filename"], d["web_url"]), d["last_modified"]]
             for d in result["documents"] if not d["po_id"]
         ],
-    )
-
-    ws4 = wb.create_sheet("Projects")
-    _sheet(
-        ws4, ["Project ID", "Project名", "リンク"],
-        [[p["project_id"], p["project_name"], p["web_url"]] for p in result["projects"]],
-    )
-
-    ws5 = wb.create_sheet("Vendors")
-    _sheet(
-        ws5, ["Vendor ID", "Vendor名", "Project ID", "リンク"],
-        [[v["vendor_id"], v["vendor_name"], v["project_id"], v["web_url"]]
-         for v in result["vendors"]],
     )
 
     wb.save(out_path)
@@ -558,8 +669,8 @@ def route_scan():
                 cache.reset()
 
             with _lock:
-                token = _auth.get_token(SCOPES)
-            client   = SharePointClient(token, SITE_HOST, SITE_PATH)
+                _auth.get_token(SCOPES)
+            client   = SharePointClient(_auth, SITE_HOST, SITE_PATH)
             site_id  = client.get_site_id()
             drive_id = client.get_drive_id(site_id, LIBRARY_NAME)
 
