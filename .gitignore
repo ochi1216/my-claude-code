@@ -90,3 +90,5 @@ r19_site_organizer/site_registry.json
 r19_site_organizer/cache/
 r19_site_organizer/sites_list_*.json
 r19_site_organizer/quick_links_*.json
+# Project Cost Analyzerのローカル設定（環境依存のファイルパス等を含むため）
+project_cost_analyzer/.pca_settings.json

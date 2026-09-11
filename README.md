@@ -79,6 +79,9 @@ SharePointサイトのフォルダ構成をツリー表示・ダウンロード�
 > `rss_organizer/` に残っているのは移管時点の記録です。会社PCの絶対パスが
 > 埋め込まれたままなので、**新しいPCでそのまま動かさないでください**。
 > 詳細は [`rss_organizer/README.md`](rss_organizer/README.md) を参照。
+## Project Cost Analyzer
+
+セットアップ手順は [`project_cost_analyzer/README.md`](project_cost_analyzer/README.md) を参照。
 
 ## 開発ルール（バージョン管理）
 
