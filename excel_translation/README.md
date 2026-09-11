@@ -4,9 +4,11 @@ Excelファイル(`.xlsx` / `.xlsm` / `.xls`)のセルをGemini APIで翻訳し�
 
 ## 最新版
 
-`excel_translation_20260911_01.py`
+`excel_translation_20260911_02.py`
 
-バージョンごとの変更点は [`CHANGELOG.md`](CHANGELOG.md) を参照。旧版(`excel_translation_20260616_03.py` / `excel_translation_20260812_01.py` / `excel_translation_20260817_01.py`)は削除せず残してある。
+Excelファイルのセルに加え、フローチャート等の**図形(AutoShape)内の文字も翻訳**する。
+
+バージョンごとの変更点は [`CHANGELOG.md`](CHANGELOG.md) を参照。旧版(`excel_translation_20260616_03.py` / `excel_translation_20260812_01.py` / `excel_translation_20260817_01.py` / `excel_translation_20260911_01.py`)は削除せず残してある。
 
 ## セットアップ
 
@@ -32,7 +34,7 @@ PythonScripts\
 │   └── gemini_client.py
 └── excel\
     └── excel_transrate\
-        └── excel_translation_20260911_01.py
+        └── excel_translation_20260911_02.py
 ```
 
 `GEMINI_COMMON_DIR` 未設定時は、スクリプトから見て 1つ上 → 2つ上 → 3つ上 の順に
@@ -59,7 +61,7 @@ PythonScripts\
 ## 実行
 
 ```
-python excel_translation_20260911_01.py
+python excel_translation_20260911_02.py
 ```
 
 翻訳対象のExcelファイルは事前に閉じておくこと。出力は
@@ -76,9 +78,13 @@ python excel_translation_20260911_01.py
 ## テスト
 
 ```
+python tests/test_excel_translation_20260911_02.py
 python tests/test_excel_translation_20260817_01.py
 ```
 
 偽の `gemini_client` を `sys.modules` へ注入し、`generate_advanced()` へ渡るpayloadと
 レスポンス契約を検証する(Windows・Excel・実際のGemini APIに依存しない)。
 `tkinter` / `pandas` はテスト側でスタブ化するため未導入の環境でも実行できる。
+`_20260911_02` のテストは `openpyxl` を実際に使い、図形(Shape)の保持・翻訳を検証する。
+`libreoffice-calc` が導入された環境では実際にPDF変換して図形が描画されることまで
+確認する(無ければそのテストのみ自動的にスキップされる)。
