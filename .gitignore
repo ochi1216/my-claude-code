@@ -2,6 +2,10 @@ __pycache__/
 *.pyc
 venv/
 .venv/
+.pytest_cache/
+
+# 実行時に生成される起動ログ（run_latest.pyが追記する）
+startup.log
 
 # SharePoint連携ツールのローカル設定・認証キャッシュ
 po_database_organizer/config.json
@@ -12,6 +16,25 @@ po_database_organizer/cache/
 # Nexperiaのゴールシート由来の機密情報(氏名・KPI・数値目標)を含むため、リポジトリには含めない。
 outlook_total_organizer/json/review_person_goals.json
 
+# Outlookオーガナイザー: ローカル設定・実行時データ。
+# mail_manager_config.json には Gemini APIキーが平文で入る。analysis_cache/ と
+# json/ 配下の各種結果ファイルには実際のメール本文・取引先名・社内の議事内容が含まれるため、
+# リポジトリには絶対に含めない（ローカルフォルダをgit clone化する際の誤コミット防止）。
+outlook_total_organizer/json/
+outlook_total_organizer/analysis_cache/
+outlook_total_organizer/mail_reports/
+
+# analog_ic_se_strategy_organizer: 実行時に生成されるデータ・レポート。
+# 製品ケースライブラリ(product_lake)・インデックス・生成済みHTMLレポートが入る。
+analog_ic_se_strategy_organizer/data/
+
+# rtocs_organizer: 実行時データ（RTOCSのJSONレイク・生成レポート・カテゴリ対応表）。
+rtocs_organizer/data/
+
+# Gemini共通クライアントのフォールバック状態ファイル（直接呼び出し無効化の期限記録）
+.gemini_direct_disabled_until
+**/.gemini_direct_disabled_until
+
 # OneNote Report Generator のローカル設定・認証キャッシュ・生成物
 # bookmarks.jsonには実際のプロジェクト名・会議名・サイトIDが記録されるため、
 # 社内情報保護の観点からリポジトリには含めない（config.example.jsonのみコミット）。
@@ -21,6 +44,8 @@ onenote_report_generator/bookmarks.json
 onenote_report_generator/bookmarks.json.bak
 onenote_report_generator/reports/*.html
 
+# ツールランチャーの実行ログ（実行のたびに追記される実行時生成物）
+tool_launcher/launcher_log.txt
 # Document Search Manager のローカル設定・認証キャッシュ・生成物
 # config.jsonにはテナントID/クライアントID、exports/には検索キーワードと
 # 実際の社内文書名が含まれるため、リポジトリには含めない
@@ -37,3 +62,36 @@ document_search_manager/tests/__pycache__/
 # セッションCookieそのものなので、他ツールのconfig.json同様コミットしない。
 document_search_manager/enovia_session.json
 document_search_manager/enovia_profile/
+# 緊急連絡ツールのローカル設定・DB
+emergency_alert_tool/config.json
+emergency_alert_tool/*.db
+
+# Power Automate版: pac CLIの作業用一時フォルダ、実メンバー情報
+power_automate_safety_checkin/.pac-work/
+power_automate_safety_checkin/config/members.json
+
+# Power Automate安否確認PoC: デプロイ用の実値設定と生成物。
+# Team ID・Channel ID・SharePointサイトURL・リストGUIDを含むため、
+# リポジトリには含めない（deploy_config.example.json のみコミット）。
+# deploy_config.json 本体に加え、その写し（動作確認用の deploy_config_errortest.json 等）と
+# 自動で作られる控え（deploy_config.json.bak_<日時>）も除外する。example のみ例外。
+power_automate_safety_checkin/solution/deploy_config*.json
+!power_automate_safety_checkin/solution/deploy_config.example.json
+power_automate_safety_checkin/solution/deploy_config.json.bak_*
+power_automate_safety_checkin/solution/src/
+power_automate_safety_checkin/solution/*.zip
+# R19 Site Organizer のローカル設定・認証キャッシュ・実行時生成物
+# sites_list_*.json / quick_links_*.json には実際のサイト名・サイトID・URLが
+# 記録されるため、社内情報保護の観点からリポジトリには含めない（*.example.jsonのみコミット）。
+r19_site_organizer/config.json
+r19_site_organizer/token_cache.json
+r19_site_organizer/download_prefs.json
+r19_site_organizer/site_registry.json
+r19_site_organizer/cache/
+r19_site_organizer/sites_list_*.json
+r19_site_organizer/quick_links_*.json
+# Project Cost Analyzerのローカル設定（環境依存のファイルパス等を含むため）
+project_cost_analyzer/.pca_settings.json
+# 会議録画文字起こし・要約ツールのローカル設定・出力
+meeting_transcript_summarizer/config.json
+meeting_transcript_summarizer/output/

@@ -1,4 +1,8 @@
-"""ppt_translation_20260812_01.py の Gemini プロキシ移行部分の検証テスト。
+"""ppt_translation_20260911_01.py の検証テスト。
+
+20260911_01 で変えたのは出力ファイル名の言語コードだけ（`_gemini_japanese` -> `_ja`）。
+そのため本テストは、20260812_01 から引き継いだ Gemini プロキシ移行部分の検証に加えて、
+「ファイル名だけが変わり、中身は一切変わっていないこと」を確認する。
 
 Windows / tkinter / 実際の Gemini API に依存せず検証するため、
 偽の `gemini_client` を **対象モジュールのロード前に** sys.modules へ注入し、
@@ -15,7 +19,7 @@ tkinter だけスタブ化する。
 
 実行方法:
     pip install python-pptx
-    python3 tests/test_ppt_translation_20260812_01.py
+    python3 tests/test_ppt_translation_20260911_01.py
 """
 
 import importlib.util
@@ -28,8 +32,11 @@ import tempfile
 import types as pytypes
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TARGET = os.path.join(HERE, "..", "ppt_translation_20260812_01.py")
-OLD_TARGET = os.path.join(HERE, "..", "ppt_translation_20260309_03.py")
+TARGET = os.path.join(HERE, "..", "ppt_translation_20260911_01.py")
+# 移行前（Geminiプロキシ対応前）の版。出力の完全一致比較に使う。
+ORIGINAL_TARGET = os.path.join(HERE, "..", "ppt_translation_20260309_03.py")
+# 直前の版。出力ファイル名だけが変わったことの確認に使う。
+PREV_TARGET = os.path.join(HERE, "..", "ppt_translation_20260812_01.py")
 
 RESULTS = []
 
@@ -176,7 +183,7 @@ check("自動モデル検出(list_models)の呼び出しが残っていない",
       "起動時のネットワークアクセスが無いこと")
 check("genai.configure の呼び出しが残っていない", not _calls_named(TARGET, "configure"))
 check("旧版には list_models の呼び出しがあった(移行の必要性の裏付け)",
-      _calls_named(OLD_TARGET, "list_models"))
+      _calls_named(ORIGINAL_TARGET, "list_models"))
 
 # --- init_gemini がネットワークアクセスを行わないこと -------------------
 # 旧版は genai.list_models() を呼んでいたため、遮断下では必ず失敗して起動できなかった。
@@ -608,9 +615,38 @@ try:
     MESSAGEBOX.CALLS.clear()
     mod.translate_ppt_document_thread(src_pptx, "Japanese", pw)
 
-    out_pptx = os.path.join(_ppt_dir, "sample_gemini_japanese.pptx")
-    check("出力ファイル名が 元ファイル名_gemini_japanese.pptx になる",
+    out_pptx = os.path.join(_ppt_dir, "sample_ja.pptx")
+    check("出力ファイル名が 元ファイル名_ja.pptx になる",
           os.path.isfile(out_pptx), f"exists={os.path.isfile(out_pptx)}")
+    check("旧仕様の長い名前(_gemini_japanese.pptx)では出力されない",
+          not os.path.isfile(os.path.join(_ppt_dir, "sample_gemini_japanese.pptx")))
+
+    # --- 言語コードの変換 (20260911_01 の変更点) ------------------------
+    for lang, expected in [("Japanese", "ja"), ("English", "en"),
+                           ("Chinese Simplified", "cn"), ("Korean", "ko")]:
+        check(f"lang_to_suffix: {lang} -> {expected}",
+              mod.lang_to_suffix(lang) == expected,
+              f"got={mod.lang_to_suffix(lang)}")
+    check("lang_to_suffix: 未知の言語は先頭2文字を小文字で使う",
+          mod.lang_to_suffix("Portuguese") == "po",
+          f"got={mod.lang_to_suffix('Portuguese')}")
+    check("lang_to_suffix: 前後の空白を落としてから2文字にする",
+          mod.lang_to_suffix("  Thai  ") == "th",
+          f"got={mod.lang_to_suffix('  Thai  ')}")
+
+    # --- 英語・中国語でもエンドツーエンドで出力名を確認 -----------------
+    for lang, suffix in [("English", "en"), ("Chinese Simplified", "cn")]:
+        src_other = os.path.join(_ppt_dir, f"sample_{suffix}_src.pptx")
+        _build_sample_pptx(src_other)
+        MESSAGEBOX.CALLS.clear()
+        mod.translate_ppt_document_thread(src_other, lang, _FakeProgressWindow())
+        expected_out = os.path.join(_ppt_dir, f"sample_{suffix}_src_{suffix}.pptx")
+        check(f"{lang} の出力ファイル名が _{suffix}.pptx になる",
+              os.path.isfile(expected_out),
+              f"exists={os.path.isfile(expected_out)}")
+        check(f"{lang} ではフォント名を 游ゴシック に変えない",
+              all(s["name"] != "游ゴシック" for s in _run_signature(expected_out)),
+              f"names={sorted({s['name'] for s in _run_signature(expected_out)})}")
     check("エラーダイアログが出ていない",
           not any(c[0] == "error" for c in MESSAGEBOX.CALLS), f"{MESSAGEBOX.CALLS}")
     check("完了ダイアログが出る", any(c[0] == "info" for c in MESSAGEBOX.CALLS))
@@ -652,12 +688,12 @@ try:
           all(t in _untouched.values() for t in ("ab", "•", "12.34")),
           f"texts={[s['text'] for s in after_sig]}")
 
-    # --- 旧版(_20260309_03)と新版でPPTX出力が一致することの直接確認 --------
+    # --- 移行前(_20260309_03)と新版でPPTX出力の中身が一致することの直接確認 ---
     # 移行が触ったのは Gemini 呼び出し経路だけなので、同じ翻訳文を与えれば
     # 旧版と新版のPPTX出力(テキスト・書式)は完全に一致するはずである。
     # ※PPTX(zip)はタイムスタンプが毎回変わるためバイト比較はできない。
     #   run 単位のテキストと書式で比較する。
-    if os.path.isfile(OLD_TARGET):
+    if os.path.isfile(ORIGINAL_TARGET):
         class _OldResponse:
             def __init__(self, payload_text):
                 n = payload_text.count("[")
@@ -679,7 +715,7 @@ try:
         sys.modules["google"] = google_pkg
         sys.modules["google.generativeai"] = fake_genai
 
-        spec = importlib.util.spec_from_file_location("target_old", OLD_TARGET)
+        spec = importlib.util.spec_from_file_location("target_old", ORIGINAL_TARGET)
         old_mod = importlib.util.module_from_spec(spec)
         sys.modules["target_old"] = old_mod
         spec.loader.exec_module(old_mod)
@@ -691,19 +727,21 @@ try:
         old_mod.translate_ppt_document_thread(old_src, "Japanese", _FakeProgressWindow())
         old_out = os.path.join(_ppt_dir, "sample_old_gemini_japanese.pptx")
 
-        check("旧版でも同じ名前で出力される", os.path.isfile(old_out))
+        check("移行前の版は旧仕様の名前(_gemini_japanese.pptx)で出力する",
+              os.path.isfile(old_out))
         old_sig = _run_signature(old_out)
-        check("旧版と新版で出力PPTXの run 構成が一致する",
+        check("移行前の版と新版で出力PPTXの run 構成が一致する",
               [s["key"] for s in old_sig] == [s["key"] for s in after_sig],
               f"old={len(old_sig)} / new={len(after_sig)}")
-        check("旧版と新版で出力PPTXのテキストが完全一致する",
+        check("移行前の版と新版で出力PPTXのテキストが完全一致する",
               [s["text"] for s in old_sig] == [s["text"] for s in after_sig])
-        check("旧版と新版で出力PPTXの書式が完全一致する",
+        check("移行前の版と新版で出力PPTXの書式が完全一致する",
               _fmt_only(old_sig) == _fmt_only(after_sig))
-        check("旧版と新版で出力PPTXのフォント名が完全一致する",
+        check("移行前の版と新版で出力PPTXのフォント名が完全一致する",
               [s["name"] for s in old_sig] == [s["name"] for s in after_sig])
     else:
-        check("旧版(_20260309_03)が見つかり比較できる", False, f"not found: {OLD_TARGET}")
+        check("移行前の版(_20260309_03)が見つかり比較できる", False,
+              f"not found: {ORIGINAL_TARGET}")
 
     # --- 翻訳対象が無いPPTXでも落ちないこと -------------------------------
     empty_pptx = os.path.join(_ppt_dir, "empty.pptx")

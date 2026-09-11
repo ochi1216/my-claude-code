@@ -1,5 +1,23 @@
 # my-claude-code
 
+このリポジトリは `common/` を [gemini-common-tools](https://github.com/ochi1216/gemini-common-tools) の
+git submoduleとして含む（会社PCでのGemini API直接アクセス遮断時、自宅PC経由プロキシへ自動フォールバックする
+共通クライアント）。クローン時は以下でsubmoduleも取得すること。
+
+```
+git clone --recurse-submodules https://github.com/ochi1216/my-claude-code.git
+# または、既にクローン済みの場合
+git submodule update --init common
+```
+
+## Tool Launcher
+
+このリポジトリ内の各ツールと、旧 `PythonScripts` に残っているツールを1画面から起動する
+ランチャー。デスクトップショートカットのリンク先を
+`tool_launcher/run_tool_launcher.bat` に設定して使う。起動対象の追加・変更は
+`tool_launcher/tools.json` を編集するだけでよい。セットアップ手順は
+[`tool_launcher/README.md`](tool_launcher/README.md) を参照。
+
 ## Outlook Total Organizer
 
 Outlookメール解析・アクションダッシュボードツール。詳細は [`outlook_total_organizer/CHANGELOG.md`](outlook_total_organizer/CHANGELOG.md) を参照（README.md は未整備）。
@@ -8,9 +26,24 @@ Outlookメール解析・アクションダッシュボードツール。詳細�
 
 セットアップ手順は [`onenote_report_generator/README.md`](onenote_report_generator/README.md) を参照。
 
+## BBT レクチャーオーガナイザー（BBTサマリ）
+
+セットアップ手順は [`bbt_lecture_organizer/README.md`](bbt_lecture_organizer/README.md) を参照。
+## 会議録画 文字起こし・要約ツール
+
+セットアップ手順は [`meeting_transcript_summarizer/README.md`](meeting_transcript_summarizer/README.md) を参照。
+
 ## BBT RTOCS Organizer
 
 セットアップ手順は [`rtocs_organizer/README.md`](rtocs_organizer/README.md) を参照。
+
+## analog_ic_se_strategy_organizer
+
+セットアップ手順は [`analog_ic_se_strategy_organizer/README.md`](analog_ic_se_strategy_organizer/README.md) を参照。設計背景は [`DESIGN_analog_ic_se_strategy_organizer.md`](DESIGN_analog_ic_se_strategy_organizer.md)。
+
+## PO Database Organizer
+
+セットアップ手順は [`po_database_organizer/README.md`](po_database_organizer/README.md) を参照。
 
 ## Shareflex Document Dashboard
 
@@ -37,6 +70,11 @@ Outlookメール解析・アクションダッシュボードツール。詳細�
 
 セットアップ手順は [`word_translator/README.md`](word_translator/README.md) を参照。
 
+## R19 Site Organizer（R19 SharePoint Portal）
+
+SharePointサイトのフォルダ構成をツリー表示・ダウンロードできるツール。セットアップ手順は
+[`r19_site_organizer/README.md`](r19_site_organizer/README.md) を参照。
+
 ## RSS Organizer（`ochi1216/home-pc-workspace` へ移管済み）
 
 > **⚠️ このプロジェクトは 2026-08-13 に [`ochi1216/home-pc-workspace`](https://github.com/ochi1216/home-pc-workspace) の `rss-organizer/` へ移管しました。以後の開発は移管先で行います。**
@@ -44,6 +82,9 @@ Outlookメール解析・アクションダッシュボードツール。詳細�
 > `rss_organizer/` に残っているのは移管時点の記録です。会社PCの絶対パスが
 > 埋め込まれたままなので、**新しいPCでそのまま動かさないでください**。
 > 詳細は [`rss_organizer/README.md`](rss_organizer/README.md) を参照。
+## Project Cost Analyzer
+
+セットアップ手順は [`project_cost_analyzer/README.md`](project_cost_analyzer/README.md) を参照。
 
 ## 開発ルール（バージョン管理）
 

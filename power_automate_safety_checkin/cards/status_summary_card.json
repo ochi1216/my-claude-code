@@ -1,0 +1,30 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.4",
+  "body": [
+    {
+      "type": "TextBlock",
+      "text": "安否確認 集計状況",
+      "weight": "Bolder",
+      "size": "Large",
+      "wrap": true
+    },
+    {
+      "type": "FactSet",
+      "facts": [
+        { "title": "拠点", "value": "${SiteName}" },
+        { "title": "Event ID", "value": "${EventID}" },
+        { "title": "対象者", "value": "${TotalCount} 名" },
+        { "title": "回答済み", "value": "${AnsweredCount} 名" },
+        { "title": "未回答", "value": "${UnansweredCount} 名" },
+        { "title": "被災", "value": "${AffectedCount} 名" }
+      ]
+    },
+    {
+      "type": "TextBlock",
+      "text": "未回答の方は、個人チャットに届いた安否確認カードから回答してください。",
+      "wrap": true
+    }
+  ]
+}

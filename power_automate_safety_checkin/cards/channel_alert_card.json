@@ -1,0 +1,29 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.4",
+  "body": [
+    {
+      "type": "TextBlock",
+      "text": "${TestPrefix}地震発生・安否確認開始",
+      "weight": "Bolder",
+      "size": "Large",
+      "wrap": true
+    },
+    {
+      "type": "FactSet",
+      "facts": [
+        { "title": "拠点", "value": "${SiteName}" },
+        { "title": "震度", "value": "${Intensity}" },
+        { "title": "震源", "value": "${Epicenter}" },
+        { "title": "発生日時", "value": "${OccurredAtJST}" },
+        { "title": "Event ID", "value": "${EventID}" }
+      ]
+    },
+    {
+      "type": "TextBlock",
+      "text": "各自、個人チャットに届いた安否確認カードから回答してください。このカード自体は回答用ではありません。",
+      "wrap": true
+    }
+  ]
+}

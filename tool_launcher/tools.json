@@ -1,0 +1,306 @@
+{
+  "schema_version": 1,
+  "window": {
+    "title": "TOOL LAUNCHER",
+    "width": 1100,
+    "height": 800,
+    "columns": 4
+  },
+  "legacy_root": "%USERPROFILE%\\Documents\\PythonScripts",
+  "categories": [
+    { "id": "translate",   "label": "📄 翻訳" },
+    { "id": "mail_doc",    "label": "📧 メール・文書" },
+    { "id": "excel_pm",    "label": "📊 Excel・PM" },
+    { "id": "sharepoint",  "label": "🔗 SharePoint・文書管理" },
+    { "id": "strategy",    "label": "🧠 分析・戦略" },
+    { "id": "safety",      "label": "🚨 安全・緊急" },
+    { "id": "research",    "label": "📚 情報収集" }
+  ],
+  "tools": [
+    {
+      "id": "word_translator",
+      "label": "Word翻訳ツール",
+      "category": "translate",
+      "root": "repo",
+      "kind": "bat",
+      "path": "word_translator/run_word_translator.bat",
+      "gemini": "proxy",
+      "status": "active"
+    },
+    {
+      "id": "ppt_translator",
+      "label": "PowerPoint翻訳ツール",
+      "category": "translate",
+      "root": "repo",
+      "kind": "bat",
+      "path": "ppt_translator/run_ppt_translator.bat",
+      "gemini": "proxy",
+      "status": "active"
+    },
+    {
+      "id": "pdf_translator",
+      "label": "PDF翻訳ツール",
+      "category": "translate",
+      "root": "repo",
+      "kind": "bat",
+      "path": "pdf_translator/run_pdf_translator.bat",
+      "gemini": "proxy",
+      "status": "active"
+    },
+    {
+      "id": "excel_translation",
+      "label": "Excel翻訳ツール",
+      "category": "translate",
+      "root": "repo",
+      "kind": "py",
+      "path": "excel_translation/excel_translation_",
+      "gemini": "proxy",
+      "status": "active",
+      "note": "S03でrun_excel_translation.batを整備したらkindをbatに変更する"
+    },
+
+    {
+      "id": "outlook_total_organizer",
+      "label": "Outlook管理ツール",
+      "category": "mail_doc",
+      "root": "repo",
+      "kind": "bat",
+      "path": "outlook_total_organizer/run_outlook_total_organizer.bat",
+      "gemini": "proxy",
+      "status": "active"
+    },
+    {
+      "id": "onenote_report_generator",
+      "label": "OneNote要約ツール",
+      "category": "mail_doc",
+      "root": "repo",
+      "kind": "py",
+      "path": "onenote_report_generator/onenote_report_generator_",
+      "gemini": "proxy",
+      "status": "active",
+      "note": "S03でrun_onenote_report_generator.batを整備したらkindをbatに変更する"
+    },
+    {
+      "id": "meeting_transcript_summarizer",
+      "label": "会議録画 文字起こし",
+      "category": "mail_doc",
+      "root": "repo",
+      "kind": "bat",
+      "path": "meeting_transcript_summarizer/run_meeting_transcript_summarizer.bat",
+      "gemini": "direct",
+      "status": "active"
+    },
+    {
+      "id": "weekly_pdf_diff",
+      "label": "Weekly PDF差分",
+      "category": "mail_doc",
+      "root": "repo",
+      "kind": "bat",
+      "path": "weekly_pdf_diff/run_weekly_pdf_diff.bat",
+      "gemini": "none",
+      "status": "active"
+    },
+
+    {
+      "id": "excel_bc_parameter",
+      "label": "BCパラメータ抽出",
+      "category": "excel_pm",
+      "root": "legacy",
+      "kind": "py",
+      "path": "excel/excel_business_case_parameter_extraction_",
+      "gemini": "proxy",
+      "status": "active"
+    },
+    {
+      "id": "excel_ll_feedback",
+      "label": "LLフィードバックツール",
+      "category": "excel_pm",
+      "root": "legacy",
+      "kind": "py",
+      "path": "excel/excel_lesson_learned_feedabck_tool_",
+      "gemini": "direct",
+      "status": "active",
+      "note": "フォルダ・ファイル名の綴りはfeedabck（実在する綴りをそのまま使用）"
+    },
+    {
+      "id": "excel_vvcm_checker",
+      "label": "VVCMチェッカー",
+      "category": "excel_pm",
+      "root": "legacy",
+      "kind": "py",
+      "path": "excel/excel_VVCM_checker_",
+      "gemini": "none",
+      "status": "active"
+    },
+    {
+      "id": "project_cost_analyzer",
+      "label": "プロジェクト原価分析",
+      "category": "excel_pm",
+      "root": "repo",
+      "kind": "bat",
+      "path": "project_cost_analyzer/run_dashboard.bat",
+      "gemini": "none",
+      "status": "active"
+    },
+
+    {
+      "id": "r19_site_organizer",
+      "label": "R19 SharePointツール",
+      "category": "sharepoint",
+      "root": "repo",
+      "kind": "py",
+      "path": "r19_site_organizer/r19_site_organizer_",
+      "gemini": "none",
+      "status": "active",
+      "note": "2026-09-11の統合でlegacy(PythonScripts)からrepoへ移した。S03でbat整備予定"
+    },
+    {
+      "id": "document_search_manager",
+      "label": "文書横断検索",
+      "category": "sharepoint",
+      "root": "repo",
+      "kind": "bat",
+      "path": "document_search_manager/run_document_search_manager.bat",
+      "gemini": "proxy",
+      "status": "active"
+    },
+    {
+      "id": "excel_open_po_report",
+      "label": "PO reportアップデート",
+      "category": "sharepoint",
+      "root": "legacy",
+      "kind": "py",
+      "path": "excel/excel_open_PO_report_update_tool_",
+      "gemini": "direct",
+      "status": "active"
+    },
+    {
+      "id": "sharepoint_folder_url_link",
+      "label": "SharePointリンクツール",
+      "category": "sharepoint",
+      "root": "legacy",
+      "kind": "py",
+      "path": "SharePoint/BC_tranfer/sharepoint_folder_URL_link_setting_",
+      "gemini": "none",
+      "status": "active",
+      "note": "フォルダ名の綴りはBC_tranfer（実在する綴りをそのまま使用）"
+    },
+
+    {
+      "id": "analog_ic_se_strategy",
+      "label": "SE戦略立案",
+      "category": "strategy",
+      "root": "repo",
+      "kind": "bat",
+      "path": "analog_ic_se_strategy_organizer/run_dashboard.bat",
+      "gemini": "proxy",
+      "status": "active"
+    },
+    {
+      "id": "rtocs_organizer",
+      "label": "RTOCS連続要約",
+      "category": "strategy",
+      "root": "repo",
+      "kind": "py",
+      "path": "rtocs_organizer/rtocs_organizer_",
+      "gemini": "proxy",
+      "status": "planned_move"
+    },
+    {
+      "id": "rtocs_dashboard",
+      "label": "RTOCSダッシュボード",
+      "category": "strategy",
+      "root": "repo",
+      "kind": "streamlit",
+      "path": "rtocs_organizer/rtocs_dashboard_",
+      "gemini": "direct",
+      "status": "planned_move"
+    },
+    {
+      "id": "bbt_lecture_organizer",
+      "label": "BBT講義スクリプト",
+      "category": "strategy",
+      "root": "repo",
+      "kind": "py",
+      "path": "bbt_lecture_organizer/BBT_lecture_script_getter_",
+      "gemini": "proxy",
+      "status": "planned_move"
+    },
+
+    {
+      "id": "power_automate_safety_checkin",
+      "label": "安否確認（Power Automate）",
+      "category": "safety",
+      "root": "repo",
+      "kind": "bat",
+      "path": "power_automate_safety_checkin/run_power_automate_tools.bat",
+      "gemini": "none",
+      "status": "active"
+    },
+    {
+      "id": "emergency_alert_tool",
+      "label": "緊急連絡ツール",
+      "category": "safety",
+      "root": "repo",
+      "kind": "bat",
+      "path": "emergency_alert_tool/run_emergency_alert_tool.bat",
+      "gemini": "none",
+      "status": "active"
+    },
+
+    {
+      "id": "books_info_organizer",
+      "label": "Books検索統合ツール",
+      "category": "research",
+      "root": "legacy",
+      "kind": "py",
+      "path": "books/books_info_organizer_",
+      "gemini": "none",
+      "status": "active"
+    },
+    {
+      "id": "library_new_stock",
+      "label": "図書館管理ツール",
+      "category": "research",
+      "root": "legacy",
+      "kind": "py",
+      "path": "Library/Library_new_stock_summary_",
+      "gemini": "direct",
+      "status": "active"
+    },
+    {
+      "id": "journal",
+      "label": "学びジャーナル（LKPT）",
+      "category": "strategy",
+      "root": "repo",
+      "kind": "bat",
+      "path": "journal/RunConsole.bat",
+      "gemini": "proxy",
+      "status": "active",
+      "note": "日々のL(教訓)/K(継続)/P(課題)/T(挑戦)と時間管理・アクションアイテム管理を1つで行うツール。RunConsole.batはrun_latest.pyを呼び、run_latest.pyが最新のdaily_journal_*.pyを選ぶ二段構え。SetupAutoStart.batはWindowsスタートアップ登録用のため割り当てない"
+    },
+
+    {
+      "id": "po_database_organizer",
+      "label": "PO Database Organizer",
+      "category": "sharepoint",
+      "root": "repo",
+      "kind": "bat",
+      "path": "po_database_organizer/run_po_database_organizer.bat",
+      "gemini": "none",
+      "status": "hidden",
+      "note": "越智さんの指示によりランチャー未登録。hiddenにすることで自動検出の「未登録」にも出さない"
+    },
+    {
+      "id": "shareflex_dashboard",
+      "label": "Shareflex Dashboard",
+      "category": "sharepoint",
+      "root": "repo",
+      "kind": "bat",
+      "path": "shareflex_dashboard/run_shareflex_dashboard.bat",
+      "gemini": "none",
+      "status": "hidden",
+      "note": "越智さんの指示によりランチャー未登録。hiddenにすることで自動検出の「未登録」にも出さない"
+    }
+  ]
+}

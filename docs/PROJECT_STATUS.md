@@ -391,3 +391,439 @@ Papers with Code は同期間0件で、Windows実機での `feedparser` 実行�
 `rss_organizer/` のコードには会社PCの絶対パスが残っている。
 `mkdir(parents=True)` により実在しないユーザー名のフォルダが作られ、
 エラーも出ないまま誤った場所へHTMLが出力されるため、他のPCで実行しないこと。
+# PROJECT_STATUS.md
+
+最終更新: 2026-09-01 (S02)
+
+
+- プロジェクト名: 緊急連絡ツールの開発
+- 目的: 緊急地震速報（大分県・大阪府・東京都、震度5弱以上）を検知した際に、
+  緊急連絡網のスタッフへ安否確認を送信し、各スタッフが
+  「無事/被災」「出社可能/出社不可能」を回答すると、即座に上司（管理者）へ
+  通知される仕組みを構築する。
+- 位置づけ: Nexperia B.V. 日本支社には現在、緊急連絡網が存在しない。本仕組みは
+  会社が有料安否確認サービスを承認・契約するまでの**暫定措置**であり、
+  将来は補助的な位置づけに変わる想定。
+- スコープ: 日本支社40名（開発部門18名＋ビジネスデベロップメント部門22名）のうち、
+  まず開発部門18名を対象としたPoCとして開始する。
+- 前提環境: Microsoft 365。
+
+## 採用アプローチの経緯（重要）
+
+S01セッション内で、実装方式を1回転換している。
+
+1. **前半: Python + Microsoft Graph API版**（`emergency_alert_tool/`）を実装。
+   ロジック・Webフォーム・通知処理は完成し自動テストも全件合格したが、
+   実際にメールを送るには Azure ADアプリ登録＋`Mail.Send`（アプリケーション権限）への
+   **管理者同意**が必要と判明。ユーザー（Japan Site Manager）個人の権限では
+   完結せず、IT部門への依頼が前提になることが分かった。
+2. **後半: Power Automate版**（`power_automate_safety_checkin/`）に転換。
+   標準コネクタ（SharePoint・Teams）のみで構成すればIT部門への申請なしで
+   構築できるため。ユーザーからGPT側で作成されたPower Automate構想書
+   （`Earthquake_Safety_System_0730_02`）が提示され、これを精査
+   （`docs/REVIEW_earthquake_safety_system_0730_02.md`）した上で、
+   指摘事項を反映したPoC（P1: 手動トリガー版）を新規に構築した。
+
+現時点の主軸は**Power Automate版**。Python版はプロトタイプとして完成・動作確認済み
+（dry-runモードでの一連の流れは実機確認済み）だが、実際のメール送信は
+Azure AD側の制約で止まっている（IT部門への依頼文は作成済み、未送付）。
+
+
+`my-claude-code` は複数の独立した社内向けツールを `ツール名/` フォルダ単位で
+管理するモノレポ。
+
+my-claude-code/
+├── CLAUDE.md                  # セッション/開発運用ルール（S01で新規作成）
+├── README.md                  # リポジトリ全体の開発ルール（バージョン管理規約）
+├── docs/                      # プロジェクト管理ファイル（S01で新規作成）
+│   ├── PROJECT_STATUS.md
+│   ├── SESSION_HISTORY.md
+│   ├── NEXT_TASK.md
+│   └── REVIEW_earthquake_safety_system_0730_02.md  # Power Automate構想の精査レポート
+├── emergency_alert_tool/      # Python + Graph API版（S01前半、現在は非主軸）
+├── power_automate_safety_checkin/  # Power Automate版（S01後半、現在の主軸）
+├── po_database_organizer/     # 既存ツール（他プロジェクト、本作業では変更しない）
+├── rtocs_organizer/           # 既存ツール（他プロジェクト、本作業では変更しない）
+├── shareflex_dashboard/       # 既存ツール（他プロジェクト、本作業では変更しない）
+├── HANDOVER_analog_ic_scout.md      # 既存の別プロジェクト引継ぎ資料
+├── HANDOVER_youtube_summary_list.md # 既存の別プロジェクト引継ぎ資料
+└── youtube_summary_list_*.py         # 既存の別プロジェクト成果物
+
+既存フォルダ（`po_database_organizer/`, `rtocs_organizer/`, `shareflex_dashboard/` 等）は
+本プロジェクトとは無関係の別ツールであり、本プロジェクトでは変更しない。
+
+
+- `emergency_alert_tool/`: 詳細は同フォルダの `README.md` / `CHANGELOG.md` を参照。
+- `power_automate_safety_checkin/`: 詳細は同フォルダの `README.md` / `CHANGELOG.md` を参照。
+
+## Confirmed Specifications（Power Automate版・現行）
+
+- 監視対象拠点: 大分県・大阪府・東京都、閾値: 震度5弱以上
+- 拠点情報（拠点名・閾値・TeamId・ChannelId）は**SharePointリストではなく、
+  Power Automateフロー内のSwitchアクション（`CMP_Site_Config`）に固定値として保持**する
+  （SharePointの全員閲覧可能なリストに置く必要がないとの判断、ユーザー指示による）。
+- スタッフ・管理者の名簿はSharePointリスト`EQ_Config_Members`で管理する。
+  管理者役のID命名は `mgr01`, `mgr02`, `admin01`（旧`boss01/02/03`から変更）。
+- スタッフの回答項目: 4択（①無事・出社可能／②無事・出社不可／③被災・出社可能／④被災・出社不可）
+- 回答が送信されたら、即座に管理者（`mgr01`/`mgr02`/`admin01`）へ通知する。
+- アーキテクチャは**待機型＋並列ループ**（S02で変更）。当初は「カード投げ切り＋
+  応答トリガー分離」の非同期設計だったが、**このテナントのTeamsコネクタには
+  アダプティブカードの応答を受け取るトリガーが存在しない**ことがS02で判明したため、
+  `PostCardAndWaitForResponse`（応答を待機するアクション）を`Apply to each`の中で使い、
+  ループを並列実行して全員分を同時に待つ方式に変更した。直列ループを避ける
+  という当初の要件（1人目の回答まで他メンバーへの送信が止まってはいけない）は
+  並列実行で満たしている。
+- フローの構築方法は、Power AutomateのGUIでの手組みではなく、**フロー定義（JSON）を
+  スクリプトで生成し`pac` CLIでインポートする方式**（S02で変更）。
+- 自動地震検知（気象庁XML自動取込）はスコープ外（Gate C不合格見込み）。
+  P1は手動トリガーのみ。
+
+
+- **Power Automate版（主軸）**: **P1のフロー実装は完了し、DEV環境で実機検証済み**（S02）。
+  - SharePoint 4リストは作成済み・データ投入済み（開発部門の実名簿19名＋検証用2名）。
+  - `EQ06_Manual_Drill_DEV`（手動訓練）と`EQ05_Status_Summary_DEV`（定期集計）の
+    2フローがDEV環境で動作している。当初設計の`EQ04b_On_Response_DEV`は、
+    応答トリガーが存在しないためEQ06へ統合し廃止した。
+  - 検証済みの動作: 閾値判定（未満は正常終了）／`EQ_Events`へのイベント記録／
+    Teamsチャネルへの開始通知カード／対象者の抽出／個人カードの送信と回答待機／
+    `EQ_Responses`への回答保存／被災回答時の上司通知／未回答（タイムアウト）時の
+    正常終了／`EQ05`による集計カードの投稿。
+  - フローは`solution/build_flows_*.py`で生成し、`pac solution pack`→`import`の
+    3コマンドで再展開できる。GUI操作は接続の作成と動作確認のみ。
+- **検証段階の安全弁**: `deploy_config.json`の`testRecipientOverride`が設定されている間、
+  個人カード・上司通知の宛先は名簿の内容にかかわらず検証者だけに向く。
+  実在拠点の名簿に触れずに試せるよう、架空拠点`NARA`（検証者1名のみ所属）も用意した。
+  本番移行時は`testRecipientOverride`を空にする（それが唯一の切替操作）。
+- **Python版（非主軸）**: `emergency_alert_tool/` は実装・自動テスト（21件）ともに完了。
+  Windows実機でのdry-run動作確認（トリガー→18名通知→回答→上司通知の一連の流れ）も
+  完了。実際のM365テナントへのメール送信はAzure AD管理者同意待ちで未検証。
+
+
+- **エラー処理（`SCOPE_Try`/`SCOPE_Catch`による`EQ_Received_Items`へのログ記録）が未実装。**
+  `EQ_Received_Items`の列内部名も未取得。
+- **イベントのクローズ処理が未実装。** `AlertStatus`は`Open`のまま更新されないため、
+  EQ05が古いイベントを集計し続ける。
+- `TeamId`/`ChannelId`は、検証中のため3拠点＋NARAとも同一のテスト用チャネルを指している。
+  拠点ごとの実チャネルは未設定。
+- 実在拠点（大分・大阪・東京）での訓練、3名結合テスト、18名訓練はいずれも未実施。
+- S02の実機テストで、**実在の同僚2名（東京拠点）へ訓練用の安否確認カードが誤送信された。**
+  以後は`testRecipientOverride`により再発しない仕組みにしてあるが、当該2名への
+  フォローが必要かはユーザー判断。
+- Python版は、Azure ADの`Mail.Send`アプリケーション権限への管理者同意が
+  得られていないため、実メール送信は未検証（IT部門への依頼文は作成済み、未送付）。
+- 既存の安否確認サービスの有無について、社内所管部門への確認はまだ行っていない
+  （ユーザー＝Japan Site Managerが暫定措置と位置づけ済みだが、正式な社内合意の
+  記録は未確認）。
+
+
+- `emergency_alert_tool/`: `pytest tests/ -v` で21件全てPASS。実機（Windows、
+  dry_runモード）でのE2E確認済み。詳細は同フォルダの`README.md`参照。
+- `power_automate_safety_checkin/`: DEV環境（`Nexperia (default)`）で
+  `EQ06_Manual_Drill_DEV`・`EQ05_Status_Summary_DEV`の実機動作を確認済み。
+  実測値は`evidence/`（Teamsカード応答の構造、SharePoint列内部名・型）に記録。
+  再展開の手順は`solution/README.md`を参照。
+
+
+- 既存の他ツールフォルダ（`po_database_organizer/` 等）は変更しない。
+- APIキー・パスワード・クライアントシークレット等の認証情報はコミットしない。
+- コミット・Pushはユーザーが明示的に指示した場合のみ行う。
+- Power Automateのフロー本体・SharePointの実データ投入など、GUI操作や
+  実テナントへの実行が必要な作業はユーザー自身が行う（Claude Codeはこのセッション
+  環境から対象テナントへ直接操作できない）。
+
+対象プロジェクト: **PDF メール解析ツール開発**（`weekly_pdf_diff/`）
+最終更新: S01（2026-07-29）
+
+
+Weekly Report メール（Nexperia社内、単一送信者からの継続的な週次報告）をOneNoteに
+集約してエクスポートしたPDFを解析し、各Weeklyを**直前の日付のWeekly**と比較して、
+今週追加・修正された文言のみを**青太字**に変更した別名PDFを生成するツール。
+
+基準日（2026-04-17）以降の各Weeklyについて、直前週からの差分を可視化することが目的。
+元PDFは変更せず、常に別名で出力する。OCRは使用しない（PDFは文字情報を保持している）。
+
+
+このリポジトリ（`my-claude-code`）は越智さん個人の複数独立ツールのモノレポ。
+本プロジェクトは新規フォルダ `weekly_pdf_diff/` として追加する（既存の
+`rtocs_organizer/` 等と同じ、自己完結フォルダ構成の慣習に従う）。
+
+├── CLAUDE.md                      # 本プロジェクトのセッション管理ルール
+├── docs/
+│   ├── PROJECT_STATUS.md          # 本ファイル
+│   └── NEXT_TASK.md
+├── weekly_pdf_diff/                # 本プロジェクト（新規）
+│   ├── IMPLEMENTATION_PLAN.md
+│   ├── README.md
+│   ├── CHANGELOG.md
+│   ├── requirements.txt
+│   ├── weekly_pdf_diff_20260729_01.py   # CLIエントリポイント旧版（保持のみ）
+│   ├── weekly_pdf_diff_20260729_02.py   # CLIエントリポイント現行版（GUI選択対応）
+│   ├── run_weekly_pdf_diff.bat          # Windows起動バッチ（最新版を自動選択）
+│   ├── pdf_reader.py
+│   ├── weekly_splitter.py
+│   ├── text_normalizer.py
+│   ├── diff_engine.py
+│   ├── pdf_renderer.py
+│   ├── report_writer.py
+│   └── tests/
+├── rtocs_organizer/ 他             # 既存の無関係な他プロジェクト（変更対象外）
+
+
+未実装（S01は調査・設計フェーズ）。S01で実施したのはPDF構造調査とPhase 1
+（Weekly境界検出）の実現性検証のみ。
+
+## Confirmed Specifications（S01でPDF実データから確認した事実）
+
+- 対象PDFは89ページ、全て文字情報を保持するテキストレイヤー（OCR不要）。
+- Weeklyメールは同一送信者からの継続シリーズで、`Subject: Weekly Report Najib ww15`
+  〜 `ww29` の15件がメールヘッダー（From/Sent/Subject）付きで検出できた。
+  さらにPDF先頭（1ページ目）にヘッダーなしの最新Weekly（2026-07-29相当）が1件あり、
+  **実データ全体では16件のWeeklyブロックが存在する**。
+- 最古のヘッダー付きWeekly（ww15）の送信日は **2026-04-10** であり、引継ぎ資料が
+  述べる「最古Weekly=2026-04-17」より1件古い。基準日2026-04-17（ww16）を採用する
+  場合、ww15（2026-04-10）はWeekly分割の境界検出には使うが、比較・差分処理の
+  スコープには含めない、という解釈で件数（基準込み15件、差分対象14件）と整合する。
+  → 詳細は `weekly_pdf_diff/IMPLEMENTATION_PLAN.md` 参照。
+- **Weekly境界はページ途中（Y座標）で発生する実例を確認済み**（例: ページ6は
+  上部が前Weeklyの署名、Y≈542から次Weeklyの `From:` ヘッダーが開始）。
+  ページ単位の固定範囲では分割できない。
+- ページ末尾に OneNote由来のフッター（例: `2026_07 - 6 ページ`）が全89ページに1行ずつ
+  存在し、除外対象メタデータの安定した目印になる（フォント: `YuGothic-Regular`,
+  色: 灰色 `#767676` 系）。
+- OneNoteの印字日時（例: `2026年7月29日 / 13:58`）は文書全体で**1箇所のみ**（1ページ目）
+  にしか出現しない。引継ぎ資料が想定する「ページ上部の日時」は全ページ共通の目印ではなく、
+  ヘッダーを持たない最新Weeklyの日付推定に使える単発の手がかりとして扱う。
+- 本文は Arial 11pt（通常）/ Arial,Bold 11pt（見出し）が主体。日本語のOneNote由来
+  メタ文字列のみ YuGothic。
+- **既存のハイパーリンクは文字色 `#0066CC`** で本文中に埋め込まれている
+  （`page.get_links()` で4件確認、色コード26316=0x0066CCと一致）。引継ぎ資料が
+  提案する差分色 `#0057B8` は非常に近い青であり、リンクと紛れやすい。差分は
+  **太字**で必ず区別し、必要であれば差分色をもう少し離す（例: `#0033A0`寄り）ことを
+  IMPLEMENTATION_PLAN.mdでリスクとして明記。
+- **PyMuPDFの `find_tables()` では、罫線付きの本格的なグリッド表はほぼ検出されない**
+  （1ページ目で1行×2列の小さな表が1件のみ）。実体は「Project Name: / Milestone: /
+  ゲート予定 / STR / Reliability / Others」といった見出し＋番号付きリスト／
+  ラベル:値行で構成された疑似構造化テキストであり、罫線ベースの表ではない。
+  → 引継ぎ資料が前提とする「表・セル単位比較（table_parser.py等）」は過剰設計であり、
+  「セクション階層＋行（段落・箇条書き・ラベル行）単位の比較」で十分という結論に至った。
+  詳細はIMPLEMENTATION_PLAN.mdの設計判断を参照。
+
+
+S01完了分: Phase 1〜5すべて実装済み。`weekly_pdf_diff_20260729_03.py`が
+現行版CLIエントリポイントで、基準日以降の各Weeklyを直前のWeeklyと比較し、
+青太字化した別名PDF・差分レポート（CSV/HTML）・Weekly一覧JSONを出力する
+フルパイプラインが動作する。旧版`_01`/`_02`は開発ルールにより削除せず保持。
+Windows起動バッチ`run_weekly_pdf_diff.bat`は最新版`.py`を自動選択して実行する
+（Shift_JIS(CP932)保存で文字化け対策済み）。単体テスト38件・統合テスト1件
+（合成3Weekly PDFでパイプライン全体を検証）が全てPASS。
+
+実PDF（89ページ、14 Weeklyペア）に対するエンドツーエンド実行も確認済みで、
+その過程で単体テストだけでは検出できなかった重大な不具合を3件発見・修正した
+（詳細は`weekly_pdf_diff/CHANGELOG.md`参照）。修正後は正常終了・89ページ維持・
+change_typeの内訳（moved/added/deleted/modifiedが妥当な比率で分布）・
+複数ページの目視確認（PDFをPNG書き出しして確認）で問題ないことを確認済み。
+
+
+- 引継ぎ資料の「Weekly数15件」と実データの「16ブロック」の差異（上記参照）。
+  暫定的にww15（2026-04-10）をスコープ外として扱う方針だが、越智さんの最終確認が
+  望ましい。
+- 実PDFは社内機密情報（個人名・メールアドレス・電話番号・プロジェクトコード名）を
+  含むため、テスト・開発では合成PDFを用いる方針（CLAUDE.md参照）。
+- `page.get_text("dict")` のブロック順が視覚的なY座標順と一致しない実例を発見
+  （1ページ目のOneNote日時スタンプ）。`pdf_reader.py`で `(page, y0)` ソートにより
+  対処済みだが、他ページでも同様の非直感的な順序が起こり得る前提で設計する必要がある。
+- STR/Reliability/Others配下の罫線なし複数列レイアウト（進捗ステータス表等）は
+  行・列として正確に再構成できておらず、断片単位のTextUnitとして扱われる
+  （詳細はIMPLEMENTATION_PLAN.md）。誤結合は防止済みだが、差分対応付けの精度は
+  本文の箇条書き・番号付き項目より低い。
+
+
+```bash
+cd weekly_pdf_diff
+pip install -r requirements.txt
+python -m pytest tests/ -v
+
+S01時点: 単体テスト38件・統合テスト1件（計39件）が全てPASS（合成PDFのみ使用）。
+実PDFでの検証はセッション内の一時実行として実施し、結果は
+`weekly_pdf_diff/CHANGELOG.md`と`IMPLEMENTATION_PLAN.md`に記録。実PDF自体・
+出力結果（差分PDF・レポート等）はリポジトリにコミットしていない。
+
+
+- 元PDF (`Hello_Ochi_San.pdf` 等) はリポジトリにコミットしない。
+- テストは実データでなく合成PDFを使用する。
+- 元PDFを上書きせず、常に別名で出力する。
+- OCRは使用しない。外部AI API・クラウドサービスは使用しない（ローカル完結）。
+
+最終更新: 2026-07-23 (S01)
+
+
+- プロジェクト名: Project Cost developer開発
+- 目的: Project CostのKOB1シート（SAPのプロジェクトコスト実績明細データ）から、
+  プロジェクト単位・事業部単位・職種単位でコスト分析を行うツールを開発する。
+- 成果物: `project_cost_analyzer/` フォルダに、Excelファイル（KOB1シートを含む
+  `.xlsm`/`.xlsx`）を読み込んで分析するStreamlitダッシュボードを新規開発した。
+
+
+├── CLAUDE.md                      # セッション管理ルール
+├── README.md                      # リポジトリ全体の開発ルール・ツール一覧
+├── docs/                          # セッション管理ファイル
+├── HANDOVER_analog_ic_scout.md    # 他ツールの構想メモ（旧方式、本プロジェクトと無関係）
+├── HANDOVER_youtube_summary_list.md
+├── youtube_summary_list_20260703_01.py
+├── youtube_summary_list_20260711_01.py
+├── po_database_organizer/         # SharePoint PO書類カタログ化ツール（本プロジェクトと無関係）
+├── rtocs_organizer/                # RTOCS企業戦略分析ツール（本プロジェクトと無関係）
+├── shareflex_dashboard/            # Shareflex文書管理集計ダッシュボード（本プロジェクトと無関係）
+└── project_cost_analyzer/          # 本プロジェクトの成果物（S01で新規作成）
+    ├── project_cost_analyzer_20260722_01.py 〜 _13.py（最新版は_13、旧版は全て残置）
+    ├── requirements.txt
+    ├── README.md
+    ├── CHANGELOG.md
+    └── run_dashboard.bat           # フォルダ内最新版を自動判定して起動するWindows用バッチ
+
+
+`project_cost_analyzer_20260722_13.py`（最新版）時点の機能:
+
+- **データ読み込み**: サイドバーからExcelファイルをアップロード、またはローカルパス指定で
+  KOB1シートを読み込む。パース結果を`.kob1_cache/`（元ファイルの隣、またはOS一時フォルダ）
+  にpickleキャッシュし、元ファイル未変更時は次回起動を高速化（実測: 初回15秒前後→再起動後
+  2〜3秒）
+- **3タブ構成**:
+  1. 🏛 事業部俯瞰: 全Profit Center（R03/R04/R07/R0N/R0S/R19）横断のサマリー、
+     プロジェクト費/非プロジェクト費比較、期間別コスト推移（棒グラフ・積み上げ切替）、
+     Cost Category別/PM cost category別/Function別/Cost Element別の内訳（棒/円グラフ切替）、
+     プロジェクト別コスト内訳、コスト種別深掘り（下記）
+  2. 🧭 プロジェクト深掘り: 単一プロジェクトのカルテ、バーンチャート、Function別/組織別/
+     コスト種別内訳、外部購買明細（PO単位）、工数投下(Man month, FY2026限定)、
+     コスト種別深掘り（下記）
+  3. 🔧 ファンクション横断: Function（職種）別のプロジェクト別・担当者別チャージ
+- **コスト種別深掘り**（事業部俯瞰・プロジェクト深掘り両タブに搭載）: Function／
+  Func.Category／B4P category／FSI Descriptionの4軸から選び、内訳グラフ→明細テーブルを
+  表示。明細テーブルは金額列を除く全12列でのAND絞り込みフィルタ、列表示/非表示（フィルタと
+  連動）、列選択での昇順/降順並び替え、Excelダウンロードに対応。さらに明細テーブル自体を
+  期間別棒グラフ・軸選択式の棒/円グラフ（上位20/上位10/上位5＋その他切替）で可視化できる
+  （折りたたみ式、既定は閉じた状態）
+- **通貨表示**: 金額は全てUSD表示（`Val/COArea Crcy`はSAP統制領域通貨で元々単一通貨のため
+  換算不要と確認済み）
+- **設定の永続化**: ファイルパス・各種フィルタ・選択中プロジェクト/Function・分類軸・
+  積み上げ/円グラフトグル等を`.pca_settings.json`に保存し、ツール再起動後も復元
+
+
+- 開発ルール（リポジトリ共通、`README.md` より）:
+  - ファイル命名: `ツール名_yyyymmdd_連番.py`
+  - 旧バージョンは削除・上書きせず併存させる
+  - 各ツールフォルダに `CHANGELOG.md` を置き、バージョンごとの変更点を記録する
+- KOB1シートは83,318行・30列（2026-07-22時点のユーザー提供ファイル）。金額列
+  `Val/COArea Crcy`はUSD単一通貨（ブック内「Cost by nature」シートが"Cost in $"と明示、
+  Company Code別金額規模でも裏付け済み）
+- 工数(Man month)・担当者(Resource name)はFY2026分のみ記録（過去年度は金額のみ）
+- Function/Func.Category列はTime Writing(内部労務)行にのみ値が入る。B4P category/
+  FSI Description列はMaterial・Service(外部購買)行を対象にすると意味のある分解になる
+  （内部労務行でこれらを使うとほぼ単一カテゴリに潰れるため）
+- "SSC Package R&D"・"Quality"等の一部Functionは、個人単位のResource nameマッピングが
+  されておらず、Function/Organization/Resource nameが同一値になる「バケット化」データで、
+  KOB1データからは個人単位への分解ができない（92%程度がDocument Header Text空欄で追跡不可）
+- Supabase等の外部サービスへのデータアップロードは、Claude Code Webの自動判定（安全分類器）
+  にブロックされたため採用せず、ローカル完結構成（Excel直接読み込み→ローカル集計→
+  Streamlit表示）を正式な方針として確定
+- ユーザーの実運用パス:
+  `C:\Users\nx023836\Documents\PythonScripts\PM_organizer\ProjectCost\BG ICS Project cost summary_20260722.xlsm`
+- 予算(Budget/Committed)との対比分析（`Project cost against BC`シート等との突き合わせ）は
+  提案のみ行い、実装はスコープ外のまま保留中
+
+
+- S01: セッション管理ファイル導入後、同一セッション内でKOB1コスト分析ツールを新規開発。
+  `_01`（初版）から`_13`（最新版）まで、ユーザーからのフィードバックを反映しながら反復開発。
+  全てコミット・Push済み（詳細は`docs/SESSION_HISTORY.md`参照）。
+
+
+- Streamlitのselectboxウィジェットに、`session_state`経由で値を復元した際にプルダウンの
+  表示ラベルだけが最初の選択肢のまま更新されない癖がある（`_06`で、ウィジェット自体のkeyと
+  永続化keyを分離し`index`を明示計算する方式で回避済み。新規にselectboxを追加する際は
+  同じパターンを踏襲すること）
+- Plotlyの円グラフは既定で反時計回りに配置されるため、`_11`で`sort=False`+
+  `direction="clockwise"`を明示指定して時計回り・大きい順にした（`render_breakdown()`に
+  今後手を入れる際はこの指定を維持すること）
+- `st.dataframe`標準の列非表示アイコン（テーブル右上の目のアイコン等）は、アプリ独自の
+  「表示する列」ウィジェットとは連動しない（Streamlit側がPython側に状態を返さないため技術的に
+  同期不可）。`_12`でその旨を注記表示して対応済み
+
+
+- 実行方法: `project_cost_analyzer/`フォルダで`pip install -r requirements.txt`後、
+  `streamlit run project_cost_analyzer_20260722_13.py`。Windowsでは`run_dashboard.bat`
+  実行でフォルダ内最新版を自動起動
+- テスト方法: 本セッションでは、実データ（KOB1シート）でのコアロジック検証（pandas単体、
+  合計値の突合）と、Streamlitを実起動しPlaywrightでブラウザ経由の実機動作確認（UI操作・
+  グラフ表示・フィルタ・設定復元等）を毎バージョンで実施
+- 自動テストコード（pytest等）は未整備。テストは都度スクラッチで作成・実行し、恒久的な
+  テストスイートとしては残していない
+
+
+- APIキー・パスワード・認証情報はコミットしない。
+- コミット・Pushはユーザーの明示的な指示がある場合、またはセッション終了処理の
+  場合に限る。
+- 既存の他ツール（`po_database_organizer/`, `rtocs_organizer/`,
+  `shareflex_dashboard/` 等）には本プロジェクトの作業で影響を与えない。
+- `.pca_settings.json`と`.kob1_cache/`は環境依存・機密データを含み得るため、
+  `.gitignore`でGit管理対象外にしている（`.pca_settings.json`）か、そもそもリポジトリ外
+  （`.kob1_cache/`は元データファイルの隣かOS一時フォルダ）に配置している。
+
+- **プロジェクト名**: 会議録画 文字起こし・要約ツール開発（meeting-recording-transcription）
+- **プロジェクトの目的**: オンライン会議の画面キャプチャー録画（.mkv形式）から音声を取り出して文字起こしを行い、その内容を要約（議事録化）するツールを開発する。
+- **主な利用者**: 未確認
+- **実行環境**: 未確認
+
+
+このリポジトリは単一プロジェクト専用ではなく、複数の独立したPythonツールを収めたフラットな集合体である。本プロジェクト（会議録画の文字起こし・要約）専用のファイルは本セッション時点でまだ存在しない。
+
+- `README.md`: リポジトリ全体の概要と開発ルール（バージョン管理・命名規則）
+- `CLAUDE.md`: Claude Code Webのセッション管理ルール（本セッションで新規作成）
+- `docs/PROJECT_STATUS.md`: 本ファイル。プロジェクト状態の記録
+- `docs/SESSION_HISTORY.md`: セッション履歴の記録
+- `docs/NEXT_TASK.md`: 次セッションへの引継ぎタスク
+- `HANDOVER_youtube_summary_list.md`: youtube_summary_listプロジェクトの引継ぎ資料（別プロジェクト、本プロジェクトとは無関係）
+- `youtube_summary_list_YYYYMMDD_NN.py`: YouTube動画要約ツール（別プロジェクト、本プロジェクトとは無関係）
+- `po_database_organizer/`: 別プロジェクト（本プロジェクトとは無関係）
+- `rtocs_organizer/`: 別プロジェクト（本プロジェクトとは無関係。Gemini API (`google-generativeai`/`google-genai`) による要約処理の実装例あり）
+- `shareflex_dashboard/`: 別プロジェクト（本プロジェクトとは無関係）
+
+本プロジェクト専用のフォルダ・ファイルは未作成。実装を開始する際は、リポジトリの慣習（ツール専用フォルダ + `README.md` + `CHANGELOG.md` + `requirements.txt` + バージョン管理された命名規則）に従うことが想定されるが、正式決定は未確認。
+
+
+- 現時点で実装済みの機能はない（未着手）。
+- 音声・動画・.mkv・ffmpeg・Whisper等の処理は、リポジトリ内に既存の実装例なし（本プロジェクトが最初の着手となる）。
+
+
+- リポジトリ全体のバージョン管理規約（`README.md`より）:
+  - 旧バージョンファイルは削除・上書きせず併存させる
+  - 各ツールフォルダに`CHANGELOG.md`を置く
+- 本プロジェクト固有の仕様・設計方針（確定分）:
+  - 文字起こしエンジン: Gemini API（クラウド）を採用。音声ファイルをGemini Files APIに渡し、文字起こし + 簡易話者分離を1回のプロンプトで生成する。
+  - 話者分離: 簡易でよい（Gemini任せの「話者A」「話者B」等のラベル付けで十分。専用ダイアライゼーションは導入しない）。
+  - 出力形式: Markdown議事録 + 構造化データ（JSON）を両方出力する（`transcript.md`/`transcript.json`, `summary.md`/`summary.json`）。
+  - 機密性の高い会議向けオプション: **文字起こしのみローカル化**できるようにする。GUI上のラジオボタンで「クラウド（Gemini API）」／「ローカル（faster-whisper等）」を会議ごとに選択可能にする。要約ステップは常にGemini API（文字起こし後のテキストのみ送信）を使用し、要約自体のローカル化（ローカルLLM導入）は行わない。
+  - ローカルモード時の話者ラベル: 省略可（faster-whisper単体では話者分離を行わないため、ローカルモードでは話者ラベルなしの時系列テキストとする。クラウドモードのみ簡易話者分離ラベル付き）。
+  - UI形式: GUI（Tkinter）を採用。既存の`youtube_summary_list`と同様の軽量デスクトップUIとし、Streamlitは採用しない。
+- 検討中の論点（未決定・将来の拡張候補）:
+  - **pyannote.audio等の専用ダイアライゼーション**: 現時点では簡易分離（Gemini任せ）を採用するが、長時間・多人数会議でチャンクをまたいで話者ラベルがずれる等、精度不足が判明した場合の拡張候補として保留。pyannoteは音声の声紋（embedding）に基づきクラスタリングするため同一人物への一貫性は高いが、GPU推奨・HuggingFaceトークン管理・追加ライブラリが必要になり、かつ話者名との紐付けは別途必要。導入する場合は「pyannoteで話者境界を検出→Geminiで文字起こし」のハイブリッド構成を想定。
+
+
+- **完了済み**: セッション管理用ファイル（`CLAUDE.md`, `docs/PROJECT_STATUS.md`, `docs/SESSION_HISTORY.md`, `docs/NEXT_TASK.md`）の初期セットアップ。リポジトリの既存慣習の調査。文字起こしエンジン・話者分離・出力形式・ローカルオプションの範囲・話者ラベル省略可否・GUIフレームワークの全設計方針についてユーザー確認済み（上記4.参照）。
+- **作業中**: なし（設計方針の確認が完了し、実装着手前の状態）。
+- **未着手**: 実装一式（フォルダ作成、音声抽出、Gemini/faster-whisper文字起こし、要約、Tkinter GUI）。
+
+
+- 既知の問題: 未確認（コードが存在しないため該当なし）。
+- 暫定対応: 該当なし。
+- 技術的リスク: 画面キャプチャー録画（.mkv）はファイルサイズが大きくなりやすいため、音声抽出・分割処理の設計が必要になる可能性がある（未確定）。
+
+
+- 起動方法: 未確認（コード未実装）
+- テスト方法: 未確認
+- 必要な環境変数: 未確認（クラウドAPIを使う場合はAPIキー管理が必要になる見込み）
+- 外部サービスへの依存: 未確認（Gemini API等の文字起こし・要約用クラウドサービスへの依存が想定されるが未確定）
+
+
+- 変更禁止事項: 明示的な指示がない限り、`po_database_organizer/`, `rtocs_organizer/`, `shareflex_dashboard/`, `youtube_summary_list_*.py`, `HANDOVER_youtube_summary_list.md` など、本プロジェクトと無関係な既存プロジェクトのファイルを変更しない。
+- セキュリティ上の注意: APIキー・パスワード・認証情報等の秘密情報をコミットしない。会議音声・文字起こし内容には機密情報が含まれ得るため、出力ファイルの取り扱いにも注意する。
+- 後方互換性に関する注意: 既存ツールのバージョン管理規約（旧ファイルを残す運用）を踏襲する。

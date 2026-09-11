@@ -1,0 +1,11 @@
+# BBT レクチャーオーガナイザー 依存パッケージ
+#
+# VERSION 20260817_01 で Gemini API をプロキシ化したため、
+# google-generativeai（非推奨）は不要になりました。新SDK google-genai も使いません。
+# Gemini の呼び出しは共通モジュール PythonScripts\common\gemini_client.py が担当し、
+# そちらが requests を使います。
+
+selenium>=4.0.0
+requests>=2.28.0
+
+# tkinter は Python 標準添付（Windows の公式インストーラに同梱）のため記載しません。

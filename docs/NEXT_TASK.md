@@ -29,6 +29,22 @@
   * **このファイルはまだdiff確認・スタンドアロンテスト・Playwright検証・ユーザーへの納品（SendUserFile）・コミットのいずれも行っていない。**
   * `_20260730_05.py`との差分は、`apply_review_manual_overrides`内の`item["year_month_label"] = "手動追加"`の行を、`completed_date`をパースして`"{年}年{月}月"`を組み立て、パース失敗時のみ`"手動追加"`にフォールバックするロジックに置き換えた1箇所のみ（作業中に確認済みだが、次セッションで改めてdiffを取り直して確認すること）。
 
+- Project Name: 会議録画文字起こし・要約ツール開発（meeting-recording-transcription）
+- Previous Session: S01
+- Next Session Number: S02
+- Recommended Session Title: 会議録画文字起こし・要約ツール開発 S02 - （セッション目的に応じて決定）
+
+
+- 本セッション（S01）がそのまま継続する場合: 文字起こしエンジン・話者分離・出力形式についてユーザーへ確認し、要件を確定させたうえで設計・実装を開始する。
+- 新しいセッションから着手する場合: ユーザーから次のタスク指示を受ける。
+
+
+- S01では、会議録画（.mkv）の文字起こし・要約ツールの構想整理を開始し、リポジトリの既存慣習（Python製、フォルダ単位、Gemini API利用、バージョン管理命名規則）を確認した。
+- 文字起こしエンジン（Gemini API／ローカルWhisper／両対応）、話者分離の要否、出力形式（Markdownのみ／構造化データ併用）についてユーザーへ確認する予定だったが、ツールエラーにより中断している。
+- あわせて、セッション管理用の管理ファイル（`CLAUDE.md`, `docs/PROJECT_STATUS.md`, `docs/SESSION_HISTORY.md`, `docs/NEXT_TASK.md`）の初期セットアップを実施し、その後プロジェクト名の誤り（誤って「Outlookオーガナイザー開発」としていた点）を訂正した。
+- 本プロジェクト本体の要件定義・設計・実装はすべて未着手。
+- リポジトリには既存の無関係な他プロジェクト（`po_database_organizer/`, `rtocs_organizer/`, `shareflex_dashboard/`, `youtube_summary_list_*.py`）が存在するが、いずれも本プロジェクトとは独立している。
+
 ## Scope
 
 ### Files That May Be Changed
@@ -228,6 +244,10 @@ CLAUDE.md, docs/PROJECT_STATUS.md, docs/SESSION_HISTORY.md, docs/NEXT_TASK.md �
 ## Project Name
 
 Onenote オーガナイザー開発
+# NEXT_TASK.md
+
+
+PDF メール解析ツール開発（`weekly_pdf_diff/`）
 
 ## Current Session
 
@@ -305,3 +325,271 @@ Phase 1では変更なし（設計提案のみ）。Phase 3着手後の想定範
 - `bookmarks.json` は現状「単一サイトのID」を前提としたデータ構造。複数
   サーバー対応時はサーバー識別子/テナント識別子フィールドの追加要否と
   後方互換性の設計判断が必要
+# NEXT_TASK.md
+
+> このファイルは、セッション終了処理が指示されるまでは「今回（現在進行中）のセッションの作業内容」を記載する。
+> 次回セッション用への切り替えは、ユーザーがセッション終了処理を明示的に指示したときにのみ行う。
+
+
+緊急連絡ツールの開発
+
+
+S03
+
+
+緊急連絡ツールの開発 S03 - エラー処理・イベントクローズの実装と実拠点での訓練
+
+
+S02でDEV環境に構築・検証した`EQ06_Manual_Drill_DEV`・`EQ05_Status_Summary_DEV`に、
+運用に必要な2つの機能（エラー処理、イベントのクローズ）を追加し、検証用の設定を
+本番向けに切り替えたうえで、実在拠点での小規模訓練を実施する。
+
+
+S02でP1のフロー実装は完了し、DEV環境で以下を実機確認済み。
+
+- 閾値未満／以上の両パターン、イベント記録、チャネル通知、個人カードの送信と回答待機、
+  回答の`EQ_Responses`への保存、被災回答時の上司通知、未回答（タイムアウト）時の正常終了
+- `EQ05`による集計カードの投稿
+
+フローはGUIで組むのではなく、`solution/build_flows_20260901_01.py`が生成したJSONを
+`pac solution pack`→`import`で流し込む方式になっている（3コマンドで再展開できる）。
+実測で確定した仕様・本番切替チェックリストは`power_automate_safety_checkin/solution/README.md`
+に、Gate B/Dの実測値は`power_automate_safety_checkin/evidence/`にある。
+
+現在は検証段階の安全弁が有効になっており、`deploy_config.json`の
+`testRecipientOverride`が設定されている間は、拠点や`IsTest`の値にかかわらず
+個人カード・上司通知の宛先が検証者だけに向く。
+
+
+- エラー処理（`SCOPE_Try`/`SCOPE_Catch`→`EQ_Received_Items`へのログ記録）の実装
+- イベントのクローズ処理（全員回答またはタイムアウト後に`AlertStatus`を`Closed`へ）の実装
+- `EQ_Received_Items`の列内部名の実測と`evidence/`への記録
+- 拠点ごとの実Team/Channel IDの設定
+- 検証用設定の解除（`testRecipientOverride`を空に、架空拠点`NARA`と検証用メンバーの削除）
+- 実在拠点での小規模訓練（まず3名程度）、その後18名訓練
+
+
+- `power_automate_safety_checkin/solution/build_flows_*.py`（新リビジョンを作成）
+- `power_automate_safety_checkin/solution/deploy_config.example.json`
+- `power_automate_safety_checkin/solution/README.md`
+- `power_automate_safety_checkin/evidence/`
+- `power_automate_safety_checkin/cards/`
+- `power_automate_safety_checkin/docs/FLOW_LOGIC_SPEC.md`, `docs/GATE_STATUS.md`
+- `power_automate_safety_checkin/CHANGELOG.md`
+
+
+- `po_database_organizer/`, `rtocs_organizer/`, `shareflex_dashboard/` など既存の他ツールフォルダ
+- `HANDOVER_*.md`, `youtube_summary_list_*.py` など既存の別プロジェクト成果物
+- `emergency_alert_tool/`（S01で完成・パーク済み。指示がない限り変更しない）
+- リポジトリ直下の `README.md`
+
+
+1. `EQ_Received_Items`の列内部名を実測し、`evidence/sharepoint_internal_names.json`へ追記する。
+2. エラー処理を実装する。フロー全体を`SCOPE_Try`で包み、失敗時に`SCOPE_Catch`で
+   `EQ_Received_Items`へ`ProcessingStatus=Error`とエラー内容を記録する。
+3. イベントのクローズ処理を実装する。`LOOP_Each_Member`の完了後に`EQ_Events`の
+   `AlertStatus`を`Closed`へ更新する（SharePointの更新アクションの`operationId`は未実測のため、
+   最小フローで実測してから使う）。
+4. 拠点ごとの実Team/Channel IDを取得し、`deploy_config.json`へ設定する。
+5. 検証用設定を解除する（`testRecipientOverride`を空に、`sites`から`NARA`を削除、
+   `EQ_Config_Members`から`emp98`/`emp99`を削除）。この時点から実名簿へ実際に届くため、
+   **解除前に必ずユーザーの明示的な確認を取る**。
+6. 実在拠点で3名程度の小規模訓練を実施し、回答〜集計〜上司通知までを確認する。
+7. 問題がなければ18名訓練を実施する。
+
+
+- エラー処理が実装され、意図的に失敗させたときに`EQ_Received_Items`へ記録されること
+- イベントが訓練終了後に`Closed`になり、`EQ05`が古いイベントを集計し続けないこと
+- 拠点ごとの実チャネルへ通知が飛ぶこと
+- 実在拠点での3名訓練が成功すること
+- 18名訓練で、対象者数と回答集計が一致すること
+- 既存の他ツール・他機能に意図しない影響がないこと
+
+
+- エラー処理: 存在しないリストGUIDを指定する等で意図的に失敗させ、`EQ_Received_Items`への
+  記録を確認
+- クローズ処理: 訓練終了後に`EQ_Events`の`AlertStatus`が`Closed`になっていること、
+  その後`EQ05`を実行しても当該イベントが集計されないこと
+- 実在拠点での3名訓練（4択それぞれの回答保存、被災時の上司通知）
+- 18名訓練（対象者数と回答集計の一致、未回答者の可視化）
+
+
+- **本番切替後は実在の社員へ実際にカードが届く。** `testRecipientOverride`を空にする
+  操作は、実施前に必ずユーザーの明示的な確認を取ること。S02では、この安全弁が
+  無い状態でのテストにより実在の同僚2名へ訓練カードが誤送信された事故が起きている。
+- SharePointの「項目の更新」アクションの`operationId`・パラメータ形式は未実測。
+  推測で書くとインポート後に検証エラーになるため、最小フローで実測してから使う。
+- `EQ05`をオンにすると15分ごとに動く。`Open`のイベントが残っているとその都度
+  チャネルへ投稿されるため、クローズ処理の実装前に長時間オンにしない。
+- 18名が同時に待機する状態では、`loopConcurrency`（既定20）とPower Automateの
+  同時実行上限（50）に注意する。
+- 自動地震検知（EQ01/EQ02、Gate C）はP2として引き続きスコープ外。
+
+## 開始プロンプト（次セッション用）
+
+緊急連絡ツールの開発 S03 - エラー処理・イベントクローズの実装と実拠点での訓練
+
+対象ブランチ: claude/power-automate-flow-gui-gates-sulkdg
+前回のコミットID: (S02最終コミットのID)
+
+作業開始前に、必ずGitHubの最新状態を取得してください。
+
+## 現在の状態
+S02で、Power Automate版P1のフロー2本（EQ06_Manual_Drill_DEV、EQ05_Status_Summary_DEV）を
+DEV環境に構築し、実機で動作確認済み。フローはGUIではなく
+power_automate_safety_checkin/solution/build_flows_20260901_01.py が生成したJSONを
+pac solution pack → import で流し込む方式。Gate B・Gate Dは実測完了し
+evidence/ に記録済み。現在は testRecipientOverride による誤送信防止が有効で、
+個人カード・上司通知はすべて検証者だけに届く状態。
+
+## 次に行う作業
+1. EQ_Received_Items の列内部名を実測する
+2. エラー処理（SCOPE_Try/Catch → EQ_Received_Items へのログ記録）を実装する
+3. イベントのクローズ処理（AlertStatus を Closed へ更新）を実装する
+   ※SharePointの更新アクションのoperationIdは未実測。最小フローで実測してから使う
+4. 拠点ごとの実Team/Channel IDを設定する
+5. 検証用設定を解除する（実施前に必ずユーザーの明示的な確認を取ること）
+6. 実在拠点での3名訓練、その後18名訓練を実施する
+
+詳細は docs/NEXT_TASK.md を参照。
+
+未確認の事項は推測せず、必ず「未確認」と報告してください。
+PDF メール解析ツール開発 S01 - 前週差分表示（構想の磨き直し・IMPLEMENTATION_PLAN作成）
+
+
+ChatGPT作成の引継ぎ資料（構想）を、実PDFの構造調査結果に基づいて磨き直し、
+`weekly_pdf_diff/IMPLEMENTATION_PLAN.md` を作成する。あわせてPhase 1
+（Weekly境界検出）の実現性を最小コードで検証する。**この段階ではフル実装
+（差分エンジン・PDF描画）には着手しない。**
+
+
+対象PDFは、Weekly ReportメールをOneNoteに集約してエクスポートしたもの（89ページ、
+Weekly15〜16件、2026-04-10〜2026-07-29）。各Weeklyを直前のWeeklyと比較し、
+追加・修正された文言を青太字化した別名PDFを作る、という要件。詳細は
+`weekly_pdf_diff/IMPLEMENTATION_PLAN.md` を参照。
+
+
+- IMPLEMENTATION_PLAN.md の作成（10項目: 構造調査結果／区切り判定／差分抽出／
+  比較方法／青太字反映方法／モジュール構成／テスト計画／リスクと代替案／
+  実装手順／完了判定基準）
+- Phase 1（PDF読み込み・Weekly境界検出）の最小プロトタイプと、合成PDFによる
+  単体テスト
+
+
+- `CLAUDE.md`, `docs/PROJECT_STATUS.md`, `docs/SESSION_HISTORY.md`,
+  `docs/NEXT_TASK.md`（本ファイル）
+- `weekly_pdf_diff/` 配下の新規ファイル一式
+
+
+- 他の既存プロジェクト（`rtocs_organizer/`, `po_database_organizer/`,
+  `shareflex_dashboard/`, `youtube_summary_list_*.py` 等）
+- 元PDF（リポジトリにコミットしない）
+
+
+1. 実PDFをPyMuPDFで解析し、構造・フォント・色・リンク・Weekly境界を確認する（実施済み）
+2. `weekly_pdf_diff/IMPLEMENTATION_PLAN.md` を作成する
+3. Phase 1（Weekly分割・日付抽出）の最小プロトタイプコードを作成する
+4. 合成PDFで単体テストを実施する
+5. 完了条件と既知のリスクを整理し報告する
+
+
+- IMPLEMENTATION_PLAN.md が引継ぎ資料の10項目を満たし、実データ調査結果を反映している
+- Phase 1プロトタイプが合成PDFに対して単体テストをパスする
+- 既存の他プロジェクトに影響がない
+- 実データ（PDF本体・全文抽出テキスト）をリポジトリにコミットしない
+
+
+- Weekly境界検出（ページ番号＋Y座標）の単体テスト（合成PDF）
+- 日付抽出優先順位ロジックの単体テスト
+
+
+- 実データの「Weekly16ブロック／基準日以前の1件」という食い違い（要越智さん確認）
+- 差分色 `#0057B8` と既存ハイパーリンク色 `#0066CC` が近似している
+- PyMuPDFの罫線表検出が実質使えないため、表比較は「セクション＋行」ベースに設計変更
+
+
+Project Cost developer開発
+
+
+S02（未開始）
+
+
+Project Cost developer開発 S02 - KOB1分析ツールの継続改善（次タスク未定）
+
+
+未定。ユーザーから次のタスク指示を受ける。
+
+
+S01で`project_cost_analyzer/`フォルダにKOB1コスト分析用Streamlitダッシュボードを
+新規開発した（最新版: `project_cost_analyzer_20260722_13.py`）。3タブ構成
+（事業部俯瞰／プロジェクト深掘り／ファンクション横断）に加え、Function/Func.Category/
+B4P category/FSI Descriptionの4軸で深掘りできる「コスト種別深掘り」機能、フィルタ・
+並び替え付き明細テーブル、明細の可視化グラフ、設定の永続化などを実装済み。
+詳細は`docs/PROJECT_STATUS.md`・`docs/SESSION_HISTORY.md`のS01記録を参照。
+
+
+未定。ユーザーの次回指示に従う。
+
+参考: S01時点で保留・未着手のまま残っている既知の候補（指示があった場合の対応候補であり、
+ユーザーの指示なしに着手しないこと）:
+
+- 予算(Budget/Committed)との対比分析（`Project cost against BC`シート等との突き合わせ）
+- Cost Elementの独自グルーピング（提案時の案D、未採用）
+- 自動テストスイート（pytest等）の整備
+- ユーザーのWindows実機での`run_dashboard.bat`経由の動作確認結果のフィードバック反映
+
+
+- `project_cost_analyzer/` 配下のファイル一式（新しい変更は次バージョン`_14`以降として
+  旧版を残したまま追加する）
+- リポジトリ直下 `README.md`（必要な場合のみ）
+- `docs/PROJECT_STATUS.md` / `docs/SESSION_HISTORY.md` / `docs/NEXT_TASK.md`
+  （セッション終了時）
+
+
+- `po_database_organizer/`, `rtocs_organizer/`, `shareflex_dashboard/`,
+  `youtube_summary_list_*.py`, `HANDOVER_*.md` など、本プロジェクトと無関係な既存ツール
+
+
+ユーザーから次のタスク指示を受ける。
+
+
+未定（次回タスク指示に応じて設定する）。
+
+
+未定。ただしS01の慣行に倣い、実データでのコアロジック検証とStreamlit実起動＋
+Playwrightでの実機確認を継続することが望ましい。
+
+
+- Streamlitのselectboxで`session_state`経由の値復元を行う際、プルダウンの表示ラベルが
+  更新されない癖がある（`_06`で対処済みのパターンを新規箇所にも踏襲すること）
+- Plotly円グラフは既定で反時計回りのため、新規に円グラフを追加する際は
+  `sort=False`+`direction="clockwise"`の指定を忘れないこと
+- `st.dataframe`標準の列非表示機能はアプリ独自の「表示する列」と連動しない
+  （Streamlit側の制約のため回避不可、注記で対応済み）
+- 未定（要件確定後、本プロジェクト専用の新規フォルダ・ファイルを作成する見込み。既存ファイルへの変更は想定していない）
+
+
+- `po_database_organizer/` 配下一式
+- `rtocs_organizer/` 配下一式
+- `shareflex_dashboard/` 配下一式
+- `youtube_summary_list_*.py`, `HANDOVER_youtube_summary_list.md`
+- （上記は本プロジェクトと無関係な既存プロジェクトのため、明示的指示がない限り変更しない）
+
+
+1. 文字起こしエンジン（Gemini API／ローカルWhisper／両対応）についてユーザーへ確認する。
+2. 話者分離の要否・精度レベルについてユーザーへ確認する。
+3. 要約の出力形式（Markdownのみ／構造化データ併用）についてユーザーへ確認する。
+4. 上記が確定した後、実装方針を設計し、実装を開始する。
+
+
+- 未定（要件確定後に定める）
+
+
+- 未定（実装内容確定後に定める）
+
+
+- 文字起こしエンジン・話者分離・出力形式が未確認であり、推測で実装を進めるべきではない。
+- 画面キャプチャー録画（.mkv）はファイルサイズが大きくなりやすく、音声抽出・分割処理の設計が必要になる可能性がある。
+
+
+会議録画文字起こし・要約ツール開発を再開します。`CLAUDE.md`, `docs/PROJECT_STATUS.md`, `docs/SESSION_HISTORY.md`, `docs/NEXT_TASK.md` を確認しました。文字起こしエンジン・話者分離・出力形式について確認させてください。
