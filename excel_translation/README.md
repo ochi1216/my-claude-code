@@ -4,11 +4,11 @@ Excelファイル(`.xlsx` / `.xlsm` / `.xls`)のセルをGemini APIで翻訳し�
 
 ## 最新版
 
-`excel_translation_20260911_04.py`
+`excel_translation_20260911_05.py`
 
 Excelファイルのセルに加え、フローチャート等の**図形(AutoShape)内の文字も翻訳**する。
 
-バージョンごとの変更点は [`CHANGELOG.md`](CHANGELOG.md) を参照。旧版(`excel_translation_20260616_03.py` / `excel_translation_20260812_01.py` / `excel_translation_20260817_01.py` / `excel_translation_20260911_01.py` / `excel_translation_20260911_02.py` / `excel_translation_20260911_03.py`)は削除せず残してある。**`_20260911_02`・`_20260911_03`はいずれも実データで図形保存時にファイル破損を起こす不具合があるため使用しないこと**（`_20260911_04`で修正済み。ただし実機での再確認待ち）。
+バージョンごとの変更点は [`CHANGELOG.md`](CHANGELOG.md) を参照。旧版(`excel_translation_20260616_03.py` / `excel_translation_20260812_01.py` / `excel_translation_20260817_01.py` / `excel_translation_20260911_01.py` / `excel_translation_20260911_02.py` / `excel_translation_20260911_03.py` / `excel_translation_20260911_04.py`)は削除せず残してある。**`_20260911_02`・`_20260911_03`・`_20260911_04`はいずれも、画像を含むシートの図形を復元する際に`<drawing>`要素が二重になり、Excelで「内容に問題が見つかりました」という修復ダイアログが出る不具合があるため使用しないこと**（`_20260911_05`で修正済み。実際に破損を起こした資料ファイルそのもので修正前後を比較検証済み）。
 
 ## セットアップ
 
@@ -34,7 +34,7 @@ PythonScripts\
 │   └── gemini_client.py
 └── excel\
     └── excel_transrate\
-        └── excel_translation_20260911_04.py
+        └── excel_translation_20260911_05.py
 ```
 
 `GEMINI_COMMON_DIR` 未設定時は、スクリプトから見て 1つ上 → 2つ上 → 3つ上 の順に
@@ -61,7 +61,7 @@ PythonScripts\
 ## 実行
 
 ```
-python excel_translation_20260911_04.py
+python excel_translation_20260911_05.py
 ```
 
 翻訳対象のExcelファイルは事前に閉じておくこと。出力は
@@ -78,13 +78,20 @@ python excel_translation_20260911_04.py
 ## テスト
 
 ```
-python tests/test_excel_translation_20260911_04.py
+python tests/test_excel_translation_20260911_05.py
 python tests/test_excel_translation_20260817_01.py
 ```
 
 偽の `gemini_client` を `sys.modules` へ注入し、`generate_advanced()` へ渡るpayloadと
 レスポンス契約を検証する(Windows・Excel・実際のGemini APIに依存しない)。
 `tkinter` / `pandas` はテスト側でスタブ化するため未導入の環境でも実行できる。
-`_20260911_04` のテストは `openpyxl` を実際に使い、図形(Shape)の保持・翻訳を検証する。
+`_20260911_05` のテストは `openpyxl` を実際に使い、図形(Shape)の保持・翻訳を検証する。
 `libreoffice-calc` が導入された環境では実際にPDF変換して図形が描画されることまで
 確認する(無ければそのテストのみ自動的にスキップされる)。
+
+`Pillow` が導入された環境では、`<drawing>` 要素が二重になる不具合(`_20260911_05`で修正)
+の回帰テストを、openpyxlを実際に通す形でも実行する。openpyxlが画像を保持するのは
+Pillowがある場合だけで、無い場合はこの状態自体が発生しないため、未導入環境では
+自動的にスキップされる(Pillowに依存しない合成版の回帰テストは常に実行される)。
+**本ツール自体はPillowを必要としない**(図形・画像の復元は元ファイルから直接行うため、
+Pillowの有無にかかわらず保持される)。
