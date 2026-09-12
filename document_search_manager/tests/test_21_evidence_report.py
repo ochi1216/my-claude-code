@@ -146,8 +146,9 @@ with tempfile.TemporaryDirectory() as tmp:
     check("まだ有効なCookieは残り日数を出す", "残り" in text)
     # この見本には federated 宛の有効なCookieが含まれるため、判定は「有効」側。
     # 「期限切れ」「ログイン未完了」の判定は H5 で個別に確認する。
-    check("有効なCookieがあるときは、その旨を判定として出す",
-          "まだ有効です" in text, text[text.find("【判定】"):][:300])
+    check("検索に使えるCookieがそろっていれば、その旨を判定として出す",
+          "取得できています" in text and "両方がそろっています" in text,
+          text[text.find("【判定】"):][:300])
     check("検索に使うCookieには印を付けて区別する",
           "★検索に使う" in text)
 
@@ -258,10 +259,17 @@ with tempfile.TemporaryDirectory() as tmp:
          "expires": PAST},
     ])
     text = run(root)
-    check("★実データの構成で「ログイン自体が完了していない」と判定する",
-          "ログイン自体が完了していない" in text, text[text.find("【判定】"):][:400])
+    check("★実データの構成で、原因の候補を2つとも示す",
+          "ログイン自体が完了していない" in text
+          and "Cookieを取り出す前に閉じられた" in text,
+          text[text.find("【判定】"):][:600])
     check("期限切れだけが理由だと**言わない**（以前の誤判定）",
           "期限切れだけで" not in text and "ログインし直せば直る" not in text)
+    check("片方に断定しない（履歴で見分けるよう促す）",
+          "どちらか" in text and "履歴で見分けられます" in text,
+          text[text.find("【判定】"):][:600])
+    check("セッションCookieであることが原因になり得ると説明する",
+          "ウィンドウを閉じた時点でメモリから消えます" in text)
     check("Microsoft側の認証までは通っていたことを示す",
           "Microsoft側の認証までは通っていた" in text)
     check("検索に使えるCookieの件数を0と数える",
@@ -299,8 +307,8 @@ with tempfile.TemporaryDirectory() as tmp:
          "domain": "dspace.plm.nexperia.com", "expires": FUTURE},
     ])
     text = run(root)
-    check("有効なCookieがあれば、その旨と別の可能性を示す",
-          "まだ有効です" in text and "無効化されている可能性" in text,
+    check("dspaceだけでfederatedが無ければ、検索を1回する必要があると伝える",
+          "取得できています" in text and "1回検索してから閉じる" in text,
           text[text.find("【判定】"):][:300])
 
 check.finish()

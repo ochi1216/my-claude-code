@@ -121,107 +121,110 @@
 * プロジェクト名: Document Search Manager 開発
 * プロジェクトの目的: 社内の3つのドキュメント管理系（SharePoint / Nexus(Shareflex) /
   Enovia(3DEXPERIENCE)）を、**同一キーワードで横断検索**するツール
-  (`document_search_manager/`) の開発。画面は系統ごとの**タブ**で、
-  `0. All`（既定）/ `1. SharePoint` / `2. Nexus` / `3. Enovia` を切り替える。
+  (`document_search_manager/`) の開発。**3系統すべて実装済み。**
+  さらに、**AIによる文書要約**と**フォルダ配下の再帰探索**を備える。
 * 主な利用者: 越智さん本人（Japan Site Manager）。必要な社内文書がどこにあるか
   分からず、3系統を個別に探し回っている状況の解消が動機。
 * 実行環境: 会社PC（Windows）＋ Python。`http://127.0.0.1:5020` のFlask画面。
-  開発・検証環境（Claude Code Web、Linuxコンテナ）では会社のSharePointに
-  アクセスできないため、Graph API疎通・リンク到達性・一括ダウンロードの実動作は
-  毎回越智さんに実機確認を依頼している。
+  開発・検証環境（Claude Code Web、Linuxコンテナ）では社内システムに
+  アクセスできないため、実動作は毎回越智さんに実機確認を依頼している。
+* **社外（自宅等）から会社PCで使う場合、Enoviaは会社VPNへの接続が必要。**
 
 ## 2. Repository Structure
 
 * `document_search_manager/`
-  * **最新リビジョン: `document_search_manager_20260903_16.py`**（約2,900行）
-  * `old/`: 旧リビジョン `_20260903_01.py` 〜 `_20260903_15.py`（削除せず保持）。
-    ツール起動時に自分より古い版を自動でここへ退避する。リポジトリ側の構成も
-    一致させてあるため `git pull` で旧版が復活して重複することはない。
-  * `README.md`: 利用者向け（導入手順・画面の使い方・設定項目・トラブルシュート）
-  * `CHANGELOG.md`: 変更履歴（`## VERSION 20260903_01`〜`_16`）
-  * **`DESIGN_NOTES.md`**: 設計メモ・調査記録。**次に改修するときは最初にここを読む**
-  * `config.example.json` / `requirements.txt` / `run_document_search_manager.bat`
-  * `tests/`: 検証ハーネス（570項目、`test_01`〜`test_14`）＋
-    `ui_check.py`（ブラウザ操作34項目）
+  * **最新リビジョン: `document_search_manager_20260911_02.py`**（約6,560行）
+  * `old/`: 旧リビジョン `_20260903_01` 〜 `_20260911_01`（計27本。削除せず保持）。
+    ツール起動時に自分より古い版を自動でここへ退避する。
+  * `tools/enovia_evidence_report.py`: **Enovia認証の調査用**（読み取り専用）。
+    保存済みCookieとブラウザ履歴から、認証の時系列と状態を復元する。
+    **Cookieの値は一切出力しない**ため、そのままITへ共有できる。
+  * `README.md` / `CHANGELOG.md` / `DESIGN_NOTES.md` / `config.example.json` /
+    `requirements.txt` / `run_document_search_manager.bat`
+  * `tests/`: 検証ハーネス（**1038項目**、`test_01`〜`test_23`）＋
+    `ui_check.py`（ブラウザ操作**112項目**）
 * `.claude/skills/document-search-tool-dev/SKILL.md`: このツールの開発手順スキル
 
 ## 3. Current Functions
 
 Flask画面（ダークテーマ bg `#1a1a2e` / accent `#e94560`）の構成:
 
-1. **検索**: キーワード入力、**「タイトルだけを検索する」チェックボックス（既定オン）**、
-   取得件数（関連度上位 10/25/50/100/200/500 件）
-2. **系統タブ**: `0. All` / `1. SharePoint` / `2. Nexus` / `3. Enovia`。
-   **タブごとに表の列構成が切り替わる**（SharePointとNexusでは持つ情報が違うため）。
-   列構成は「選択したタブ」ではなく「実際に検索した系統」に追従する。
-3. **診断ボタン3種**:
-   * 疎通診断 … 各系統が利用可能かを最小リクエストで確認
-   * **Nexus検索診断** … 同じキーワードを5通りのKQLで投げ、該当件数を実測比較
-   * **Nexus列診断** … 先頭1件のNexusの全列（内部名 = 値）と、画面の列との対応を表示
-4. **結果一覧**（タブ別の列構成）
-   * `0. All`: ソース / タイトル / 選択 / 作成者 / 最終更新日 / 種別 / サイト
-   * `1. SharePoint`: 上記＋フォルダ（ソース列なし）
-   * `2. Nexus`: 選択 / Document Number / OldSystemIdentifier / Document Title /
-     Doc Author / Doc Owner / Applicable To / Department / 最終更新日 /
-     **有効期限** / 種別 / Nexusで開く
-   * ソート（昇順→降順→解除）、列ごとの絞り込み（日付範囲／複数選択）、
-     一括ZIPダウンロード
-   * **有効期限は「期限切れ」「まもなく」のバッジ付き**。日付から判定する
-   * Index列はセルにマウスを載せると**値の出所（Shareflexの内部列名）**が出る
-5. **出力**: Excel（セル自体がハイパーリンク、オートフィルタ付き）/ CSV。
-   **Nexusの結果なら標準Index＋有効期限＋期限状態の列構成で出力**する
-6. **状態の保持**: 前回の検索キーワード・対象タブ・件数・タイトル限定の有無・
-   並び順・絞り込み条件を復元する（結果は保存せず自動で再検索する）
+1. **検索**: キーワード、タイトル限定（既定オン）、**前方一致**、
+   **フォルダのみを検索**（SharePointタブ）、取得件数
+2. **系統タブ**: `0. All` / `1. SharePoint` / `2. Nexus` / `3. Enovia` /
+   **`4. フォルダ探索`**（探索するまで非表示）。タブごとに列構成が切り替わる
+3. **診断ボタン5種**: 疎通診断 / Nexus検索診断 / Nexus列診断 /
+   Enovia検索診断 / **フォルダ探索診断**
+4. **Enoviaにログイン**: Edgeを起動して手動ログイン。
+   **ログイン → 画面で1回検索 → ウィンドウを閉じる**の順が必須
+5. **結果一覧**: ソート、列ごとの絞り込み、一括ZIPダウンロード、タブのキャッシュ、
+   「さらに取得」
+6. **AI要約**（`.docx` / `.pptx` / `.xlsx` / `.xlsm` / `.pdf`）:
+   ①Executive Summary ②章立てと概要 ③Japan Site Managerへの示唆。
+   上限超過時は実行前に確認。**図面が主体のPDFは要約せず理由を表示**
+7. **フォルダ探索**（SharePointのみ）: フォルダを複数選択して配下を再帰的に一覧化
+   （深さ5階層 / 2000件）。ツリー表示と一覧表示。探索結果に対しても
+   ZIP取得・Excel/CSV出力・要約が使える
+8. **出力**: Excel（ハイパーリンク・オートフィルタ付き）/ CSV
+9. **状態の保持**: 前回の検索条件・並び順・絞り込みを復元
 
 ## 4. Confirmed Specifications
 
-* **新規のEntra ID権限を申請しない**（越智さんの明確な指示）。既存の
-  `po_database_organizer` と同一アプリ登録を流用し、スコープは `Sites.Read.All` のみ。
-  **Nexus対応でも新規権限は発生しなかった。**
-* `tenant_id` / `client_id` は `config.json` が空なら既存ツールから自動借用する。
-  越智さんの環境では
-  `C:\Users\nx023836\Documents\PythonScripts\SharePoint\PO_Matrix_manager\config.json`
-  を `credentials_from` で参照している。
-* **Nexus検索は `path:` でDocumentsフォルダに限定する。** 実測で確定
-  （`validation plan`: フォルダ限定117件 ≒ Nexus画面116件 / サイト限定297件）。
-* **Nexusの標準Indexは、Graphのリスト項目 `fields` から取る。**
-  `/shares/{token}/driveItem?$expand=listItem($expand=fields)`。
-  検索マネージドプロパティ名を推測しないため。内部列名は実機で確定済み:
-  `qmDocumentNo` / `nxOldDocumentNo` / `qmDocumentTitle` / `qmEditor`(Doc Author) /
-  `qmConfirmer`(Doc Owner) / `nxApplicable` / `nxFunctionalOrg` / `qmValidUntil`。
-* **「Nexusで開く」は列フィルタ `@qmDocumentNo=<番号>` で1件に絞り込む。**
-  全文検索（`q=`）は、他文書の本文にある参照文献番号にも当たるため使わない。
-* **有効期限は日付（`qmValidUntil`）から判定する。** Shareflexの `qmStatus` と
-  `qmStatusEn` は食い違うことがあるため、参考としてツールチップに添えるに留める。
-* **重複排除はNexusを実際に検索したときだけ行う。** `1. SharePoint` 単独でも
-  除外すると、Nexus配下の文書がどこにも出なくなるため。
-* **検索結果のフォルダは除外せず「種別=フォルダ」として区別する**（案A）。
-* 拡張子とみなす条件は「英字で始まる1〜10文字の英数字」（例外 `7z`）。
+* **新規のEntra ID権限を申請しない**（越智さんの明確な指示）。
+  スコープは `Sites.Read.All` のみ。**要約・フォルダ探索でも新規権限は発生していない。**
+* **Enoviaの検索の実体**は `POST federated.plm.nexperia.com/federated/search`
+  （Exalead系JSON API）。認証はCookieのみ。**タイトル限定検索は非対応**（実機確認）。
+  **一括ZIPダウンロードの対象外**（WebPublish URLが文書の状態次第で拒否される）。
+* **Enoviaのセッションはすべてセッションcookie**（`JSESSIONID` / `SERVERID` 等）。
+  ウィンドウを閉じると消えるため、**開いている間に取得する**必要がある。
+  また `federated` は `dspace` とは別のセッションで、**画面で1回検索して初めて発行**される。
+* **要約のAI呼び出しは共通モジュール `gemini_client.py`**（会社PC直接→自宅PC
+  プロキシへ自動フォールバック）。**M365 Copilotは採用しない**（新規権限が必要なため）。
+* **要約の見出しは形式を問わず `# ` で統一**する（docx=見出し / pptx=スライド /
+  xlsx=シート / pdf=しおりまたはページ）。プロンプトを形式ごとに分岐させないため。
+* **図面が主体のPDFは要約しない。** 文末記号の密度と1行あたりの文字数の**両方**が
+  閾値を下回るときだけ図面と判定する（片方だと箇条書き・表を誤判定する）。
+* **フォルダ探索は幅優先**。上限で打ち切られても浅い階層は全部見えている状態で終わる。
+* **探索結果は検索結果と同じ `SearchResult` 型**で組み立て、既存機構を再利用する。
+* Nexus関連の確定事項（`path:` 限定、標準Indexの取得方法、有効期限の判定、
+  「Nexusで開く」の列フィルタ方式、重複排除の条件）はS02から変更なし。
 * 維持すべき方針: 旧バージョンを削除しない／認証・検索ロジックに不用意に触らない／
-  コミット・Pushは明示的な指示があったときのみ。
+  **推測で実装に入らない**（不明点は診断を先に作って実機で確定させる）。
 
 ## 5. Current Status
 
-* **Phase 1（SharePoint全社検索）完了。会社PCで実動作を確認済み。**
-* **Phase 2（Nexus検索）＋ Phase 2.5（タブ構成・標準Index・有効期限）完了。**
-  会社PCで、件数の一致・Index 7列の表示・Nexus画面との突き合わせ・
-  **有効期限の表示と期限切れバッジ**まで確認済み。
-* **Phase 1 から残っていた実機未確認2件（フォルダリンクの到達性、
-  一括ダウンロードの成否）も確認済み。未確認事項は無くなった。**
-* ブランチ: `claude/document-search-manager-phase2-nexus-d0tg0m`。
-  コミット済み最新: `5cd128f`。本体は `_20260903_16.py`。
-* 検証: `python tests/run_tests.py` で **570項目すべて合格**。
-  `tests/ui_check.py`（Playwright）で **34項目すべて合格**。
-* 未着手: **Phase 3（Enovia）**、Phase 4（3系統統合の磨き込み）
+* **Phase 1〜3（SharePoint / Nexus / Enovia）すべて完了。会社PCで実動作を確認済み。**
+* **AI要約機能・フォルダ探索機能も実装済み。2026-09-11に会社PCで実機確認、全て合格。**
+  * フォルダ探索: フォルダ10件 / ファイル22件を取得
+  * 図面PDFの判定: 実際の回路図PDFで判定、通常PDFの誤判定も無し
+  * `.pdf` の要約: 動作確認（PyMuPDF導入済み）
+  * Enovia検索: `validation` で10件（該当6927件）
+* ブランチ: `claude/document-search-enovia-phase3-5p33ci`。
+  コミット済み最新: `068bda2`。本体は `_20260911_02.py`。
+* 検証: `python tests/run_tests.py` で **1038項目すべて合格**。
+  `tests/ui_check.py`（Playwright）で **112項目すべて合格**。
+* 未着手: 探索結果の**一括要約**、Enoviaの**再発防止**（下記6参照）
 
 ## 6. Open Items
 
-* **SharePoint / Nexus 側に実機未確認の項目は残っていない。**
-  Phase 1 のフォルダリンク・一括ダウンロード、v20260903_16 の有効期限表示は
-  いずれも会社PCで確認済み（2026-09-03）。
-* Phase 3（Enovia）は**未確認事項が残る**。実装前に、Enoviaでの検索時の
-  F12キャプチャ（Network → Fetch/XHR）を越智さんに依頼する必要がある。
-  会社PCでPlaywrightが使えるかも未確認。
+* **9/4〜9/11のEnovia認証障害は、原因不明のまま自然復旧した。IT調査が継続中。**
+  * 障害期間は `2026-09-04 08:42 〜 2026-09-11 17:51`（両端とも実測）。
+  * Microsoft側の認証は成功しており、失敗は**3DPassport側のSAML処理**。
+  * 詳細と、ITへ渡すべき実測時刻は `DESIGN_NOTES.md` 3-8 に記録済み。
+  * **再発の可能性が残るため、調査依頼をこちらから取り下げないこと。**
+* **Enovia検索拡張（Document以外の項目）が次の主題**（S04・越智さん指示）。
+  クエリは既に191種類すべての型を要求しており、**応答にはDocument以外も
+  含まれている**。`enovia_document_type_only`（既定true）が
+  `_item_to_result()` で捨てているだけで、**新しいAPI連携は不要**。
+  ただし、Document以外の型でどの属性が返るかは**未確認**。
+* **探索結果の一括要約**（越智さん承認済み・未実装）。
+* **Enoviaの再発防止**（未実装）: Cookie有効期限の画面表示 / 認証ログの記録
+  （`logs/enovia_auth.log`、値は書かない）/ ログイン待機中の表示と中止ボタン /
+  VPN接続直後のタイムアウト時の案内。
+* 会社PCのローカル `main` に、リモートに無いマージコミットが2つある。
+  独自の作業は含まれておらず、巻き戻して差し支えないことは確認済み（未実施）。
+* リポジトリ直下の不要ファイル `tatus`、`ppt_translator/` と `word_translator/` の
+  `translation_debug.log` が未追跡のまま。`.gitignore` への追記が必要。
 * Nexusで未使用のまま把握できている列（必要になれば追加可能）:
   `qmStatusEn` / `qmStatus` / `qmValidFrom` / `qmRevisionNo` / `qmRevisionReason` /
   `qmReviewer` / `qmProcess1` / `qmConfidentialLevel` / `qmRecordNo`。
