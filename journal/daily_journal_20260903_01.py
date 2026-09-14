@@ -2,7 +2,24 @@
 """
 daily_journal_20260903_01.py
 学びジャーナル - ホットキー起動の入力ポップアップUI
-Version: 0.44.0
+Version: 0.45.0
+
+v0.45.0での変更点：
+会議分類の声かけを、本体のJournalポップアップをいきなり最前面に開く
+方式から、フォーカスを奪わない小さな通知（_MeetingNoticeToast、画面
+右下）を先に出す2段階方式に変更した。Outlook予定表の判定・Teams
+ウィンドウ確認（scheduler.py v0.9.0）の両方をすり抜けて、会議が
+実際にはまだ延長中だったにもかかわらず本体ポップアップが会議中に
+出現してしまう実害が報告されたための対応。通知はoverrideredirect＋
+topmostで表示はするが、focus_force()/lift()を一切呼ばないため、
+万一会議中に出てしまっても今操作している画面のフォーカスを奪わない。
+通知をクリックすると初めて本体ポップアップ（分類バナー付き）を開く。
+✖で明示的に閉じる、または20秒操作が無ければ自動的に消え、いずれも
+次にJournalを開いた時にまた尋ねる（本体ポップアップの「後で」と
+同じ扱い）。scheduler.py側の声かけタイミング判定ロジックは無変更で、
+run()内でstart_meeting_sync_loopに渡すコールバックだけを、本体
+ポップアップを直接開くqueue_popup_triggerから、この通知を出す
+_show_meeting_notice()に差し替えた
 
 v0.44.0での変更点：
 「魂のひれぶり」の感情ボタンに「無」（何も無い・凪の状態）を追加し、
@@ -368,7 +385,7 @@ HOTKEY = "ctrl+shift+j"
 # する）専用のホットキー。Windows標準では未使用で、他アプリとの衝突も
 # 確認されていない組み合わせを選んだ
 HOTKEY_FOCUS = "ctrl+shift+t"
-VERSION = "0.44.0"
+VERSION = "0.45.0"
 
 # ファイル名（daily_journal_yyyymmdd_NN.py）そのものがバージョン識別子を
 # 兼ねる運用のため、ここに手で書いた文字列を置くと更新を忘れて古いまま
@@ -2490,6 +2507,100 @@ class PopupWindow:
             print(f"❌ 読みの入力を開けませんでした: {e}")
 
 
+class _MeetingNoticeToast:
+    """
+    会議分類の「声かけ」を、フォーカスを奪わない小さな通知として画面右下に
+    出す。分類そのものはこの通知からは行わず、クリックされた時だけ通常の
+    Journalポップアップ（分類バナー付き）を開く。一定時間操作が無ければ
+    静かに消え、次にJournalを開いた時にまた尋ねる（本体ポップアップの
+    「後で」ボタンと同じ扱い。scheduler.py側の_already_nudged_rowsにより、
+    同じ会議へこのプロセス内で再度通知されることも無い）。
+
+    背景：本体のJournalポップアップは-topmost属性に加えfocus_force()で
+    最前面に割り込む作りになっている。Outlook予定表の判定・Teams
+    ウィンドウ確認の両方をすり抜けて、会議が予定より延長されている
+    最中に本体ポップアップが直接開いてしまう実害が発生したため、
+    「気づいた時に自分から開く」控えめな通知を間に挟むことにした。
+    この通知はfocus_force()を一切呼ばないため、万一会議中に出てしまっても
+    今操作している画面（Teamsの会議画面等）のフォーカスを奪わない
+    """
+    WIDTH = 300
+    HEIGHT = 64
+    TIMEOUT_MS = 20000  # この時間操作が無ければ、開かないまま静かに消える
+
+    def __init__(self, root: tk.Tk, subject: str, on_open) -> None:
+        self.root = root
+        self.subject = subject
+        self.on_open = on_open
+        self.window = None
+        self._after_id = None
+
+    def show(self) -> None:
+        win = tk.Toplevel(self.root)
+        self.window = win
+        # タイトルバー・タスクバー項目の無い、通知然とした見た目にする
+        win.overrideredirect(True)
+        # 会議中で他のウィンドウ（Teams等）が全画面に近い状態でも見える
+        # ようにtopmostは付けるが、focus_force()/lift()は呼ばない。
+        # topmostは「常に手前に描画される」だけでフォーカスは奪わない
+        win.attributes("-topmost", True)
+        win.configure(
+            bg=BG_COLOR, highlightthickness=1, highlightbackground=MEETING_CLASSIFY_BG,
+        )
+
+        screen_w = win.winfo_screenwidth()
+        screen_h = win.winfo_screenheight()
+        x = screen_w - self.WIDTH - 20
+        y = screen_h - self.HEIGHT - 60  # タスクバーに重ならないよう余白を取る
+        win.geometry(f"{self.WIDTH}x{self.HEIGHT}+{x}+{y}")
+
+        body = tk.Frame(win, bg=BG_COLOR, cursor="hand2")
+        body.pack(fill="both", expand=True, padx=1, pady=1)
+
+        text = "📅 会議の分類ができます"
+        if self.subject:
+            text += f"\n{self.subject}"
+        label = tk.Label(
+            body, text=text, bg=BG_COLOR, fg=TEXT_COLOR,
+            font=tkfont.Font(family="Yu Gothic UI", size=9),
+            justify="left", anchor="w", cursor="hand2",
+        )
+        label.pack(side="left", fill="both", expand=True, padx=(12, 4), pady=6)
+
+        close_btn = tk.Label(
+            body, text="✖", bg=BG_COLOR, fg=PLACEHOLDER_COLOR,
+            font=tkfont.Font(family="Yu Gothic UI", size=9), cursor="hand2",
+        )
+        close_btn.pack(side="right", padx=(0, 10))
+
+        for widget in (body, label):
+            widget.bind("<Button-1>", self._on_click_open)
+        close_btn.bind("<Button-1>", self._on_click_dismiss)
+
+        self._after_id = self.root.after(self.TIMEOUT_MS, self._dismiss)
+
+    def _on_click_open(self, _event=None) -> None:
+        self._close()
+        self.on_open()
+
+    def _on_click_dismiss(self, _event=None) -> None:
+        self._close()
+
+    def _dismiss(self) -> None:
+        self._close()
+
+    def _close(self) -> None:
+        if self._after_id is not None:
+            try:
+                self.root.after_cancel(self._after_id)
+            except Exception:
+                pass
+            self._after_id = None
+        if self.window is not None and self.window.winfo_exists():
+            self.window.destroy()
+        self.window = None
+
+
 def poll_trigger_queue(root: tk.Tk, popup: "PopupWindow") -> None:
     """
     トリガーキューを定期的に確認し、通知があればポップアップを表示する。
@@ -2528,8 +2639,26 @@ def run() -> None:
 
     # Outlook連携：終了した会議の自動記録／分類待ちの声かけ。既存の定時
     # リマインドループ(start_scheduler_loop)とは独立させてあるため、
-    # Outlook側で何か問題が起きても本来のリマインド機能には影響しない
-    start_meeting_sync_loop(root, queue_popup_trigger)
+    # Outlook側で何か問題が起きても本来のリマインド機能には影響しない。
+    #
+    # 声かけ自体は本体のJournalポップアップを直接開かず、フォーカスを
+    # 奪わない小さな通知(_MeetingNoticeToast)を先に出す。Outlook予定表の
+    # 判定・Teamsウィンドウ確認をすり抜けて会議が実際にはまだ延長中
+    # だった場合でも、通知はfocus_force()を呼ばないため画面を占有しない
+    def _show_meeting_notice() -> None:
+        try:
+            pending = get_pending_meetings()
+        except Exception as e:
+            print(f"⚠️ 分類待ちの会議一覧の取得に失敗しました: {e}")
+            pending = []
+        subject = pending[0]["subject"] if pending else ""
+        try:
+            _MeetingNoticeToast(root, subject, on_open=queue_popup_trigger).show()
+        except Exception as e:
+            print(f"⚠️ 会議分類の通知表示に失敗しました。通常のポップアップで代替します: {e}")
+            queue_popup_trigger()
+
+    start_meeting_sync_loop(root, _show_meeting_notice)
 
     # 起動直後に一度ポップアップを表示し、本日最初のチェックイン（基準点）を
     # すぐに促す。Windowsスタートアップから自動起動された場合、次の定時
