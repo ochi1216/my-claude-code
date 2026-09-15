@@ -13,14 +13,20 @@ forecasts.json に一括登録する（1回実行するだけ）。
   （二重実行しても重複しない）
 - 登録後にこのファイルを残しておく必要はないが、消さなくても害はない
 
-Version: 1.0.0
+Version: 1.1.0
+
+v1.1.0での変更点：
+コード本体をapp/フォルダに集約する整理に伴い、forecast.pyの置き場所が
+app/配下になったため、sys.pathへの追加先をSCRIPT_DIR自身からSCRIPT_DIR/app
+に変更した。登録内容自体は無変更
 """
 
 import os
 import sys
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, SCRIPT_DIR)
+APP_DIR = os.path.join(SCRIPT_DIR, "app")
+sys.path.insert(0, APP_DIR)
 
 import forecast
 

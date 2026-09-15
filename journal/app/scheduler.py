@@ -2,7 +2,17 @@
 """
 scheduler.py
 学びジャーナル - 定時強制リマインド＋ログオン時自動起動登録
-Version: 0.9.0
+Version: 0.9.1
+
+v0.9.1での変更点：
+コード本体をapp/フォルダに集約する整理に伴い、register_startup_task()/
+create_startup_batch()内でrun_latest.pyの絶対パスを「自分(scheduler.py)
+と同じ階層」として計算していた箇所を、「1つ上の階層」に修正した
+（run_latest.py自身はapp/へ移動せず、これまで通りjournal/直下に
+置いたままのため）。現状どちらの関数もどこからも呼ばれていない
+（setup_autostart.pyが独自にバッチファイルを作成しており、こちらは
+未使用のまま残っている）が、放置すると潜在的なパスバグになるため
+あわせて修正した。それ以外の変更は無い
 
 v0.9.0での変更点：
 分類ポップアップの声かけ判定(check_pending_meeting_classification)に、
@@ -313,7 +323,9 @@ def write_startup_batch_file(
 
     if script_path is None:
         script_path = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "run_latest.py")
+            os.path.join(
+                os.path.dirname(os.path.dirname(__file__)), "run_latest.py",
+            )
         )
 
     startup_folder = get_startup_folder()
@@ -382,7 +394,9 @@ def register_startup_task(
 
     if script_path is None:
         script_path = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "run_latest.py")
+            os.path.join(
+                os.path.dirname(os.path.dirname(__file__)), "run_latest.py",
+            )
         )
 
     command = (
