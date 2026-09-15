@@ -12,7 +12,12 @@ PCログオン時の自動起動は
 ファイル名を変更した際に更新漏れが起きやすい。
 
 このスクリプトは上記の連鎖を順に確認し、どこが切れているかを指摘する。
-Version: 1.0.0
+Version: 1.1.0
+
+v1.1.0での変更点：
+コード本体をapp/フォルダに集約する整理に伴い、daily_journal_*.pyの
+検索先をSCRIPT_DIR直下からapp/配下に変更した。run_latest.py自身は
+引き続きSCRIPT_DIR直下にあるため、そちらのチェックは無変更
 """
 
 import glob
@@ -21,6 +26,7 @@ import re
 import sys
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+APP_DIR = os.path.join(SCRIPT_DIR, "app")
 BATCH_NAME = "LearningJournalAutoStart.bat"
 LAUNCHER = "run_latest.py"
 
@@ -66,7 +72,7 @@ def check_journal_folder() -> None:
     else:
         ng(f"{LAUNCHER} がありません。Journalフォルダに配置してください")
 
-    bodies = sorted(glob.glob(os.path.join(SCRIPT_DIR, "daily_journal_*.py")))
+    bodies = sorted(glob.glob(os.path.join(APP_DIR, "daily_journal_*.py")))
     if bodies:
         ok(f"本体ファイルが {len(bodies)} 件あります")
         for path in bodies:

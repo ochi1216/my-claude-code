@@ -2,7 +2,14 @@
 """
 dashboard.py
 LKPT Dashboard - 日次〜年次の集計ダッシュボード
-Version: 0.21.0
+Version: 0.21.1
+
+v0.21.1での変更点：
+コード本体をapp/フォルダに集約する整理に伴い、dashboard.py自身が
+1階層深い場所(journal/app/)に移動したため、_resolve_gemini_common_dirs()
+の候補パスに".."を1つずつ追加した（ツール自体のPythonScriptsからの
+深さは変わっていないが、dashboard.pyの置き場所が1階層深くなった分の
+補正）。挙動（gemini_client.pyの探索そのもの）は無変更
 """
 
 import math
@@ -42,17 +49,20 @@ GEMINI_MODEL = "gemini-2.5-flash"
 def _resolve_gemini_common_dirs():
     """
     gemini_client.pyの探索先候補を優先順に返す。
-    ツールがPythonScripts直下に1階層で置かれている場合は"../common"で
-    届くが、2階層以上深い場合は届かない（HANDOVER文書の「ハマりどころ(1)」）。
-    環境変数GEMINI_COMMON_DIRで明示されていればそれを最優先する。
+    ツール（journalフォルダ）がPythonScripts直下に1階層で置かれている
+    場合は"../../common"で届くが、2階層以上深い場合は届かない（HANDOVER
+    文書の「ハマりどころ(1)」）。dashboard.py自身はjournal/app/に置かれて
+    いるため、ツールの深さ分に加えてこのファイル自身の深さ(app/の1階層)
+    も候補パスに織り込んでいる。環境変数GEMINI_COMMON_DIRで明示されて
+    いればそれを最優先する。
     """
     env_dir = os.environ.get("GEMINI_COMMON_DIR")
     if env_dir:
         return [env_dir]
     here = os.path.dirname(os.path.abspath(__file__))
     return [
-        os.path.normpath(os.path.join(here, "..", "common")),
         os.path.normpath(os.path.join(here, "..", "..", "common")),
+        os.path.normpath(os.path.join(here, "..", "..", "..", "common")),
     ]
 
 

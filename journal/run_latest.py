@@ -19,7 +19,18 @@ run_latest.pyだけを呼ぶようにしておけば、新しいバージョン�
 RegisterHotKeyは同じキー組み合わせを1プロセスしか保持できないため、
 先に起動していた古いプロセスの方にホットキーを奪われたままになり、
 「コードを更新したのに動作が変わらない」という混乱の元になるため。
-Version: 1.2.0
+Version: 1.3.0
+
+v1.3.0での変更点：
+コード本体をapp/フォルダに集約する整理に伴い、daily_journal_*.pyの
+検索先をSCRIPT_DIR直下からapp/配下に変更した。あわせて、app/内の
+daily_journal_*.pyが`import storage`のようにapp/内の他モジュールを
+プレーンなimportで読み込めるよう、動的import前にapp/をsys.pathへ
+追加するようにした（従来はSCRIPT_DIR自身が本体・全モジュールの
+置き場所を兼ねており、run_latest.py自身がpython.exeの起動対象と
+してsys.path[0]に入ることで暗黙に解決できていたが、app/への分離に
+伴い明示的な追加が必要になった）。run_latest.py自身の置き場所・
+呼び出し方（RunSilent.bat/RunConsole.bat）は変更していない
 """
 
 import glob
@@ -32,7 +43,8 @@ import traceback
 from datetime import datetime
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PATTERN = os.path.join(SCRIPT_DIR, "daily_journal_*.py")
+APP_DIR = os.path.join(SCRIPT_DIR, "app")
+PATTERN = os.path.join(APP_DIR, "daily_journal_*.py")
 
 # daily_journal_yyyymmdd_NN.py だけを起動対象とする。
 # 「daily_journal_20260805_01 - コピー.py」「..._01_backup.py」のような
@@ -140,7 +152,7 @@ def find_latest_script() -> str:
     if not candidates:
         raise FileNotFoundError(
             "起動対象のファイルが見つかりません。\n"
-            f"探した場所: {SCRIPT_DIR}\n"
+            f"探した場所: {APP_DIR}\n"
             "daily_journal_yyyymmdd_NN.py という名前のファイルが必要です。"
         )
 
@@ -159,6 +171,12 @@ def main() -> None:
 
     name = os.path.basename(script_path)
     print(f"📦 最新版を起動します: {name}")
+
+    # daily_journal_*.py内の`import storage`等のプレーンなimportが
+    # app/内の他モジュールを解決できるよう、動的import前にapp/を
+    # sys.pathへ追加する（すでに追加済みなら重複させない）
+    if APP_DIR not in sys.path:
+        sys.path.insert(0, APP_DIR)
 
     try:
         module_name = os.path.splitext(name)[0]
