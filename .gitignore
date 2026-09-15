@@ -46,6 +46,8 @@ onenote_report_generator/reports/*.html
 
 # ツールランチャーの実行ログ（実行のたびに追記される実行時生成物）
 tool_launcher/launcher_log.txt
+# ツールランチャー: 多重起動防止の補助ファイル（実行中PIDを記録。実行時生成物）
+tool_launcher/.tool_launcher.pid
 # Document Search Manager のローカル設定・認証キャッシュ・生成物
 # config.jsonにはテナントID/クライアントID、exports/には検索キーワードと
 # 実際の社内文書名が含まれるため、リポジトリには含めない
