@@ -14,14 +14,21 @@ Actionクイック入力から打つのと同じ内容で呼ぶだけの使い�
 越智さんご自身が書いた文言をそのまま使っている。Claude Codeが内容を
 考えたり書き換えたりはしていない。
 
-Version: 1.0.0
+Version: 1.1.0
+
+v1.1.0での変更点：
+コード本体をapp/フォルダに集約する整理に伴い、forecast.py/storage.py
+の置き場所がapp/配下になったため、sys.pathへの追加先をSCRIPT_DIR自身
+からSCRIPT_DIR/appに変更した。内容（Proof/Obstacle/If-Then/Next 7 Days
+の登録処理）自体は無変更
 """
 
 import os
 import sys
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, SCRIPT_DIR)
+APP_DIR = os.path.join(SCRIPT_DIR, "app")
+sys.path.insert(0, APP_DIR)
 
 import forecast
 import storage
