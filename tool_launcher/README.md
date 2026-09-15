@@ -13,7 +13,7 @@
 | `tool_launcher_yyyymmdd_NN.py` | ランチャー本体（GUI・起動制御・git pull） |
 | `tools.json` | ツール定義。**ツールの増減はこのファイルだけで行う** |
 | `run_tool_launcher.bat` | 起動用バッチ。デスクトップショートカットのリンク先 |
-| `tool_launcher.ico` | ショートカット用アイコン（背景 `#1a1a2e` ／ 稲妻 `#e94560`） |
+| `tool_launcher.ico` | ショートカット用アイコン（越智さん提示のグリッドデザイン） |
 | `launcher_log.txt` | 実行ログ（自動生成、`.gitignore` 対象） |
 
 ## セットアップ（初回のみ）
