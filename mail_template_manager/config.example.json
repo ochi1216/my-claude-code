@@ -1,0 +1,19 @@
+{
+  "_comment_auth": "tenant_id / client_id を空のままにすると、既存ツールの config.json から自動的に借用します（読むだけで書き換えません）。探索順は po_database_organizer → onenote_report_generator。新規のEntra ID権限申請は不要です。要求スコープは Sites.Read.All のみ。",
+  "tenant_id": "",
+  "client_id": "",
+
+  "_comment_credentials_from": "既存ツールの config.json が別の場所にある場合は、そのフルパスをここに書くと最優先で参照します。バックスラッシュは2つ重ねてください。",
+  "credentials_from": "",
+
+  "_comment_probe": "【M0の実機プローブ専用】項目[9]でSharePointフォルダの中身を一覧できるか確かめるための上位フォルダURL。ブラウザのアドレスバーの値をそのまま貼ってください。空のままだと項目[9]だけスキップし、他の項目は通常どおり実行します。",
+  "probe_target_folder_url": "",
+
+  "_comment_m1": "ここから下は M1 以降で使う設定です。M0（実機プローブ）の時点では読み込まれません。",
+
+  "_comment_cards_dir": "カード定義(JSON)の保存先。既定は本フォルダ直下の cards。共有フォルダやOneDrive配下を指定すると、他のメンバーと共有でき、PC入替時のバックアップにもなります。",
+  "cards_dir": "./cards",
+
+  "flask_port": 5030,
+  "auto_open_browser": true
+}

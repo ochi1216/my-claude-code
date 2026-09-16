@@ -97,3 +97,15 @@ project_cost_analyzer/.pca_settings.json
 # 会議録画文字起こし・要約ツールのローカル設定・出力
 meeting_transcript_summarizer/config.json
 meeting_transcript_summarizer/output/
+# Mail Template Manager のローカル設定・認証キャッシュ・実行時生成物
+# cards/ には実在の宛先アドレス・SharePointサイトURL・本文テンプレートが、
+# contacts.json には宛先アドレスが、プローブの出力には署名（氏名・連絡先）や
+# フォルダ構成が記録されるため、社内情報保護の観点からリポジトリには含めない
+# （コミット対象は config.example.json などのテンプレートのみ）。
+mail_template_manager/config.json
+mail_template_manager/token_cache.json
+mail_template_manager/contacts.json
+mail_template_manager/cards/
+mail_template_manager/probe_result_*.txt
+mail_template_manager/probe_signature.html
+mail_template_manager/probe_sample.eml

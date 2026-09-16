@@ -1,0 +1,20 @@
+# Mail Template Manager
+
+# --- M0（実機プローブ / probe_outlook.py）で必要なもの ---
+
+# Outlook をプログラムから操作するために必要。Windows専用。
+# outlook_total_organizer で既に使用しており、会社PCには導入済みの想定。
+# 未導入の場合、プローブは「pywin32 が入っていません」と日本語で案内し、
+# 他の項目を巻き添えにせず終了する。
+pywin32>=306
+
+# SharePoint（Microsoft Graph）へのサインインに使用。
+# po_database_organizer と同一のEntra IDアプリ登録をそのまま流用するため、
+# 新規のEntra ID権限申請は発生しない（要求スコープは Sites.Read.All のみ）。
+# 未導入でもプローブは動く（項目[9]だけスキップする）。社内プロキシ・証明書の
+# 都合で pip install が詰まっても、プローブ自体は動かせるようにするための設計。
+msal>=1.24
+
+# --- M1 以降で追加予定（M0の時点では不要） ---
+# flask>=3.0
+# requests>=2.31

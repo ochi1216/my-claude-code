@@ -86,6 +86,13 @@ SharePointサイトのフォルダ構成をツリー表示・ダウンロード�
 
 セットアップ手順は [`project_cost_analyzer/README.md`](project_cost_analyzer/README.md) を参照。
 
+## Mail Template Manager
+
+定型メールをカードとして管理し、その月のSharePointフォルダ／ファイルのリンクを自動解決して
+Outlookの下書きを組み立てるツール。**現在はM0（実機プローブ）のみ実装済みで、本体は未着手。**
+実行手順は [`mail_template_manager/README.md`](mail_template_manager/README.md)、
+設計の背景は [`mail_template_manager/DESIGN_NOTES.md`](mail_template_manager/DESIGN_NOTES.md) を参照。
+
 ## 開発ルール（バージョン管理）
 
 - **ファイル命名**: プログラムを更新する際は、ファイル名を `ツール名_yyyymmdd_連番.py`（例: `rtocs_organizer_20260711_01.py`）とする。同日に複数回更新する場合は連番（`_01`, `_02`...）を上げる。
