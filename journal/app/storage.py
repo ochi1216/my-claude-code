@@ -2,7 +2,23 @@
 """
 storage.py
 学びジャーナル - Excel(SharePoint同期フォルダ)読み書きモジュール
-Version: 0.14.0
+Version: 0.15.0
+
+v0.15.0での変更点：
+タスク（Actions）にOffice/Private/Kousouの3タブ分類を追加した。
+ACTIONS_HEADERを8列に拡張（末尾に「カテゴリ」列）し、優先列と同じ形の
+自己修復マイグレーション_ensure_actions_category_column()を追加。
+add_action()にcategory引数を追加（この機能導入前からの既存タスクは
+読み込み時にACTION_CATEGORY_DEFAULT_LEGACY=officeへフォールバック）。
+複数行を一括で移動できるset_actions_category()（単一行版
+set_action_categoryも用意）を新設。タスク一覧のアクティブタブを
+再起動後も覚えておくためのget_action_active_tab()/
+set_action_active_tab()も追加した（get_action_sort_order等と同じ
+Settingsシートのパターン）。「All」（全件表示の仮想タブ）は行の
+カテゴリ値には絶対にならない——ACTION_CATEGORIES（行が持てる3値）と
+ACTION_TABS（UI/Settingsが持てる4値）を別の定数として分離している。
+complete_action()・set_action_priority()は無改修（新しい列に触れない
+ため）。既存のシート・関数のうち、上記以外には変更を加えていない
 
 v0.14.0での変更点：
 ひれぶり（魂のひれぶり）の感情ラベルに「無」を追加し、
@@ -67,9 +83,25 @@ HIREBI_HEADER = ["日時", "タグ", "感情"]
 EMOTION_LABELS = ["喜", "怒", "無", "哀", "楽"]
 # 完了・未完了という状態を持つため、追記のみの他シートとは別に管理する。
 # 行番号自体を識別子として使う（削除・並べ替えを行わないため安定する）
-ACTIONS_HEADER = ["作成日時", "タグ", "内容", "由来", "ステータス", "完了日時", "優先"]
+ACTIONS_HEADER = ["作成日時", "タグ", "内容", "由来", "ステータス", "完了日時", "優先", "カテゴリ"]
 ACTION_STATUS_PENDING = "未着手"
 ACTION_STATUS_DONE = "完了"
+
+# タスクのタブ分類（Office/Private/Kousouの3カテゴリ＋仮想タブAll）。
+# 「All」は行が実際に持つ値には絶対にならない——複数タブを横断して
+# 全件を見るためのビュー専用の値。行のカテゴリは必ずOffice/Private/Kousou
+# のいずれかで、Allタブの表示・完了操作は「同じ行を別の見え方で扱う」
+# だけなので、Allとの同期のための特別な処理は不要
+ACTION_CATEGORY_OFFICE = "office"
+ACTION_CATEGORY_PRIVATE = "private"
+ACTION_CATEGORY_KOUSOU = "kousou"
+ACTION_CATEGORIES = (ACTION_CATEGORY_OFFICE, ACTION_CATEGORY_PRIVATE, ACTION_CATEGORY_KOUSOU)
+# この機能導入前から登録済みだった（カテゴリ列を持たない）既存タスクの
+# 読み込み時フォールバック先
+ACTION_CATEGORY_DEFAULT_LEGACY = ACTION_CATEGORY_OFFICE
+
+ACTION_TAB_ALL = "all"
+ACTION_TABS = ACTION_CATEGORIES + (ACTION_TAB_ALL,)
 
 # タスク一覧の文字サイズ・並び順など、UIの好みをアプリの再起動後も
 # 覚えておくための汎用キーバリュー設定シート。ポップアップを閉じている
@@ -79,6 +111,7 @@ ACTION_FONT_SIZE_KEY = "action_font_size"
 ACTION_SORT_ORDER_KEY = "action_sort_order"
 ACTION_SORT_ORDER_ASC = "asc"   # 登録が古い順（先頭が一番古い）
 ACTION_SORT_ORDER_DESC = "desc"  # 登録が新しい順（先頭が一番新しい）
+ACTION_ACTIVE_TAB_KEY = "action_active_tab"
 
 # 前回チェックポイントから長時間経過していた場合の安全弁（この時間で打ち切る）
 MAX_TIMELOG_GAP_HOURS = 2
@@ -235,6 +268,21 @@ def _ensure_actions_priority_column(wb) -> None:
     if len(header) < 7:
         ws.cell(row=1, column=7, value="優先")
         print(f"🔧 '{ACTIONS_SHEET}'シートに優先列を追加しました。")
+
+
+def _ensure_actions_category_column(wb) -> None:
+    """
+    Actionsシートがカテゴリ（タブ分類）列の無い旧形式（7列まで）の
+    ままなら、8列目にカテゴリ列を追加する自己修復を行う。
+    優先列の自己修復と同じ形で、既存行への値の書き戻しは行わない
+    （get_actions()側で欠損時にACTION_CATEGORY_DEFAULT_LEGACYへ
+    フォールバックする）。
+    """
+    ws = wb[ACTIONS_SHEET]
+    header = [cell.value for cell in ws[1]]
+    if len(header) < 8:
+        ws.cell(row=1, column=8, value="カテゴリ")
+        print(f"🔧 '{ACTIONS_SHEET}'シートにカテゴリ列を追加しました。")
 
 
 def _ensure_hirebi_sheet(wb) -> None:
@@ -974,6 +1022,7 @@ def get_last_other_comment(tag: str, path: str = EXCEL_PATH) -> str:
 
 
 def add_action(content: str, tag: str = "", origin: str = "manual",
+                category: str = ACTION_CATEGORY_DEFAULT_LEGACY,
                 path: str = EXCEL_PATH, now: datetime = None) -> bool:
     """
     アクションアイテムを1件追加する（ステータスは常に「未着手」で開始する）。
@@ -983,6 +1032,9 @@ def add_action(content: str, tag: str = "", origin: str = "manual",
         tag: 関連タグ（空文字列可。ポップアップでタグ未選択のまま追加した場合など）
         origin: "manual"（ポップアップの＋アクション欄から）または
                 "P"（LKPTのP欄からのチェックによる自動作成）
+        category: タブ分類（ACTION_CATEGORIES のいずれか）。呼び出し元の
+            UI層は常に明示的に渡すべきで、ここでの既定値は防御的な
+            フォールバックに過ぎない
         path: Excelファイルパス
         now: 作成日時（省略時はdatetime.now()）
 
@@ -992,6 +1044,8 @@ def add_action(content: str, tag: str = "", origin: str = "manual",
     content = content.strip()
     if not content:
         return False
+    if category not in ACTION_CATEGORIES:
+        category = ACTION_CATEGORY_DEFAULT_LEGACY
     if now is None:
         now = datetime.now()
     now = now.replace(second=0, microsecond=0)
@@ -1000,10 +1054,11 @@ def add_action(content: str, tag: str = "", origin: str = "manual",
     wb = _load_with_retry(path)
     _ensure_actions_sheet(wb)
     _ensure_actions_priority_column(wb)
+    _ensure_actions_category_column(wb)
     ws = wb[ACTIONS_SHEET]
     ws.append([
         now.strftime("%Y-%m-%d %H:%M"), tag, content, origin,
-        ACTION_STATUS_PENDING, "", False,
+        ACTION_STATUS_PENDING, "", False, category,
     ])
 
     success = _save_with_retry(wb, path)
@@ -1018,11 +1073,14 @@ def get_actions(path: str = EXCEL_PATH) -> list:
 
     Returns:
         list[dict]: 各要素は{"row", "created_at", "tag", "content", "origin",
-        "status", "completed_at", "starred"}。"row"はcomplete_action()・
-        set_action_priority()に渡すExcelの実行番号（IDを別列で持たず、
-        行番号をそのまま識別子として使う。このシートは行の削除・並べ替えを
-        行わない前提のため安定する）。"starred"は優先(★)列が無い旧形式の
-        行ではFalse扱いになる
+        "status", "completed_at", "starred", "category"}。"row"は
+        complete_action()・set_action_priority()・set_actions_category()に
+        渡すExcelの実行番号（IDを別列で持たず、行番号をそのまま識別子として
+        使う。このシートは行の削除・並べ替えを行わない前提のため安定する）。
+        "starred"は優先(★)列が無い旧形式の行ではFalse扱いになる。
+        "category"はカテゴリ列が無い旧形式の行・不正な値が入っている行では
+        ACTION_CATEGORY_DEFAULT_LEGACYにフォールバックする（"all"には
+        絶対にならない——それは行の値ではなくビュー専用の仮想タブのため）
     """
     ensure_workbook_exists(path)
     wb = _load_with_retry(path)
@@ -1057,6 +1115,9 @@ def get_actions(path: str = EXCEL_PATH) -> list:
             except ValueError:
                 completed_at = None
 
+        raw_category = row[7] if len(row) > 7 else None
+        category = raw_category if raw_category in ACTION_CATEGORIES else ACTION_CATEGORY_DEFAULT_LEGACY
+
         actions.append({
             "row": row_idx,
             "created_at": created_at,
@@ -1066,6 +1127,7 @@ def get_actions(path: str = EXCEL_PATH) -> list:
             "status": row[4] or ACTION_STATUS_PENDING,
             "completed_at": completed_at,
             "starred": bool(row[6]) if len(row) > 6 and row[6] else False,
+            "category": category,
         })
 
     print(f"📌 アクション一覧を取得しました（{len(actions)}件）")
@@ -1132,6 +1194,44 @@ def set_action_priority(row: int, starred: bool, path: str = EXCEL_PATH) -> bool
         mark = "★" if starred else "☆"
         print(f"{mark} アクションの優先度を更新しました（行{row}）")
     return success
+
+
+def set_actions_category(rows: list, category: str, path: str = EXCEL_PATH) -> bool:
+    """
+    複数行のアクションのタブ分類（カテゴリ）をまとめて書き換える。
+    複数選択での一括移動・ドラッグ＆ドロップでの移動、どちらもこの1関数に
+    集約する（1行だけの移動もrows=[row]として呼べばよい）。
+
+    Args:
+        rows: get_actions()が返す各要素の"row"のリスト
+        category: 移動先（ACTION_CATEGORIES のいずれか。"all"は不可——
+            Allは仮想タブであり、行が持てる値ではないため）
+        path: Excelファイルパス
+
+    Returns:
+        bool: 保存に成功した場合True
+    """
+    if category not in ACTION_CATEGORIES:
+        raise ValueError(f"不正なカテゴリです: {category!r}")
+    ensure_workbook_exists(path)
+    wb = _load_with_retry(path)
+    if ACTIONS_SHEET not in wb.sheetnames:
+        print(f"❌ シート'{ACTIONS_SHEET}'が見つかりません。")
+        return False
+    _ensure_actions_category_column(wb)
+    ws = wb[ACTIONS_SHEET]
+    for row in rows:
+        ws.cell(row=row, column=8, value=category)
+
+    success = _save_with_retry(wb, path)
+    if success:
+        print(f"📂 {len(rows)}件のアクションを{category}へ移動しました")
+    return success
+
+
+def set_action_category(row: int, category: str, path: str = EXCEL_PATH) -> bool:
+    """set_actions_category()の単一行版（rows=[row]の薄いラッパー）。"""
+    return set_actions_category([row], category, path)
 
 
 def get_setting(key: str, default=None, path: str = EXCEL_PATH):
@@ -1206,6 +1306,25 @@ def set_action_sort_order(order: str, path: str = EXCEL_PATH) -> bool:
     if order not in (ACTION_SORT_ORDER_ASC, ACTION_SORT_ORDER_DESC):
         raise ValueError(f"不正な並び順です: {order!r}")
     return set_setting(ACTION_SORT_ORDER_KEY, order, path)
+
+
+def get_action_active_tab(default: str = ACTION_TAB_ALL, path: str = EXCEL_PATH) -> str:
+    """
+    タスク一覧で最後に選んでいたタブ（ACTION_TABS のいずれか）を読む。
+    未設定・値が不正な場合はdefaultを返す。初回起動時の既定は"all"にして、
+    この機能導入前の「全部見える」体験をそのまま引き継ぐ想定
+    """
+    value = get_setting(ACTION_ACTIVE_TAB_KEY, default, path)
+    if value in ACTION_TABS:
+        return value
+    return default
+
+
+def set_action_active_tab(tab: str, path: str = EXCEL_PATH) -> bool:
+    """タスク一覧のアクティブタブ設定を保存する。"""
+    if tab not in ACTION_TABS:
+        raise ValueError(f"不正なタブです: {tab!r}")
+    return set_setting(ACTION_ACTIVE_TAB_KEY, tab, path)
 
 
 def get_last_meeting_check(default: datetime = None, path: str = EXCEL_PATH) -> datetime:

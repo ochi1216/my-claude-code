@@ -2,7 +2,25 @@
 """
 daily_journal_20260903_01.py
 学びジャーナル - ホットキー起動の入力ポップアップUI
-Version: 0.45.0
+Version: 0.46.0
+
+v0.46.0での変更点：
+タスク一覧をOffice（青）/Private（緑）/Kousou（オレンジ）/All（紫）の
+4タブに分けた（storage.py v0.15.0のカテゴリ列拡張と対になる変更）。
+Allは仮想タブで、全件表示＋各行に所属カテゴリの色ドットを付ける。
+「同じ行＝同じタスク」なのでAllと実タブの完了操作の同期に特別な処理は
+不要（complete_action()は列8のカテゴリに触れないため）。
+既存タスクは複数選択（本文クリックでトグル→「移動先」チップ）と
+ドラッグ＆ドロップ（本文ラベルを押してタブボタンへドロップ）の両方で
+別タブへ移動できる。ドラッグは押下からの移動量が6px未満なら単純クリック
+（選択トグル）として扱い、以上なら_DragGhost（新規、_Tooltipと同じ
+Toplevel手法）でカーソル追従のゴーストを出す。Allタブ表示中に新規
+タスクを追加した場合は、直前に見ていた実タブ（self._last_real_tab）の
+カテゴリを引き継ぐ。アクティブタブはaction_font_size/action_sort_order
+と同じくSettingsシートに永続化し、再起動後も前回のタブを覚えている。
+タブバーは既存の「タスク」見出し行の1行上に新設し（300px幅に4タブ＋
+既存コントロールは1行に収まらないため）、フォントサイズ・並び順は
+引き続きタブ非依存（全タブ共通）のまま変更していない
 
 v0.45.0での変更点：
 会議分類の声かけを、本体のJournalポップアップをいきなり最前面に開く
@@ -119,9 +137,14 @@ from datetime import datetime, timedelta
 from tkinter import font as tkfont
 
 from storage import (
+    ACTION_CATEGORIES,
+    ACTION_CATEGORY_KOUSOU,
+    ACTION_CATEGORY_OFFICE,
+    ACTION_CATEGORY_PRIVATE,
     ACTION_SORT_ORDER_ASC,
     ACTION_SORT_ORDER_DESC,
     ACTION_STATUS_PENDING,
+    ACTION_TAB_ALL,
     EMOTION_LABELS,
     MAX_TIMELOG_GAP_HOURS,
     OTHER_SUBITEM_LABEL,
@@ -132,6 +155,7 @@ from storage import (
     classify_pending_meeting,
     complete_action,
     delete_time_log_row,
+    get_action_active_tab,
     get_action_font_size,
     get_action_sort_order,
     get_actions,
@@ -140,9 +164,11 @@ from storage import (
     get_sub_item_master,
     get_tag_master,
     peek_next_time_range_v2,
+    set_action_active_tab,
     set_action_font_size,
     set_action_priority,
     set_action_sort_order,
+    set_actions_category,
     update_time_log_row,
 )
 
@@ -173,11 +199,34 @@ MEETING_CLASSIFY_BG = "#f2c078"
 # ○チェックは左端・★優先は右端という参考画像のレイアウトに合わせて選定した
 ACTION_CARD_BG = "#2a2a44"        # 各行の地色（BG_COLORより一段明るいダーク）
 ACTION_CARD_DONE_FLASH = "#3a5a45"  # チェック直後に一瞬光らせる完了フィードバック色
+ACTION_CARD_SELECTED_BG = "#3d3d63"  # 複数選択中の行の地色（ACTION_CARD_BGより明るい）
 ACTION_STAR_ON_COLOR = "#4a90e2"    # ★（優先）点灯時の色
 ACTION_STAR_OFF_COLOR = "#7c86a8"   # ☆（未優先）の色
 ACTION_CHECK_COLOR = "#9aa4c8"      # ○チェックアイコンの色
 FORECAST_BTN_BG = "#cfe6dd"         # 読み（予測）ボタンの地色。DB(青系)・
                                      # 閉じる(灰)と区別が付く淡い緑寄り
+
+# タスクのタブ分類（Office/Private/Kousou/All）のボタン色。
+# Office=青／Private=緑／Kousou=オレンジ／All=紫。ひれぶりの5色・タグの
+# 4色とも被らない色相を選んでいる
+ACTION_TAB_COLORS = {
+    ACTION_CATEGORY_OFFICE: "#4a90e2",
+    ACTION_CATEGORY_PRIVATE: "#4caf7d",
+    ACTION_CATEGORY_KOUSOU: "#e08a3c",
+    ACTION_TAB_ALL: "#9b6fd6",
+}
+ACTION_TAB_LABELS = {
+    ACTION_CATEGORY_OFFICE: "Office",
+    ACTION_CATEGORY_PRIVATE: "Private",
+    ACTION_CATEGORY_KOUSOU: "Kousou",
+    ACTION_TAB_ALL: "All",
+}
+# タブバーの並び順（辞書のキー順に依存しないよう明示的にタプルで持つ）
+ACTION_TAB_ORDER = (
+    ACTION_CATEGORY_OFFICE, ACTION_CATEGORY_PRIVATE, ACTION_CATEGORY_KOUSOU, ACTION_TAB_ALL,
+)
+# 「移動先」バーは仮想タブのAllへは移動できない（Allはカテゴリではないため）
+ACTION_MOVE_TARGETS = (ACTION_CATEGORY_OFFICE, ACTION_CATEGORY_PRIVATE, ACTION_CATEGORY_KOUSOU)
 
 # 「魂のひれぶり」信号（喜・怒・無・哀・楽）のボタン色。タグ4色・Journalトグルの
 # ラベンダーとも被らない色相を1つずつ選び、押した感情がどれだったか
@@ -307,6 +356,35 @@ class _Tooltip:
             self._tip_window = None
 
 
+class _DragGhost:
+    """
+    タスク行をドラッグしている間、カーソルに追従する小さなラベル。
+    _Tooltipと同じTopmost+overrideredirectのToplevel手法を使うが、
+    ホバーではなく明示的な座標指定で毎フレーム動かす点が異なる
+    （タスク移動のドラッグ操作用。ツールチップの流用ではなく別クラスに
+    分けているのは、表示/非表示のタイミングが全く違うため）。
+    """
+
+    def __init__(self, root: tk.Tk, text: str):
+        self.window = tk.Toplevel(root)
+        self.window.overrideredirect(True)
+        self.window.attributes("-topmost", True)
+        self._label = tk.Label(
+            self.window, text=text, bg="#111122", fg=TEXT_COLOR,
+            font=tkfont.Font(family="Yu Gothic UI", size=9),
+            padx=8, pady=4, relief="solid", borderwidth=1,
+        )
+        self._label.pack()
+
+    def move_to(self, x_root: int, y_root: int) -> None:
+        if self.window.winfo_exists():
+            self.window.wm_geometry(f"+{x_root + 12}+{y_root + 12}")
+
+    def destroy(self) -> None:
+        if self.window.winfo_exists():
+            self.window.destroy()
+
+
 def _lighten_color(hex_color: str, factor: float = 0.78) -> str:
     """hex_colorを白方向にfactor(0〜1)だけ明るくした16進色を返す。"""
     hex_color = hex_color.lstrip("#")
@@ -385,7 +463,7 @@ HOTKEY = "ctrl+shift+j"
 # する）専用のホットキー。Windows標準では未使用で、他アプリとの衝突も
 # 確認されていない組み合わせを選んだ
 HOTKEY_FOCUS = "ctrl+shift+t"
-VERSION = "0.45.0"
+VERSION = "0.46.0"
 
 # ファイル名（daily_journal_yyyymmdd_NN.py）そのものがバージョン識別子を
 # 兼ねる運用のため、ここに手で書いた文字列を置くと更新を忘れて古いまま
@@ -592,6 +670,31 @@ class PopupWindow:
         self.action_sort_btn = None         # 並び順トグルボタン（↓/↑）
         self._action_sort_tooltip = None    # 上記の状態・操作を説明するツールチップ
 
+        # タスクのタブ分類（Office/Private/Kousou/All）。アクティブタブは
+        # action_font_size/action_sort_orderと同じ理由でshow()ではリセット
+        # せず、アプリ起動時に一度だけSettingsシートから読み込む
+        try:
+            self.active_tab = get_action_active_tab(default=ACTION_TAB_ALL)
+        except Exception as e:
+            print(f"⚠️ タスクタブ設定の読み込みに失敗しました: {e}")
+            self.active_tab = ACTION_TAB_ALL
+        # Allタブを見ている間に新規タスクを追加した場合、直前に見ていた
+        # 実タブ（Office/Private/Kousouのいずれか）のカテゴリを引き継ぐための
+        # 記録。起動直後にactive_tabが既にAll以外なら、それを初期値にする
+        self._last_real_tab = self.active_tab if self.active_tab != ACTION_TAB_ALL else ACTION_CATEGORY_OFFICE
+        self.action_tab_buttons = {}        # tab_id -> Label（タブバーの各ボタン）
+        self.selected_action_rows = set()   # 複数選択中のExcel行番号
+        self.action_move_frame = None       # 「移動先」チップ行（選択が無ければ非表示）
+        self.action_move_buttons = {}       # category -> Label（移動先チップ）
+        # ドラッグ＆ドロップの状態一式。押下ウィジェットごとに使い回す
+        # （複数行を同時にドラッグする実装ではないため、単一の状態で足りる）
+        self._drag_active = False
+        self._drag_row_ids = set()
+        self._drag_ghost = None             # ドラッグ中のカーソル追従ラベル(Toplevel)
+        self._drag_hover_tab_id = None       # ドラッグ中、ホバー中のタブ（ハイライト対象）
+        self._drag_start_x = 0
+        self._drag_start_y = 0
+
         # Outlook連携：分類待ちの会議（タグ未確定のままTimeLogに自動記録
         # された会議）を、開いた時に真っ先に尋ねるための状態。
         # 手動でJournalを開いた場合／次回起動時にJournalを開いた場合の
@@ -694,6 +797,14 @@ class PopupWindow:
             self.subitem_master = {}
 
         self.pending_actions = self._fetch_pending_actions()
+        # 複数選択・ドラッグの状態も毎回まっさらにする（見えなくなった行が
+        # 選択されたままだと「移動先」操作が不可解になるため）。
+        # active_tab自体はaction_font_size/action_sort_orderと同じ理由で
+        # ここではリセットしない（前回選んでいたタブを引き継ぐ）
+        self.selected_action_rows = set()
+        self._drag_active = False
+        self._drag_row_ids = set()
+        self._drag_hover_tab_id = None
 
         self.window = tk.Toplevel(self.root)
         self.window.title(f"LKPT - {FILE_VERSION_LABEL}")
@@ -1174,6 +1285,25 @@ class PopupWindow:
             dashboard_btn.image = dashboard_img
         dashboard_btn.grid(row=0, column=2, sticky="ew", padx=3)
 
+        # タスクのタブ分類（Office/Private/Kousou/All）。4タブ均等幅で
+        # 1行に並べる。300px幅のポップアップに「タスク」見出し行と
+        # 同じ行では収まらないため、独立した行にする
+        action_tab_frame = tk.Frame(self.window, bg=BG_COLOR)
+        action_tab_frame.pack(pady=(8, 0), padx=20, fill="x")
+        self._register_themed(action_tab_frame)
+
+        action_tab_font = tkfont.Font(family="Yu Gothic UI", size=9, weight="bold")
+        self.action_tab_buttons = {}
+        for tab_id in ACTION_TAB_ORDER:
+            tab_btn = tk.Label(
+                action_tab_frame, text=ACTION_TAB_LABELS[tab_id], font=action_tab_font,
+                cursor="hand2", padx=2, pady=4, anchor="center",
+            )
+            tab_btn.pack(side="left", fill="x", expand=True, padx=1)
+            tab_btn.bind("<Button-1>", lambda e, t=tab_id: self._switch_action_tab(t))
+            self.action_tab_buttons[tab_id] = tab_btn
+        self._update_action_tab_buttons()
+
         # たまっているアクション一覧。MS To Doの参考画像に合わせ、○チェックは
         # 左端・★優先は右端、行は横幅いっぱいの1行カードとして縦に積む。
         # ポップアップの高さがアクション件数に比例して伸び続けないよう、
@@ -1181,7 +1311,7 @@ class PopupWindow:
         # アクションを入力してもこのUI自体は閉じない前提のため、複数件
         # 書き留めた直後でもこの一覧がその場で増えていく様子が見える
         action_header_frame = tk.Frame(self.window, bg=BG_COLOR)
-        action_header_frame.pack(pady=(8, 2), padx=20, fill="x")
+        action_header_frame.pack(pady=(2, 2), padx=20, fill="x")
         self._register_themed(action_header_frame)
 
         action_section_label = tk.Label(
@@ -1308,9 +1438,36 @@ class PopupWindow:
         )
         self._register_themed(self.forecast_seed_label, bg=True, fg=True)
 
+        # 複数選択中だけ出す「移動先」チップ行。Allは移動先になれない
+        # （カテゴリではなく仮想タブのため）ので3チップのみ
+        self.action_move_frame = tk.Frame(self.window, bg=BG_COLOR)
+        self._register_themed(self.action_move_frame)
+        move_label_font = tkfont.Font(family="Yu Gothic UI", size=8)
+        tk.Label(
+            self.action_move_frame, text="移動先:", bg=BG_COLOR, fg=PLACEHOLDER_COLOR,
+            font=move_label_font,
+        ).pack(side="left", padx=(0, 4))
+        self._register_themed(self.action_move_frame.winfo_children()[-1], bg=True, fg=True)
+        move_chip_font = tkfont.Font(family="Yu Gothic UI", size=9, weight="bold")
+        self.action_move_buttons = {}
+        for category in ACTION_MOVE_TARGETS:
+            color = ACTION_TAB_COLORS[category]
+            chip = tk.Label(
+                self.action_move_frame, text=ACTION_TAB_LABELS[category],
+                bg=color, fg=_readable_text_color(color), font=move_chip_font,
+                cursor="hand2", padx=6, pady=2,
+            )
+            chip.pack(side="left", padx=2)
+            chip.bind("<Button-1>", lambda e, c=category: self._move_selected_actions(c))
+            self.action_move_buttons[category] = chip
+        # 選択0件の間は表示しない（packせず隠しておく。表示するときは
+        # action_scroll_outerの直前に差し込む必要があるため、before=で
+        # 参照できるよう先にウィジェットだけ作ってpackはまだしない）
+
         action_scroll_outer = tk.Frame(self.window, bg=BG_COLOR)
         action_scroll_outer.pack(pady=(0, 10), padx=20, fill="both", expand=True)
         self._register_themed(action_scroll_outer)
+        self._action_scroll_outer = action_scroll_outer
 
         visible_rows = 4
         self.action_row_height = 40
@@ -2165,10 +2322,106 @@ class PopupWindow:
         except Exception as e:
             print(f"⚠️ タスク並び順の設定保存に失敗しました: {e}")
 
+    def _update_action_tab_buttons(self) -> None:
+        """
+        タブバーの各ボタンの配色を、アクティブ/非アクティブの状態に
+        合わせて更新する。アクティブはカテゴリ色そのもの、非アクティブは
+        タグチップの非選択時と同じ_blend_toward()でBG_COLORに寄せた淡色。
+        """
+        for tab_id, btn in self.action_tab_buttons.items():
+            color = ACTION_TAB_COLORS[tab_id]
+            if tab_id == self.active_tab:
+                bg = color
+            else:
+                bg = _blend_toward(color, BG_COLOR, 0.72)
+            btn.config(bg=bg, fg=_readable_text_color(bg))
+
+    def _switch_action_tab(self, tab_id: str) -> None:
+        """
+        タブを切り替える。一覧はExcelへ再アクセスせず、既にキャッシュ済みの
+        self.pending_actionsを描画時にフィルタするだけ（_render_action_rows
+        を参照）。切替のたびに選択状態はクリアする（見えなくなった行が
+        選択されたままだと「移動先」操作が不可解になるため）
+        """
+        self._cancel_autoclose(permanent=True)
+        if tab_id == self.active_tab:
+            return
+        self.active_tab = tab_id
+        if tab_id != ACTION_TAB_ALL:
+            self._last_real_tab = tab_id
+        self.selected_action_rows.clear()
+        self._update_action_tab_buttons()
+        self._update_action_move_bar()
+        self._render_action_rows()
+        try:
+            set_action_active_tab(tab_id)
+        except Exception as e:
+            print(f"⚠️ タスクタブ設定の保存に失敗しました: {e}")
+
+    def _resolve_new_action_category(self) -> str:
+        """
+        新規タスクに付けるカテゴリを決める。Allタブを見ている間は
+        「どのタブに追加するか」が一意に決まらないため、直前に見ていた
+        実タブ（Office/Private/Kousouのいずれか）を引き継ぐ
+        """
+        return self._last_real_tab
+
+    def _toggle_row_selection(self, row_id: int) -> None:
+        """タスク行の本文クリック（ドラッグでない単純クリック）で選択を切り替える。"""
+        self._cancel_autoclose(permanent=True)
+        if row_id in self.selected_action_rows:
+            self.selected_action_rows.discard(row_id)
+        else:
+            self.selected_action_rows.add(row_id)
+        self._update_action_move_bar()
+        self._render_action_rows()
+
+    def _update_action_move_bar(self) -> None:
+        """選択が1件以上あれば「移動先」チップ行を表示し、0件なら隠す。"""
+        if self.action_move_frame is None:
+            return
+        if self.selected_action_rows:
+            self.action_move_frame.pack(
+                pady=(0, 2), padx=20, fill="x", before=self._action_scroll_outer,
+            )
+        else:
+            self.action_move_frame.pack_forget()
+
+    def _move_selected_actions(self, dest_category: str) -> None:
+        """「移動先」チップをクリックした時、選択中の全行をまとめて移動する。"""
+        if not self.selected_action_rows:
+            return
+        self._move_actions_to_category(set(self.selected_action_rows), dest_category)
+
+    def _move_actions_to_category(self, row_ids: set, dest_category: str) -> None:
+        """
+        指定した行集合のカテゴリをまとめて書き換える共通処理。
+        複数選択での移動・ドラッグでの移動、どちらもここに合流させる
+        （キャッシュ更新・選択クリア・再描画を1箇所にまとめて漏れを防ぐ）
+        """
+        if not row_ids:
+            return
+        self._cancel_autoclose(permanent=True)
+        try:
+            ok = set_actions_category(list(row_ids), dest_category)
+        except Exception as e:
+            print(f"❌ タスクの移動に失敗しました: {e}")
+            ok = False
+        if not ok:
+            return
+        for action in self.pending_actions:
+            if action["row"] in row_ids:
+                action["category"] = dest_category
+        self.selected_action_rows.clear()
+        self._update_action_move_bar()
+        self._render_action_rows()
+
     def _render_action_rows(self) -> None:
         """
         たまっているアクション一覧を、MS To Do風の1行カードとして
-        縦に積んで描画し直す。★優先の切替・チェックでの完了のたびに呼ばれる。
+        縦に積んで描画し直す。★優先の切替・チェックでの完了・タブ切替の
+        たびに呼ばれる。self.pending_actionsは全カテゴリ共通のキャッシュで、
+        表示するタブに応じたフィルタはここで行う（Allなら全件）
         """
         if self.action_list_inner is None:
             return
@@ -2177,16 +2430,24 @@ class PopupWindow:
 
         icon_font = tkfont.Font(family="Yu Gothic UI", size=13)
         text_font = tkfont.Font(family="Yu Gothic UI", size=self.action_font_size)
+        dot_font = tkfont.Font(family="Yu Gothic UI", size=9)
 
-        for action in self.pending_actions:
+        visible = [
+            a for a in self.pending_actions
+            if self.active_tab == ACTION_TAB_ALL or a["category"] == self.active_tab
+        ]
+
+        for action in visible:
             row_id = action["row"]
-            row = tk.Frame(self.action_list_inner, bg=ACTION_CARD_BG)
+            is_selected = row_id in self.selected_action_rows
+            card_bg = ACTION_CARD_SELECTED_BG if is_selected else ACTION_CARD_BG
+            row = tk.Frame(self.action_list_inner, bg=card_bg)
             row.pack(side="top", fill="x", pady=(0, 3))
             row.bind("<MouseWheel>", self._on_action_list_mousewheel)
 
             # ○チェック（左端）。クリックで即完了＝一覧から消える
             check_btn = tk.Label(
-                row, text="○", bg=ACTION_CARD_BG, fg=ACTION_CHECK_COLOR,
+                row, text="○", bg=card_bg, fg=ACTION_CHECK_COLOR,
                 font=icon_font, cursor="hand2", padx=10, pady=8,
             )
             check_btn.pack(side="left")
@@ -2195,10 +2456,21 @@ class PopupWindow:
             )
             check_btn.bind("<MouseWheel>", self._on_action_list_mousewheel)
 
+            # Allタブでは、所属カテゴリを示す色ドットを○の右に添える
+            # （タグチップの既存ドット実装と同じ、単色のUnicode図形グリフ。
+            # Windows上のTcl/Tkは色つき絵文字を描画できないため）
+            if self.active_tab == ACTION_TAB_ALL:
+                dot = tk.Label(
+                    row, text="●", bg=card_bg, fg=ACTION_TAB_COLORS[action["category"]],
+                    font=dot_font,
+                )
+                dot.pack(side="left", padx=(0, 2))
+                dot.bind("<MouseWheel>", self._on_action_list_mousewheel)
+
             content = action["content"]
             label = tk.Label(
-                row, text=content, bg=ACTION_CARD_BG, fg=TEXT_COLOR, font=text_font,
-                anchor="w",
+                row, text=content, bg=card_bg, fg=TEXT_COLOR, font=text_font,
+                anchor="w", cursor="hand2",
             )
             label.pack(side="left", fill="x", expand=True)
             # 固定文字数での省略をやめ、実際にこのラベルへ割り当てられた
@@ -2212,12 +2484,17 @@ class PopupWindow:
                     self._fit_action_row_text(lbl, full, fnt, e.width),
             )
             label.bind("<MouseWheel>", self._on_action_list_mousewheel)
+            # 本文クリックで選択トグル、ドラッグで他タブへ移動。クリックか
+            # ドラッグかは押下からの移動量で区別する（_on_row_press参照）
+            label.bind("<ButtonPress-1>", lambda e, r=row_id: self._on_row_press(e, r))
+            label.bind("<B1-Motion>", self._on_row_motion)
+            label.bind("<ButtonRelease-1>", lambda e, r=row_id: self._on_row_release(e, r))
 
             # ★優先（右端）。オンで青塗り、オフで灰アウトライン
             star_color = ACTION_STAR_ON_COLOR if action["starred"] else ACTION_STAR_OFF_COLOR
             star_char = "★" if action["starred"] else "☆"
             star_btn = tk.Label(
-                row, text=star_char, bg=ACTION_CARD_BG, fg=star_color, font=icon_font,
+                row, text=star_char, bg=card_bg, fg=star_color, font=icon_font,
                 cursor="hand2", padx=10,
             )
             star_btn.pack(side="right")
@@ -2270,6 +2547,124 @@ class PopupWindow:
         self.pending_actions = [a for a in self.pending_actions if a["row"] != row]
         self._render_action_rows()
 
+    # ------------------------------------------------------------------
+    # タスク行のドラッグ＆ドロップ（別タブへの移動）
+    # ------------------------------------------------------------------
+    # クリックと区別するための移動量のしきい値（px）。これ未満の移動は
+    # 「単純クリック」として選択トグルに、以上は「ドラッグ」として扱う
+    _DRAG_THRESHOLD_PX = 6
+
+    def _on_row_press(self, event, row_id: int) -> None:
+        """
+        タスク行の本文ラベル押下時。ここではまだクリックかドラッグかを
+        判定しない（_on_row_motionで一定距離動くまでは保留）。
+        既に複数選択されている行を押した場合は、選択セット全体を
+        ドラッグ対象にする（一般的なファイルマネージャーの挙動）
+        """
+        self._drag_start_x, self._drag_start_y = event.x_root, event.y_root
+        self._drag_active = False
+        if row_id in self.selected_action_rows and len(self.selected_action_rows) > 1:
+            self._drag_row_ids = set(self.selected_action_rows)
+        else:
+            self._drag_row_ids = {row_id}
+
+    def _on_row_motion(self, event) -> None:
+        """
+        押下後にポインタが動いた時。しきい値を超えたら初めてドラッグ状態に
+        入り、ゴーストラベルを表示する。座標は必ずevent.x_root/y_root
+        （スクリーン座標）を使う——Tkの暗黙グラブにより<B1-Motion>は
+        ドラッグ開始元のウィジェットに届き続けるため、ウィジェット相対
+        座標(event.x/y)はポインタがそのウィジェットを離れた時点で
+        意味を失う
+        """
+        dx = event.x_root - self._drag_start_x
+        dy = event.y_root - self._drag_start_y
+        if not self._drag_active and (abs(dx) > self._DRAG_THRESHOLD_PX or abs(dy) > self._DRAG_THRESHOLD_PX):
+            self._drag_active = True
+            self._show_drag_ghost()
+        if self._drag_active:
+            if self._drag_ghost is not None:
+                self._drag_ghost.move_to(event.x_root, event.y_root)
+            self._update_drag_hover_tab(event.x_root, event.y_root)
+
+    def _on_row_release(self, event, row_id: int) -> None:
+        """
+        押下していたボタンを離した時。ドラッグ状態だったかどうかで分岐する。
+        ドラッグでなければ「単純クリック」として選択トグルを呼ぶ——
+        同じウィジェットに選択トグル用の独立した<Button-1>ハンドラを
+        別途付けると、ドラッグ開始と選択トグルが同時に発火してしまうため、
+        必ずこのrelease分岐の中の一本道にする
+        """
+        was_drag = self._drag_active
+        if was_drag:
+            self._finish_drag(event.x_root, event.y_root)
+        self._drag_active = False
+        self._drag_row_ids = set()
+        if not was_drag:
+            self._toggle_row_selection(row_id)
+
+    def _show_drag_ghost(self) -> None:
+        """ドラッグ開始時、カーソル追従のゴーストラベルを表示する。"""
+        if len(self._drag_row_ids) > 1:
+            text = f"{len(self._drag_row_ids)}件を移動"
+        else:
+            action = next(
+                (a for a in self.pending_actions if a["row"] in self._drag_row_ids), None,
+            )
+            text = action["content"] if action else "1件を移動"
+        try:
+            self._drag_ghost = _DragGhost(self.window, text)
+        except Exception as e:
+            print(f"⚠️ ドラッグ表示に失敗しました（移動自体は続行できます）: {e}")
+            self._drag_ghost = None
+
+    def _update_drag_hover_tab(self, x_root: int, y_root: int) -> None:
+        """
+        ドラッグ中、ポインタが3つの実カテゴリタブのどれの上にあるかを
+        判定し、該当タブをハイライトする。Allタブはドロップ先として無効
+        （カテゴリではなく仮想タブのため）なので判定対象に含めない
+        """
+        hover_id = None
+        for category in ACTION_MOVE_TARGETS:
+            btn = self.action_tab_buttons.get(category)
+            if btn is None or not btn.winfo_exists():
+                continue
+            bx, by = btn.winfo_rootx(), btn.winfo_rooty()
+            bw, bh = btn.winfo_width(), btn.winfo_height()
+            if bx <= x_root <= bx + bw and by <= y_root <= by + bh:
+                hover_id = category
+                break
+        if hover_id != self._drag_hover_tab_id:
+            if self._drag_hover_tab_id is not None:
+                prev_btn = self.action_tab_buttons.get(self._drag_hover_tab_id)
+                if prev_btn is not None and prev_btn.winfo_exists():
+                    prev_btn.config(highlightthickness=0)
+            if hover_id is not None:
+                new_btn = self.action_tab_buttons.get(hover_id)
+                if new_btn is not None:
+                    new_btn.config(
+                        highlightthickness=2, highlightbackground=TEXT_COLOR,
+                    )
+            self._drag_hover_tab_id = hover_id
+
+    def _finish_drag(self, x_root: int, y_root: int) -> None:
+        """
+        ドラッグ終了時。ドロップ位置が有効なカテゴリタブの上であれば
+        そのカテゴリへ移動し、それ以外（ウィンドウ外・Allタブの上等）
+        でリリースした場合は何もせずキャンセル扱いにする
+        """
+        dest = self._drag_hover_tab_id
+        if self._drag_ghost is not None:
+            self._drag_ghost.destroy()
+            self._drag_ghost = None
+        if self._drag_hover_tab_id is not None:
+            hover_btn = self.action_tab_buttons.get(self._drag_hover_tab_id)
+            if hover_btn is not None and hover_btn.winfo_exists():
+                hover_btn.config(highlightthickness=0)
+        self._drag_hover_tab_id = None
+        if dest is not None:
+            self._move_actions_to_category(set(self._drag_row_ids), dest)
+
     def _toggle_action_star(self, row: int) -> None:
         """
         ★優先マークをクリックしたアクションの優先度を切り替える。
@@ -2301,7 +2696,10 @@ class PopupWindow:
         if not content:
             return
         try:
-            ok = add_action(content, tag=self.selected_tag or "", origin="manual")
+            ok = add_action(
+                content, tag=self.selected_tag or "", origin="manual",
+                category=self._resolve_new_action_category(),
+            )
         except Exception as e:
             print(f"❌ アクションの追加に失敗しました: {e}")
             ok = False
@@ -2394,7 +2792,7 @@ class PopupWindow:
         # 振り返り自体は失われない
         if p and self.p_to_action_var.get():
             try:
-                add_action(p, tag=tag, origin="P")
+                add_action(p, tag=tag, origin="P", category=self._resolve_new_action_category())
                 # 窓が開いたままになったため、追加したタスクを一覧に即反映する
                 self.pending_actions = self._fetch_pending_actions()
                 self._render_action_rows()
