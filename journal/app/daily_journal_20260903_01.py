@@ -2,7 +2,21 @@
 """
 daily_journal_20260903_01.py
 学びジャーナル - ホットキー起動の入力ポップアップUI
-Version: 0.46.0
+Version: 0.47.0
+
+v0.47.0での変更点：
+タスクのタブ分類にAutomation（マゼンタ、#d15fa0）を追加し、Private/Kousouの
+間に挿入した（storage.py v0.15.1のACTION_CATEGORIES拡張と対になる変更）。
+5タブは300px幅の1行に収まらないため、タブバーを2行（Office/Private/
+Automation・Kousou/All）に分割した。あわせて、複数選択時の「移動先」
+チップ行も、チップ数が増えると窓の外にはみ出す不具合を修正した（旧実装は
+「移動先:」ラベルとチップを同じ行に自然幅で並べており、3チップまでは
+偶然収まっていたが、Automation追加で4チップになった際に最後のチップが
+はみ出して見えなくなっていた。ラベルとチップ行を分け、チップ側はタブ
+バーと同じfill="x"均等割りにすることで、チップ数が増えても常に300px幅に
+収まるようにした）。「移動先」チップとタブバー本体はどちらも同じ
+ACTION_TAB_COLORS辞書から色を引く単一の情報源のため、色の食い違いは
+構造的に起こらない
 
 v0.46.0での変更点：
 タスク一覧をOffice（青）/Private（緑）/Kousou（オレンジ）/All（紫）の
@@ -138,6 +152,7 @@ from tkinter import font as tkfont
 
 from storage import (
     ACTION_CATEGORIES,
+    ACTION_CATEGORY_AUTOMATION,
     ACTION_CATEGORY_KOUSOU,
     ACTION_CATEGORY_OFFICE,
     ACTION_CATEGORY_PRIVATE,
@@ -206,27 +221,36 @@ ACTION_CHECK_COLOR = "#9aa4c8"      # ○チェックアイコンの色
 FORECAST_BTN_BG = "#cfe6dd"         # 読み（予測）ボタンの地色。DB(青系)・
                                      # 閉じる(灰)と区別が付く淡い緑寄り
 
-# タスクのタブ分類（Office/Private/Kousou/All）のボタン色。
-# Office=青／Private=緑／Kousou=オレンジ／All=紫。ひれぶりの5色・タグの
-# 4色とも被らない色相を選んでいる
+# タスクのタブ分類（Office/Private/Automation/Kousou/All）のボタン色。
+# Office=青／Private=緑／Automation=マゼンタ／Kousou=オレンジ／All=紫。
+# ひれぶりの5色・タグの4色とも被らない色相を選んでいる
 ACTION_TAB_COLORS = {
     ACTION_CATEGORY_OFFICE: "#4a90e2",
     ACTION_CATEGORY_PRIVATE: "#4caf7d",
+    ACTION_CATEGORY_AUTOMATION: "#d15fa0",
     ACTION_CATEGORY_KOUSOU: "#e08a3c",
     ACTION_TAB_ALL: "#9b6fd6",
 }
 ACTION_TAB_LABELS = {
     ACTION_CATEGORY_OFFICE: "Office",
     ACTION_CATEGORY_PRIVATE: "Private",
+    ACTION_CATEGORY_AUTOMATION: "Automation",
     ACTION_CATEGORY_KOUSOU: "Kousou",
     ACTION_TAB_ALL: "All",
 }
-# タブバーの並び順（辞書のキー順に依存しないよう明示的にタプルで持つ）
-ACTION_TAB_ORDER = (
-    ACTION_CATEGORY_OFFICE, ACTION_CATEGORY_PRIVATE, ACTION_CATEGORY_KOUSOU, ACTION_TAB_ALL,
+# タブバーの並び順・行分け（5タブは300px幅の1行に収まらないため2行に
+# 分ける。ACTION_TAB_ROWSの各内側タプルが1行分＝均等割りの単位になる）
+ACTION_TAB_ROWS = (
+    (ACTION_CATEGORY_OFFICE, ACTION_CATEGORY_PRIVATE, ACTION_CATEGORY_AUTOMATION),
+    (ACTION_CATEGORY_KOUSOU, ACTION_TAB_ALL),
 )
-# 「移動先」バーは仮想タブのAllへは移動できない（Allはカテゴリではないため）
-ACTION_MOVE_TARGETS = (ACTION_CATEGORY_OFFICE, ACTION_CATEGORY_PRIVATE, ACTION_CATEGORY_KOUSOU)
+# 「移動先」バーは仮想タブのAllへは移動できない（Allはカテゴリではないため）。
+# ACTION_MOVE_TARGETSは「移動先」チップとドラッグ中のドロップ先判定の
+# 両方が共有する唯一の情報源——ここに1つ追加するだけで両方に反映される
+ACTION_MOVE_TARGETS = (
+    ACTION_CATEGORY_OFFICE, ACTION_CATEGORY_PRIVATE,
+    ACTION_CATEGORY_AUTOMATION, ACTION_CATEGORY_KOUSOU,
+)
 
 # 「魂のひれぶり」信号（喜・怒・無・哀・楽）のボタン色。タグ4色・Journalトグルの
 # ラベンダーとも被らない色相を1つずつ選び、押した感情がどれだったか
@@ -463,7 +487,7 @@ HOTKEY = "ctrl+shift+j"
 # する）専用のホットキー。Windows標準では未使用で、他アプリとの衝突も
 # 確認されていない組み合わせを選んだ
 HOTKEY_FOCUS = "ctrl+shift+t"
-VERSION = "0.46.0"
+VERSION = "0.47.0"
 
 # ファイル名（daily_journal_yyyymmdd_NN.py）そのものがバージョン識別子を
 # 兼ねる運用のため、ここに手で書いた文字列を置くと更新を忘れて古いまま
@@ -1285,23 +1309,24 @@ class PopupWindow:
             dashboard_btn.image = dashboard_img
         dashboard_btn.grid(row=0, column=2, sticky="ew", padx=3)
 
-        # タスクのタブ分類（Office/Private/Kousou/All）。4タブ均等幅で
-        # 1行に並べる。300px幅のポップアップに「タスク」見出し行と
-        # 同じ行では収まらないため、独立した行にする
-        action_tab_frame = tk.Frame(self.window, bg=BG_COLOR)
-        action_tab_frame.pack(pady=(8, 0), padx=20, fill="x")
-        self._register_themed(action_tab_frame)
-
+        # タスクのタブ分類（Office/Private/Automation/Kousou/All）。
+        # 5タブは300px幅の1行には収まらないため、ACTION_TAB_ROWSに従って
+        # 2行に分ける（各行の中は均等幅）。300px幅のポップアップに
+        # 「タスク」見出し行と同じ行では収まらないため、独立した行にする
         action_tab_font = tkfont.Font(family="Yu Gothic UI", size=9, weight="bold")
         self.action_tab_buttons = {}
-        for tab_id in ACTION_TAB_ORDER:
-            tab_btn = tk.Label(
-                action_tab_frame, text=ACTION_TAB_LABELS[tab_id], font=action_tab_font,
-                cursor="hand2", padx=2, pady=4, anchor="center",
-            )
-            tab_btn.pack(side="left", fill="x", expand=True, padx=1)
-            tab_btn.bind("<Button-1>", lambda e, t=tab_id: self._switch_action_tab(t))
-            self.action_tab_buttons[tab_id] = tab_btn
+        for row_i, tab_row in enumerate(ACTION_TAB_ROWS):
+            action_tab_frame = tk.Frame(self.window, bg=BG_COLOR)
+            action_tab_frame.pack(pady=(8 if row_i == 0 else 2, 0), padx=20, fill="x")
+            self._register_themed(action_tab_frame)
+            for tab_id in tab_row:
+                tab_btn = tk.Label(
+                    action_tab_frame, text=ACTION_TAB_LABELS[tab_id], font=action_tab_font,
+                    cursor="hand2", padx=2, pady=4, anchor="center",
+                )
+                tab_btn.pack(side="left", fill="x", expand=True, padx=1)
+                tab_btn.bind("<Button-1>", lambda e, t=tab_id: self._switch_action_tab(t))
+                self.action_tab_buttons[tab_id] = tab_btn
         self._update_action_tab_buttons()
 
         # たまっているアクション一覧。MS To Doの参考画像に合わせ、○チェックは
@@ -1439,25 +1464,35 @@ class PopupWindow:
         self._register_themed(self.forecast_seed_label, bg=True, fg=True)
 
         # 複数選択中だけ出す「移動先」チップ行。Allは移動先になれない
-        # （カテゴリではなく仮想タブのため）ので3チップのみ
+        # （カテゴリではなく仮想タブのため）ので実カテゴリの数だけ並ぶ。
+        # チップ数が増えてもタブバーと同じくfill="x"の均等割りにして
+        # あるため、300px幅からはみ出して見切れることが無い（チップを
+        # 「移動先:」ラベルと同じ行に自然幅で並べていた旧実装は、
+        # Automation追加で4チップになった際に最後のチップが窓の外に
+        # はみ出す不具合になったため、ラベルとチップを別行に分けた）
         self.action_move_frame = tk.Frame(self.window, bg=BG_COLOR)
         self._register_themed(self.action_move_frame)
         move_label_font = tkfont.Font(family="Yu Gothic UI", size=8)
-        tk.Label(
+        move_label = tk.Label(
             self.action_move_frame, text="移動先:", bg=BG_COLOR, fg=PLACEHOLDER_COLOR,
-            font=move_label_font,
-        ).pack(side="left", padx=(0, 4))
-        self._register_themed(self.action_move_frame.winfo_children()[-1], bg=True, fg=True)
+            font=move_label_font, anchor="w",
+        )
+        move_label.pack(side="top", fill="x")
+        self._register_themed(move_label, bg=True, fg=True)
+
+        move_chip_row = tk.Frame(self.action_move_frame, bg=BG_COLOR)
+        move_chip_row.pack(side="top", fill="x", pady=(2, 0))
+        self._register_themed(move_chip_row)
         move_chip_font = tkfont.Font(family="Yu Gothic UI", size=9, weight="bold")
         self.action_move_buttons = {}
         for category in ACTION_MOVE_TARGETS:
             color = ACTION_TAB_COLORS[category]
             chip = tk.Label(
-                self.action_move_frame, text=ACTION_TAB_LABELS[category],
+                move_chip_row, text=ACTION_TAB_LABELS[category],
                 bg=color, fg=_readable_text_color(color), font=move_chip_font,
-                cursor="hand2", padx=6, pady=2,
+                cursor="hand2", padx=2, pady=2, anchor="center",
             )
-            chip.pack(side="left", padx=2)
+            chip.pack(side="left", fill="x", expand=True, padx=1)
             chip.bind("<Button-1>", lambda e, c=category: self._move_selected_actions(c))
             self.action_move_buttons[category] = chip
         # 選択0件の間は表示しない（packせず隠しておく。表示するときは

@@ -2,7 +2,15 @@
 """
 storage.py
 学びジャーナル - Excel(SharePoint同期フォルダ)読み書きモジュール
-Version: 0.15.0
+Version: 0.15.1
+
+v0.15.1での変更点：
+タスクのタブ分類にAutomation（コードによる自動化作業専用）を追加し、
+Office/Private/Automation/Kousouの4カテゴリにした。ACTION_CATEGORIES
+に定数を1つ追加しただけで、カテゴリ列は既に存在するためスキーマ変更・
+マイグレーションは不要。get_actions()のバリデーション・
+set_actions_category()の検証・ACTION_TABS（Allとの合算）は
+ACTION_CATEGORIESをメンバーシップ判定するだけの既存実装のため無改修
 
 v0.15.0での変更点：
 タスク（Actions）にOffice/Private/Kousouの3タブ分類を追加した。
@@ -89,13 +97,17 @@ ACTION_STATUS_DONE = "完了"
 
 # タスクのタブ分類（Office/Private/Kousouの3カテゴリ＋仮想タブAll）。
 # 「All」は行が実際に持つ値には絶対にならない——複数タブを横断して
-# 全件を見るためのビュー専用の値。行のカテゴリは必ずOffice/Private/Kousou
-# のいずれかで、Allタブの表示・完了操作は「同じ行を別の見え方で扱う」
-# だけなので、Allとの同期のための特別な処理は不要
+# 全件を見るためのビュー専用の値。行のカテゴリは必ずOffice/Private/
+# Automation/Kousouのいずれかで、Allタブの表示・完了操作は「同じ行を
+# 別の見え方で扱う」だけなので、Allとの同期のための特別な処理は不要
 ACTION_CATEGORY_OFFICE = "office"
 ACTION_CATEGORY_PRIVATE = "private"
+ACTION_CATEGORY_AUTOMATION = "automation"
 ACTION_CATEGORY_KOUSOU = "kousou"
-ACTION_CATEGORIES = (ACTION_CATEGORY_OFFICE, ACTION_CATEGORY_PRIVATE, ACTION_CATEGORY_KOUSOU)
+ACTION_CATEGORIES = (
+    ACTION_CATEGORY_OFFICE, ACTION_CATEGORY_PRIVATE,
+    ACTION_CATEGORY_AUTOMATION, ACTION_CATEGORY_KOUSOU,
+)
 # この機能導入前から登録済みだった（カテゴリ列を持たない）既存タスクの
 # 読み込み時フォールバック先
 ACTION_CATEGORY_DEFAULT_LEGACY = ACTION_CATEGORY_OFFICE
