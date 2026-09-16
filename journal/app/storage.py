@@ -2,7 +2,14 @@
 """
 storage.py
 学びジャーナル - Excel(SharePoint同期フォルダ)読み書きモジュール
-Version: 0.15.1
+Version: 0.15.2
+
+v0.15.2での変更点：
+実行用フォルダ(...\PythonScripts\Journal)を廃止し、gitクローン先から
+直接起動する構成に移行したことに伴い、EXCEL_PATHを新しい独立データ
+フォルダ(...\Documents\LearningJournalData\journal_data.xlsx)に変更した。
+Excelのシート構造・既存の記録内容への変更は無い。移行にはjournal_data.xlsx
+自体を新しい場所へ手動で移動する作業が必要（詳細は越智さんへの案内を参照）
 
 v0.15.1での変更点：
 タスクのタブ分類にAutomation（コードによる自動化作業専用）を追加し、
@@ -66,8 +73,15 @@ from openpyxl import Workbook, load_workbook
 # TODO: 越智さんのSharePoint(OneDrive)同期フォルダの実際のパスに
 #       書き換えてください。例:
 #       r"C:\Users\nx023836\Nexperia\JP Site - Journal\journal_data.xlsx"
+#
+# 実行用フォルダ(...\PythonScripts\Journal)を廃止し、gitクローン先
+# (...\PythonScripts\my-claude-code\journal)から直接起動する構成に
+# 移行したことに伴い、データファイルの置き場所もgitクローン先や
+# PythonScripts配下に依存しない独立フォルダへ変更した。既存の記録
+# （TimeLog・Actions・Hirebi等）はこの変更では一切書き換わらない
+# ——journal_data.xlsx自体を新しい場所へ移動する手順だけが必要
 # ============================================================
-EXCEL_PATH = r"C:\Users\nx023836\Documents\PythonScripts\Journal\journal_data.xlsx"
+EXCEL_PATH = r"C:\Users\nx023836\Documents\LearningJournalData\journal_data.xlsx"
 
 ENTRIES_SHEET = "Entries"
 TAGMASTER_SHEET = "TagMaster"
