@@ -2,7 +2,17 @@
 """
 daily_journal_20260903_01.py
 学びジャーナル - ホットキー起動の入力ポップアップUI
-Version: 0.47.0
+Version: 0.47.1
+
+v0.47.1での変更点：
+タブバー本体の配色を、複数選択時の「移動先」チップと完全に統一した。
+従来は非アクティブなタブだけ_blend_toward()でBG_COLORに寄せた淡色に
+していたため、同じカテゴリでもタブバーでは暗く沈み、移動先チップでは
+鮮やかに見えるという食い違いが実機のスクリーンショットで指摘された。
+_update_action_tab_buttons()を、アクティブ/非アクティブを問わず常に
+ACTION_TAB_COLORSそのものを背景にするよう変更し、アクティブかどうかは
+色の濃淡ではなく縁取り（highlightthickness、ドラッグ中のドロップ先
+ハイライトと同じ手法）で示すようにした
 
 v0.47.0での変更点：
 タスクのタブ分類にAutomation（マゼンタ、#d15fa0）を追加し、Private/Kousouの
@@ -487,7 +497,7 @@ HOTKEY = "ctrl+shift+j"
 # する）専用のホットキー。Windows標準では未使用で、他アプリとの衝突も
 # 確認されていない組み合わせを選んだ
 HOTKEY_FOCUS = "ctrl+shift+t"
-VERSION = "0.47.0"
+VERSION = "0.47.1"
 
 # ファイル名（daily_journal_yyyymmdd_NN.py）そのものがバージョン識別子を
 # 兼ねる運用のため、ここに手で書いた文字列を置くと更新を忘れて古いまま
@@ -2359,17 +2369,22 @@ class PopupWindow:
 
     def _update_action_tab_buttons(self) -> None:
         """
-        タブバーの各ボタンの配色を、アクティブ/非アクティブの状態に
-        合わせて更新する。アクティブはカテゴリ色そのもの、非アクティブは
-        タグチップの非選択時と同じ_blend_toward()でBG_COLORに寄せた淡色。
+        タブバーの各ボタンの配色を更新する。アクティブ/非アクティブを
+        問わず常にACTION_TAB_COLORSそのものを背景にする——「移動先」
+        チップ（1464-1473）と全く同じ色の引き方にすることで、タブバー
+        本体と移動先チップの見た目を完全に統一する（以前はアクティブ
+        以外を_blend_toward()でBG_COLORに寄せた淡色にしていたため、
+        同じカテゴリでもタブバーでは暗く沈み、移動先チップでは鮮やかに
+        見えるという食い違いがあった）。どれが選択中かは、色の濃淡では
+        なく縁取り（ドラッグ中のドロップ先ハイライトと同じ手法）で示す
         """
         for tab_id, btn in self.action_tab_buttons.items():
             color = ACTION_TAB_COLORS[tab_id]
+            btn.config(bg=color, fg=_readable_text_color(color))
             if tab_id == self.active_tab:
-                bg = color
+                btn.config(highlightthickness=2, highlightbackground=TEXT_COLOR)
             else:
-                bg = _blend_toward(color, BG_COLOR, 0.72)
-            btn.config(bg=bg, fg=_readable_text_color(bg))
+                btn.config(highlightthickness=0)
 
     def _switch_action_tab(self, tab_id: str) -> None:
         """
