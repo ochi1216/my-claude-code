@@ -45,6 +45,10 @@ Outlookメール解析・アクションダッシュボードツール。詳細�
 
 セットアップ手順は [`po_database_organizer/README.md`](po_database_organizer/README.md) を参照。
 
+## 京都市図書館 新着図書サマリ（library_management）
+
+セットアップ手順は [`library_management/README.md`](library_management/README.md) を参照。
+
 ## Shareflex Document Dashboard
 
 セットアップ手順は [`shareflex_dashboard/README.md`](shareflex_dashboard/README.md) を参照。

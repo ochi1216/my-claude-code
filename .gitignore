@@ -44,6 +44,10 @@ onenote_report_generator/bookmarks.json
 onenote_report_generator/bookmarks.json.bak
 onenote_report_generator/reports/*.html
 
+# library_management: 実行時に生成される冊数・既知書籍の履歴ファイル。
+# 個人の読書履歴（分類ごとの既読書籍リスト）が記録されるため、リポジトリには含めない。
+library_management/category_history.json
+
 # ツールランチャーの実行ログ（実行のたびに追記される実行時生成物）
 tool_launcher/launcher_log.txt
 # ツールランチャー: 多重起動防止の補助ファイル（実行中PIDを記録。実行時生成物）
