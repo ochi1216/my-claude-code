@@ -3,6 +3,22 @@
 このフォルダ内の変更履歴。バージョンアップ時は旧ファイルを残したまま新ファイルを追加し、
 ここに変更点を追記する。
 
+## [20260917_01] - 2026-09-17
+
+**更新ファイル:** `tools.json`
+
+`library_new_stock`（図書館管理ツール）のエントリを、`my-claude-code`リポジトリで
+Git管理を開始した`library_management/`フォルダを指すように修正した。
+
+### 変更内容
+- `root`: `"legacy"` → `"repo"`
+- `path`: `"Library/Library_new_stock_summary_"` → `"library_management/Library_new_stock_summary_"`
+
+これまでは旧・`%USERPROFILE%\Documents\PythonScripts\Library\`配下の
+スタンドアロンスクリプトを起動していたため、Git管理下のファイルとは
+別系統の二重管理状態になっていた。本修正でTool Launcherからの起動先が
+Git管理下のファイルに一致する。
+
 ## [20260915_06] - 2026-09-16
 
 **追加ファイル:** `tool_launcher_20260915_04.py`

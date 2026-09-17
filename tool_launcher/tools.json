@@ -262,9 +262,9 @@
       "id": "library_new_stock",
       "label": "図書館管理ツール",
       "category": "research",
-      "root": "legacy",
+      "root": "repo",
       "kind": "py",
-      "path": "Library/Library_new_stock_summary_",
+      "path": "library_management/Library_new_stock_summary_",
       "gemini": "direct",
       "status": "active"
     },
