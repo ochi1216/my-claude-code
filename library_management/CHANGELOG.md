@@ -1,3 +1,17 @@
+VERSION 20260917_01
+追加・修正
+Summaryフォルダ（生成済みHTMLサマリの出力先）に日々溜まっていく
+Library_new_stock_summary_*.htmlを、手作業ではなくワンクリックでまとめて
+ごみ箱へ移動できるバッチファイル Library_stock_summary_remover.bat を追加しました。
+完全削除ではなくごみ箱への移動のため、誤操作時もWindowsのごみ箱から復元できます。
+Tool Launcherにも「図書館サマリ削除（ごみ箱移動）」として登録しました。
+
+変更関数
+なし（Python本体は無変更）
+
+新規追加：
+Library_stock_summary_remover.bat（PowerShellのMicrosoft.VisualBasic.FileIO.FileSystem.DeleteFileをSendToRecycleBinオプションで呼び出し、ごみ箱移動を実現）
+
 VERSION 20260401.01
 追加・修正
 自動実行（サイレント）モードの追加: Windowsタスクスケジューラやバッチファイルからの自動実行に対応するため、起動引数 --auto を検知して動作を変えるサイレントモードを実装しました。UIスキップとデフォルト条件の適用: --auto 起動時はGUI（Tkinter）を表示せず、「全カテゴリ対象」「新着のみ抽出」「出版年月フィルタなし」のデフォルト条件を自動適用してバックグラウンド処理へ移行します。ブラウザ起動の抑制と安全な終了: --auto 起動時は処理完了後のブラウザ自動起動（webbrowser.open）をスキップし、無限ループを1回で抜けて（break）プロセスを正常終了させることで、タスクのハングアップを完全に防止しました。

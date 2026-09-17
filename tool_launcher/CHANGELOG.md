@@ -3,6 +3,14 @@
 このフォルダ内の変更履歴。バージョンアップ時は旧ファイルを残したまま新ファイルを追加し、
 ここに変更点を追記する。
 
+## [20260917_02] - 2026-09-17
+
+**更新ファイル:** `tools.json`
+
+`library_management/Library_stock_summary_remover.bat`（Summaryフォルダの
+生成済みHTMLサマリをごみ箱へ移動するツール）を、新規エントリ
+`library_stock_summary_remover`として`tools.json`に追加した。
+
 ## [20260917_01] - 2026-09-17
 
 **更新ファイル:** `tools.json`

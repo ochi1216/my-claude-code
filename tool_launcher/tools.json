@@ -269,6 +269,16 @@
       "status": "active"
     },
     {
+      "id": "library_stock_summary_remover",
+      "label": "図書館サマリ削除（ごみ箱移動）",
+      "category": "research",
+      "root": "repo",
+      "kind": "bat",
+      "path": "library_management/Library_stock_summary_remover.bat",
+      "gemini": "none",
+      "status": "active"
+    },
+    {
       "id": "journal",
       "label": "学びジャーナル（LKPT）",
       "category": "strategy",
