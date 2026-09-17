@@ -17,6 +17,16 @@ import probe_outlook as p  # noqa: E402
 ok, ng = 0, 0
 
 
+def _has_bare_newline(data):
+    """b"\r\n" 以外の裸の \r や \n が含まれるかを調べる。
+
+    "\r\r\n"（今回実機で見つかった不具合の症状）や "\n" 単独は、
+    b"\r\n" を全て取り除いた残りに \r か \n が残るかで判定する。
+    """
+    stripped = data.replace(b"\r\n", b"")
+    return b"\r" in stripped or b"\n" in stripped
+
+
 def check(label, cond, detail=""):
     global ok, ng
     if cond:
@@ -264,6 +274,45 @@ check("メール送信に使われる他のメソッドも呼んでいない",
 check("後始末で Close を呼んでいる", "Close" in called_methods)
 check("保存した下書きに Delete を呼んでいる", "Delete" in called_methods)
 check("結果ファイルをUTF-8 BOM付きで書く", "utf-8-sig" in source)
+
+# ------------------------------------------------------------
+print("\n■ .emlファイルの改行（2026-09-17 実機で判明した不具合の再発防止）")
+# ------------------------------------------------------------
+# 越智さんの会社PCで、.emlの中身がOutlookに正しく解釈されず、ヘッダー行が
+# そのまま本文の文字として表示される不具合が実際に起きた。原因は、手組みの
+# "\r\n" 入り文字列をテキストモードで書き込んでいたため、Windowsのテキストモードが
+# 文字列中の "\n" をもう一度 os.linesep に変換し、実際の改行が "\r\r\n" に
+# 壊れていたこと。Linux(この検証環境)ではこの二重変換が起きないため、
+# 当時のテストでは検出できなかった。ここでは生成されたバイト列を直接検証し、
+# プラットフォームに関わらずこのクラスの不具合を検出できるようにする。
+
+eml_bytes = p.build_eml_bytes("probe@example.com", "件名テスト", "<p>本文</p>")
+
+check("戻り値がbytes（呼び出し側でのテキストモード書き込みを誘発しない）",
+      isinstance(eml_bytes, bytes), type(eml_bytes))
+check("壊れた改行(\\r\\r\\n)を含まない", b"\r\r\n" not in eml_bytes,
+      eml_bytes[:200])
+check("裸の改行(\\r や \\n 単独)を含まない。全て \\r\\n 区切りである",
+      b"\r\n" in eml_bytes and not _has_bare_newline(eml_bytes), "")
+check("Toヘッダーが読める形で含まれる", b"To: probe@example.com" in eml_bytes,
+      eml_bytes[:200])
+check("Subjectヘッダーが含まれる（日本語件名はMIMEエンコードされる）",
+      b"Subject:" in eml_bytes, eml_bytes[:200])
+check("ヘッダーと本文の間に空行がある（ヘッダー終端の目印）",
+      b"\r\n\r\n" in eml_bytes, "")
+check("本文のHTMLが含まれる", b"<p>" in eml_bytes and b"</p>" in eml_bytes,
+      "")
+
+# email標準ライブラリで読み返して、実際にメールとして解釈できることも確認する
+import email  # noqa: E402
+import email.policy  # noqa: E402
+
+parsed = email.message_from_bytes(eml_bytes, policy=email.policy.default)
+check("読み返すとSubjectが正しくデコードされる",
+      parsed["Subject"] == "件名テスト", parsed["Subject"])
+check("読み返すとToが正しい", parsed["To"] == "probe@example.com", parsed["To"])
+check("読み返すと本文がHTMLとして取得できる",
+      "<p>本文</p>" in parsed.get_body(preferencelist=("html",)).get_content(), "")
 
 print("\n{0}\n  成功 {1} 件 / 失敗 {2} 件\n{0}".format("=" * 46, ok, ng))
 sys.exit(1 if ng else 0)

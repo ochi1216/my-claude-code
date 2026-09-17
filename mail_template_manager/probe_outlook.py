@@ -679,19 +679,36 @@ def check_07_user_properties(item, ctx):
         )
 
 
+def build_eml_bytes(to_addr, subject, body_html):
+    """RFC 5322 として正しい .eml のバイト列を組み立てる。
+
+    2026-09-17、越智さんの実機で判明した不具合の修正。手組みの "\\r\\n".join() を
+    テキストモードで書き込むと、Windows のテキストモードが文字列中の "\\n" を
+    もう一度 os.linesep(="\\r\\n") に変換するため、実際の改行が "\\r\\r\\n" に
+    壊れていた（Linux ではこの二重変換が起きないため、開発環境の検証では
+    気づけなかった）。標準ライブラリ email モジュールでメッセージを組み立て、
+    `as_bytes()` で得たバイト列をバイナリモードでそのまま書き出すことで、
+    改行の変換を完全に本関数の外に置かない構造にする。
+    """
+    from email.message import EmailMessage
+
+    msg = EmailMessage()
+    msg["To"] = to_addr
+    msg["Subject"] = subject
+    msg.set_content(body_html, subtype="html", charset="utf-8")
+    return msg.as_bytes(policy=msg.policy.clone(linesep="\r\n"))
+
+
 def check_08_eml(item, ctx):
     eml_path = os.path.join(ctx.out_dir, "probe_sample.eml")
-    body_html = "<html><body><p>MTM probe sample.</p></body></html>"
-    lines = [
-        "To: probe@example.com",
-        "Subject: [MTM PROBE] eml test",
-        "MIME-Version: 1.0",
-        "Content-Type: text/html; charset=utf-8",
-        "",
-        body_html,
-    ]
-    with open(eml_path, "w", encoding="utf-8") as fh:
-        fh.write("\r\n".join(lines))
+    eml_bytes = build_eml_bytes(
+        "probe@example.com", "[MTM PROBE] eml test",
+        "<html><body><p>MTM probe sample.</p></body></html>",
+    )
+    # バイナリモードで書く。テキストモードだと、上で組み立てた正しい改行を
+    # Windowsが再度変換してしまい、同じ不具合が再発するため。
+    with open(eml_path, "wb") as fh:
+        fh.write(eml_bytes)
 
     opened = False
     detail = ""
