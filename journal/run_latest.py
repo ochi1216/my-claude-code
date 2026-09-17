@@ -109,6 +109,7 @@ def _terminate_previous_instances() -> None:
         result = subprocess.run(
             ["powershell", "-NoProfile", "-Command", ps_command],
             capture_output=True, text=True, timeout=10,
+            encoding="cp932", errors="replace",
         )
     except Exception as e:
         _log(f"旧プロセスの検索に失敗しました（無視して続行します）: {e}")
@@ -124,7 +125,7 @@ def _terminate_previous_instances() -> None:
             continue
         subprocess.run(
             ["taskkill", "/PID", str(pid), "/F"],
-            capture_output=True, text=True,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         killed.append(pid)
 

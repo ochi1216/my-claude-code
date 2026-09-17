@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
+r"""
 storage.py
 学びジャーナル - Excel(SharePoint同期フォルダ)読み書きモジュール
 Version: 0.15.2
