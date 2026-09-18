@@ -274,10 +274,10 @@
       "category": "strategy",
       "root": "repo",
       "kind": "bat",
-      "path": "journal/RunConsole.bat",
+      "path": "journal/RunSilent.bat",
       "gemini": "proxy",
       "status": "active",
-      "note": "日々のL(教訓)/K(継続)/P(課題)/T(挑戦)と時間管理・アクションアイテム管理を1つで行うツール。RunConsole.batはrun_latest.pyを呼び、run_latest.pyが最新のdaily_journal_*.pyを選ぶ二段構え。SetupAutoStart.batはWindowsスタートアップ登録用のため割り当てない"
+      "note": "日々のL(教訓)/K(継続)/P(課題)/T(挑戦)と時間管理・アクションアイテム管理を1つで行うツール。RunSilent.batはrun_latest.pyを呼び、run_latest.pyが最新のdaily_journal_*.pyを選ぶ二段構え（コンソールは表示されない）。SetupAutoStart.batはWindowsスタートアップ登録用のため割り当てない"
     },
 
     {
