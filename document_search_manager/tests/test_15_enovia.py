@@ -161,11 +161,19 @@ check("最終更新者（ds6w:who/ds6w:lastModifiedBy）はrev3には無く空�
       result_rev3.last_modified_by == "" and result_rev2.last_modified_by == "Sheribeth Bolanos",
       f"{result_rev3.last_modified_by!r} / {result_rev2.last_modified_by!r}")
 
-check("Document以外（Issue）はenovia_document_type_only=trueで除外される",
+check("Document以外（Issue）は既定スコープ（\"document\"）で除外される",
       ep._item_to_result(ISSUE_ITEM, rank=1) is None)
-ep_all_types = dsm.EnoviaProvider(dict(CFG, enovia_document_type_only=False), None)
+# S04（v20260924_01）: 型フィルタは3択スコープ（"document"/"major"/"all"）に
+# 変わり、EnoviaProviderはtype_scope属性（SearchManagerが検索のたびに設定
+# する。tests/test_25_enovia_type_scope.pyのB3/M1参照）を見る。旧キー
+# enovia_document_type_only（bool）はEnoviaProvider自体では参照せず、
+# _load_config() の起動時読み替えでのみ使う（test_25の「旧キー」節で検証）。
+# このテストはEnoviaProviderのインスタンスを直接作るため、旧キーを渡しても
+# 効果を持たない（仕様どおり）。type_scope="all"を直接設定して検証する。
+ep_all_types = dsm.EnoviaProvider(dict(CFG), None)
+ep_all_types.type_scope = "all"
 issue_result = ep_all_types._item_to_result(ISSUE_ITEM, rank=1)
-check("enovia_document_type_only=falseならIssueも残る（設定で戻せる）",
+check("type_scope=\"all\"ならIssueも残る（設定で戻せる）",
       issue_result is not None and issue_result.document_number == "MC-20260827-112")
 
 

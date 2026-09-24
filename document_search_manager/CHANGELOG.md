@@ -1,5 +1,100 @@
 # Document Search Manager — CHANGELOG
 
+## VERSION 20260924_01
+
+S04（Enovia検索拡張）の**本実装**。v20260911_03で追加した「Enovia型診断」を
+会社PCで実行した結果（2026-09-24、キーワード"NEX13160"、Wiring Diagram/Kit
+両型で属性充足率・「Enoviaで開く」リンクの開通を実測確認）を踏まえ、
+Document以外の型を検索・表示できるようにした。
+
+### 背景
+
+越智さんがEnoviaで部品番号`NEX13160`を検索したところ、Enovia画面では
+Wiring Diagram×2件・Kit×2件の計4件がヒットしたが、本ツールでは0件と表示
+された。原因は`enovia_document_type_only`（既定true）による、Document型
+以外の**クライアント側での無条件除外**。Enoviaへのクエリ自体は既に191種類
+すべての型を要求しており、新しいAPI連携・権限申請は不要（v20260911_03の
+診断機能で確認済み）。
+
+設計はPhase1設計提案→敵対的プロダクトマネージャーレビュー（サブエージェント
+による審査）→Open Questions（既定スコープ・「よく使う型」の中身）の越智さん
+判断→Phase2設計監査、という手順を経て確定した。
+
+### 追加
+
+- Enoviaの検索スコープを3択にした（画面「Enoviaの検索対象」、Enoviaタブに
+  切り替えたときだけ表示）。
+  - ①Documentのみ（既定・従来どおり）
+  - ②よく使う型（Document・Project Space）
+  - ③全種別（Wiring Diagram・Kit等、Document以外もすべて表示）
+- 選んだスコープは`/api/state`に保存し、**次回起動時にも引き継ぐ**
+  （越智さんの判断・Q1=B案）。「よく使う型」の中身（Document・Project
+  Space）は変更しない（越智さんの判断・Q2=B案。部品番号での横断検索では
+  都度③を選ぶ運用とする）。
+- Enovia結果テーブルに新しい列「Enovia型」を追加した。既存の「種別」列
+  （`ds6w:what/ds6w:docExtension`＝拡張子）とは別概念のため、列を分けて
+  混同を避けた。CSV/Excel出力にも同じ列を追加した。
+- 型の表示ラベルは、`nex_`接頭辞を除去し大文字の前にスペースを挿入する
+  機械的な変換ルールで生成する（`EnoviaProvider._enovia_type_label()`）。
+  `nex_Kit`→`Kit`、`nex_WiringDiagram`→`Wiring Diagram`が実機のEnovia画面
+  表示（Typeフィールド）と一致することを2026-09-24に実測確認した。全191型
+  での検証ではないため、対応表は持たず機械変換のみに留める。
+- 主要な列（フォルダ・最終更新者）が型によっては構造的に空欄になることを
+  実機診断で確認した（Kit・Wiring Diagramとも実測で該当）ため、両方とも
+  空欄の行のタイトルに注記アイコン（ⓘ）を付け、取得漏れではなく型の仕様
+  であることをツールチップで示す（列の作り分けはしない）。
+- スコープ別のnote文言を出し分けた。③（全種別）選択時は該当件数と表の
+  行数が一致するため、絞り込みの注記自体を出さない。
+
+### 変更
+
+- `config.json`に`enovia_type_scope_default`（既定`"document"`）・
+  `enovia_major_types`（既定`["Document", "Project Space"]`）を追加した。
+- 旧キー`enovia_document_type_only`（bool）は、新キーが設定されていない
+  場合のみ起動時に読み替える後方互換を持たせた（`true`→`"document"`／
+  `false`→`"all"`、`_load_config()`）。新キーが明示されていれば優先する。
+  実機の`config.json`（本リポジトリには存在しない）にこの旧キーが残って
+  いても、変更なしにそのまま動作する。
+- 検索結果のキャッシュキー（`cacheKey`）にスコープを追加した。スコープを
+  切り替えたときに、古いスコープの結果がキャッシュから誤って再表示される
+  ことを防ぐ（敵対的レビューで指摘された論点。修正済み）。
+
+### 変更しないこと（宣誓）
+
+- Enoviaへの検索クエリ自体（`federated/search`へのリクエスト本文、
+  `additional_query`の191型リスト）は変更していない。応答の絞り込み方だけ
+  を変えた。
+- 認証処理（Cookieの取得・保存）、SharePoint / Nexus側のロジックには
+  一切手を入れていない。
+- AI要約機能は引き続きEnoviaを対象外のまま（変更していない）。
+- 旧バージョンファイル（`document_search_manager_20260911_03.py`）は
+  削除せず`old/`へ移動した。
+
+### 検証結果
+
+- `python -m py_compile document_search_manager_20260924_01.py` … 成功
+- `python tests/run_tests.py` … 全25ファイル・1105項目 合格（新規追加
+  `tests/test_25_enovia_type_scope.py` 45項目を含む。実機診断
+  （2026-09-24、NEX13160）で取得したnex_Kit/nex_WiringDiagramの実データを
+  そのままテストサンプルに転記した）
+- `tests/test_15_enovia.py`のD2（Document以外の除外）検証を、旧キー直渡し
+  から新しい`type_scope`属性を使う形に更新した（仕様変更に伴う陳腐化。
+  理由をコメントで明記）
+- `python tests/ui_check.py`（Playwright、Chromium）… 112項目 合格
+  （既存の回帰なし）。加えて、Enoviaタブでのスコープ選択欄の表示、
+  スコープ「③全種別」選択時にKit/Wiring Diagram行がEnovia型列・
+  注記アイコン付きで表示されることをスクリーンショットで目視確認した
+
+### 未実施（実機でのみ確認可能）
+
+- 3択スコープ・新しい列・注記アイコンの実際の見え方（開発環境ではEnovia
+  へのアクセス自体ができないため、モックデータでのスクリーンショット確認
+  に留まる）
+- スコープを切り替えて連続で検索したときの体感（キャッシュが正しく
+  切り替わるか）
+- `config.json`に旧キー`enovia_document_type_only`が残っている実機環境での
+  起動時ログ（読み替えの警告メッセージが正しく出るか）
+
 ## VERSION 20260911_03
 
 S04（Enovia検索拡張：Document以外の型にも対応）の**Phase3-0**として、

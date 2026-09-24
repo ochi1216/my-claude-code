@@ -293,7 +293,11 @@
   "Sketch"
 ],
 
-  "_comment_enovia_filter": "enovia_document_type_only を true（既定）にすると、応答の ds6w:what/ds6w:type が \"Document\" の行だけを表の対象にする（Enoviaの検索対象タイプは広いため、Issueなどが混ざるのを防ぐ）。件数(nhits)自体は絞り込み前の全種別合計になるため、画面には注記を出す。",
+  "_comment_enovia_scope": "S04（v20260924_01）: Enoviaの検索スコープは enovia_type_scope_default（\"document\"=Documentのみ既定 / \"major\"=よく使う型 / \"all\"=全種別）で決める。画面で選んだスコープは次回起動時に引き継がれる（/api/stateに保存）ため、この値は「保存済みの選択が無いときの初期値」として使われる。enovia_major_types は \"major\" のときに表の対象とする型（ds6w:what/ds6w:type の生値）。旧キー enovia_document_type_only（bool）が残っていても、enovia_type_scope_default が無ければ自動的に読み替えて動作する（true→\"document\" / false→\"all\"）。新規に設定する場合は enovia_type_scope_default を使うこと。",
+  "enovia_type_scope_default": "document",
+  "enovia_major_types": ["Document", "Project Space"],
+
+  "_comment_enovia_filter": "enovia_document_type_only は旧キー（S04以前）。enovia_type_scope_default が未設定のときのみ後方互換で読み替えられる（true→\"document\" / false→\"all\"）。新規設定は enovia_type_scope_default を使うこと。",
   "enovia_document_type_only": true,
   "enovia_page_size": 100,
   "enovia_max_raw_pages": 20
