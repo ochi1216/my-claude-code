@@ -10,6 +10,9 @@
   "flask_port": 5020,
   "auto_open_browser": true,
 
+  "_comment_auto_kill_port_conflict": "起動時にポートが使用中だった場合、そのプロセスが「自分自身の旧起動」（python.exe/pythonw.exeで、コマンドラインにdocument_search_managerを含む）だと確認できたときだけ自動終了して起動を続ける。確認できない場合（無関係なプロセスの可能性）は、従来どおり起動を中止して案内する。falseにすると自動終了を一切行わず、常に案内のみ（旧来の挙動）に戻せる。Windows以外では常に無効。",
+  "auto_kill_port_conflict": true,
+
   "page_size": 25,
   "_comment_max_results": "APIで件数指定が無かった場合のサーバー側の既定値。画面の件数プルダウンの初期値は常に「上位10件」で、前回の作業状態があればそちらが優先される。",
   "default_max_results": 10,
