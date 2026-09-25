@@ -504,6 +504,8 @@ def resolve_root(root_kind, legacy_root):
 
 def tool_target_path(tool, legacy_root):
     """tools.json の path を絶対パスに変換する（存在確認はしない）。"""
+    if tool.get("root") == "absolute":
+        return os.path.normpath(os.path.expandvars(tool.get("path", "")))
     base = resolve_root(tool.get("root"), legacy_root)
     if base is None:
         return None
