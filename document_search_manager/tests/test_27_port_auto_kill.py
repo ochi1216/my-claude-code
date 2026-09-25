@@ -105,6 +105,29 @@ try:
     check("netstat自体が失敗したらNone（例外を投げない）",
           dsm._find_port_owner_pid(5020) is None)
 
+    # ── T1b: ★2026-09-25 実機バグの再発防止★ ──────────────────
+    # 越智さんの会社PCで実際に発生したクラッシュの再現。日本語Windowsでは
+    # netstatの見出し行がCP932で出力されるため、errors="replace"が無いと
+    # デコードに失敗し、result.stdoutがNoneのまま返ってくることがある
+    # （subprocess.runの内部スレッドで例外が握りつぶされるため）。
+    print("\n[T1b] netstatの出力がデコードできず stdout=None で返ってきた場合"
+          "（2026-09-25 実機で発生したクラッシュの再現）")
+
+    dsm.subprocess.run = lambda *a, **k: FakeResult(0, None)
+    check("stdout=Noneでも例外を投げずNoneを返す（実機クラッシュの再発防止）",
+          dsm._find_port_owner_pid(5020) is None)
+
+    captured_kwargs = {}
+
+    def capture_netstat_kwargs(cmd, **kwargs):
+        captured_kwargs.update(kwargs)
+        return FakeResult(0, NETSTAT_SAMPLE)
+    dsm.subprocess.run = capture_netstat_kwargs
+    dsm._find_port_owner_pid(5020)
+    check("netstat呼び出しに errors=\"replace\" が指定されている"
+          "（デコード失敗を例外にしないための必須設定）",
+          captured_kwargs.get("errors") == "replace", captured_kwargs)
+
     # ── T2: _process_command_line（wmic→PowerShellフォールバック） ─
     print("\n[T2] _process_command_line（自プロセス確認のための情報取得）")
 
@@ -140,6 +163,29 @@ try:
     dsm.subprocess.run = fake_run_both_fail
     check("両方失敗したらNone（確認できない扱い）",
           dsm._process_command_line(9999) is None)
+
+    # ★2026-09-25 実機バグの再発防止★ wmic/PowerShellの出力がデコードできず
+    # stdout=Noneで返ってきても、例外を投げずNoneを返すこと。
+    def fake_run_wmic_stdout_none(cmd, **kwargs):
+        return FakeResult(0, None)
+    dsm.subprocess.run = fake_run_wmic_stdout_none
+    check("wmicの stdout=None でも例外を投げずNoneを返す（実機クラッシュの再発防止）",
+          dsm._process_command_line(9999) is None)
+
+    wmic_kwargs, ps_kwargs = {}, {}
+
+    def capture_wmic_ps_kwargs(cmd, **kwargs):
+        if cmd[0] == "wmic":
+            wmic_kwargs.update(kwargs)
+            return FakeResult(1, "")  # フォールバックさせてPowerShellも呼ばせる
+        ps_kwargs.update(kwargs)
+        return FakeResult(0, "python.exe|dummy")
+    dsm.subprocess.run = capture_wmic_ps_kwargs
+    dsm._process_command_line(9999)
+    check("wmic呼び出しに errors=\"replace\" が指定されている",
+          wmic_kwargs.get("errors") == "replace", wmic_kwargs)
+    check("PowerShell呼び出しにも errors=\"replace\" が指定されている",
+          ps_kwargs.get("errors") == "replace", ps_kwargs)
 
     # ── T3: _confirm_self_process（自分自身かどうかの最終判定） ──
     print("\n[T3] _confirm_self_process（自分自身かどうかの最終判定）")
@@ -237,6 +283,30 @@ try:
     dsm.subprocess.run = fake_run_kill_raise
     check("taskkillが例外を投げても、呼び出し元は落とさずFalseを返す",
           dsm._try_auto_kill_port_owner(5020, CFG) is False)
+
+    # ★2026-09-25 実機バグの再発防止★ taskkillが失敗した際のstderrも
+    # デコードできずNoneで返ってくることがあるため、.strip()で落ちないこと。
+    def fake_run_kill_fail_stderr_none(cmd, **k):
+        if cmd[0] == "taskkill":
+            return FakeResult(1, None, None)
+        return FakeResult(0)
+    dsm.subprocess.run = fake_run_kill_fail_stderr_none
+    check("taskkill失敗時にstderr=Noneでも例外を投げずFalseを返す"
+          "（実機クラッシュの再発防止）",
+          dsm._try_auto_kill_port_owner(5020, CFG) is False)
+
+    taskkill_kwargs = {}
+
+    def capture_taskkill_kwargs(cmd, **k):
+        if cmd[0] == "taskkill":
+            taskkill_kwargs.update(k)
+            return FakeResult(0)
+        return FakeResult(0)
+    dsm.subprocess.run = capture_taskkill_kwargs
+    dsm._port_in_use = lambda port: False
+    dsm._try_auto_kill_port_owner(5020, CFG)
+    check("taskkill呼び出しにも errors=\"replace\" が指定されている",
+          taskkill_kwargs.get("errors") == "replace", taskkill_kwargs)
 
 finally:
     restore()
