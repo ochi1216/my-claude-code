@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## v1.33.0 - 共有クローンのブランチ切替による「データ消失に見える」問題の根本対策
+- 背景: Journalの起動が、他ツール作業のために複数セッションで共用している
+  クローンフォルダの「今チェックアウトされているブランチの中身」に依存
+  しており、他セッションの作業でクローンが古いブランチに切り替わった瞬間に
+  Journalが起動すると、廃止済みの旧データフォルダへ空のExcelが自動生成され、
+  タスクが消えたように見える事故が複数回発生していた
+- Journalの起動実体を共有クローンの外（`C:\Users\nx023836\Documents\JournalRuntime\`）
+  に移し、起動のたびに固定ブランチ（claude/chat-reflection-dashboard-ra1zkg）
+  からgit archiveで取り出してから起動する方式に変更。共有クローンが他セッ
+  ションでどのブランチになっていても影響されなくなった
+- 併せてWindowsスタートアップ登録・Tool Launcherの起動先を
+  `JournalRuntime\LaunchJournal.bat`に変更（journal/RunSilent.bat・
+  RunConsole.bat自体は手動デバッグ用に維持）
+
 ## v1.32.0 - 雨をディシジョン・ジャーナルの要件に合わせる（forecast.py / forecast_ui.py）
 - 背景: この機能は**リスク管理ではない**という位置づけの追記を受けての対応。
   リスクは10個併記しても誰も困らないが、Forecastは1つに絞った瞬間に外れが
