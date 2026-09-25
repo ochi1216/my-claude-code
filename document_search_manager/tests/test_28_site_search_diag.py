@@ -191,15 +191,23 @@ try:
     if not html:
         client = dsm.flask_app.test_client()
         html = client.get("/").get_data(as_text=True)
-    check("「サイト名検索診断」ボタンがある", 'id="btnSiteSearchDiag"' in html)
-    row_start = html.find('id="siteScopeDiagRow"')
-    btn_pos = html.find('id="btnSiteSearchDiag"')
-    row_end = html.find("</div>", row_start)
-    check("ボタンはSharePointタブ専用の行の中にある（はみ出しているボタン列には足さない）",
-          row_start != -1 and row_start < btn_pos < row_end, (row_start, btn_pos, row_end))
-    check("処理中はボタンを押せないようにする（setBusyの対象）",
-          'getElementById("btnSiteSearchDiag").disabled = busy' in html)
-    check("/api/site_search_diag を呼ぶ", "/api/site_search_diag" in html)
+    # v20260925_03（S05本実装）で、診断ボタンは本番の「サイトを探す」に置き換えた
+    # （仕様変更に伴う期待値の更新）。診断のAPI（/api/site_search_diag）は
+    # サーバー側に残してあり、上のT2〜T4で引き続き検証している。
+    check("診断ボタン（btnSiteSearchDiag）は画面から外した",
+          'id="btnSiteSearchDiag"' not in html
+          and 'getElementById("btnSiteSearchDiag")' not in html)
+    box_start = html.find('id="siteScopeBox"')
+    btn_pos = html.find('id="btnSiteSearch"')
+    check("本番の「サイトを探す」ボタンは、SharePointタブ専用の枠の中にある",
+          box_start != -1 and box_start < btn_pos, (box_start, btn_pos))
+    check("処理中は「サイトを探す」を押せないようにする（setBusyの対象）",
+          'getElementById("btnSiteSearch").disabled = busy' in html)
+    check("「サイトを探す」は本番の /api/site_search を呼ぶ",
+          'fetch("/api/site_search"' in html)
+    client = dsm.flask_app.test_client()
+    check("診断のAPI /api/site_search_diag はサーバー側に残っている",
+          client.post("/api/site_search_diag", json={"term": ""}).status_code != 404)
 
 finally:
     dsm.http_req.post = _ORIG_POST

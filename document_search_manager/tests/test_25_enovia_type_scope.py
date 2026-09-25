@@ -285,8 +285,11 @@ check("スコープの3択（document/major/all）がoption値として定義さ
       'value="document"' in html and 'value="major"' in html and 'value="all"' in html)
 check("COLUMN_SETS.enoviaにenovia_type列がある",
       '{ key: "enovia_type",      label: "Enovia型",            type: "set"    }' in html)
+# v20260925_03（S05本実装）で、対象サイトをキャッシュの条件に加えるため
+# cacheKeyの引数が1つ増えた（typeScopeの後ろにsiteScope）。仕様変更に伴う
+# 期待値の更新で、typeScopeを受け取ることに変わりはない。
 check("cacheKey関数がtypeScope引数を受け取る",
-      "function cacheKey(keyword, target, maxResults, titleOnly, prefixSearch, typeScope)"
+      "function cacheKey(keyword, target, maxResults, titleOnly, prefixSearch, typeScope,"
       in html)
 check("runSearchのfetch本文でtype_scopeを送っている", "type_scope: p.typeScope" in html)
 check("saveState/restoreStateでenovia_type_scopeを保存・復元している",

@@ -234,22 +234,25 @@ html = dsm.flask_app.test_client().get("/").get_data(as_text=True)
 
 # ── T6: 画面（HTML/JS）の構造確認 ───────────────────────────
 print("\n[T6] 画面（HTML/JS）の構造確認")
-check('サイト絞り込み診断ボタン（id="btnSiteScopeDiag"）がある',
-      'id="btnSiteScopeDiag"' in html)
-check('診断用のサイト入力欄（id="siteScopeInput"）がある',
-      'id="siteScopeInput"' in html)
-check('入力行（id="siteScopeDiagRow"）は既定で隠れている',
-      '<div class="row" id="siteScopeDiagRow" hidden>' in html)
-check("setTargetでSharePointタブ以外はsiteScopeDiagRowを隠す",
-      'document.getElementById("siteScopeDiagRow").hidden = (target !== "sharepoint");'
+# v20260925_03（S05本実装）で、診断用の入力欄とボタンは画面から外した
+# （Phase2設計監査の問題6。本実装の「対象サイト」行に置き換え、上のボタン列の
+# はみ出しも1つ減らす）。仕様変更に伴う期待値の更新。診断のAPI
+# （/api/site_scope_diag、上のT5）はサーバー側に残しており、引き続き検証する。
+check('診断ボタン（btnSiteScopeDiag）は画面から外した',
+      'id="btnSiteScopeDiag"' not in html)
+check('診断用の入力欄（siteScopeInput）・行（siteScopeDiagRow）も外した',
+      'id="siteScopeInput"' not in html and 'id="siteScopeDiagRow"' not in html)
+check("画面から外した要素をJSが参照していない（参照すると画面全体が動かなくなる）",
+      'getElementById("btnSiteScopeDiag")' not in html
+      and 'getElementById("siteScopeInput")' not in html
+      and 'getElementById("siteScopeDiagRow")' not in html)
+check("本実装の「対象サイト」の枠（siteScopeBox）は既定で隠れている",
+      '<div id="siteScopeBox" hidden>' in html)
+check("setTargetでSharePointタブ以外は「対象サイト」を隠す",
+      'document.getElementById("siteScopeBox").hidden = (target !== "sharepoint");'
       in html)
-check("btnSiteScopeDiagはsetBusyで無効化される",
-      'document.getElementById("btnSiteScopeDiag").disabled = busy;' in html)
-check("クリック時に/api/site_scope_diagへPOSTする",
-      'fetch("/api/site_scope_diag"' in html)
-check("送信内容にtitle_only/prefix_searchの現在値を含める",
-      'title_only: document.getElementById("titleOnly").checked' in html
-      and 'prefix_search: document.getElementById("prefixSearch").checked' in html)
+check("メイン検索の送信内容に対象サイト（site_scope）を含める",
+      "site_scope: p.siteScope" in html)
 
 
 print(f"\n{'=' * 46}")

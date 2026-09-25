@@ -64,6 +64,9 @@ document_search_manager/tests/__pycache__/
 # セッションCookieそのものなので、他ツールのconfig.json同様コミットしない。
 document_search_manager/enovia_session.json
 document_search_manager/enovia_profile/
+# よく使うサイト（☆）。社内のサイト名・URLを含むためコミットしない。
+document_search_manager/favorite_sites.json
+document_search_manager/favorite_sites.json.tmp
 # 緊急連絡ツールのローカル設定・DB
 emergency_alert_tool/config.json
 emergency_alert_tool/*.db
