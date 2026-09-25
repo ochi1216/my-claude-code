@@ -8,7 +8,8 @@ v20260910_01 の事前診断で、Sites.Read.All のまま
 確認する軸は5つ。
   ① Graphの応答を、画面と同じ SearchResult に正しく写せているか
   ② ページ送り（@odata.nextLink）を最後まで追えているか
-  ③ 上限（深さ5階層 / 2000件）で確実に止まり、理由を残せているか
+  ③ 上限（指定した深さLv・2000件）で確実に止まり、理由を残せているか
+     （v20260925_04で「常に5階層」から「Lv1〜4を選ぶ（標準Lv2）」に仕様変更）
   ④ 探索結果に対して、既存のZIP取得・Excel出力・要約がそのまま効くか
   ⑤ 版を上げたのに古い画面が出る事故（実機で発生）への対策が入っているか
 
@@ -175,19 +176,25 @@ check("$select を明示している（file/folderの判定を欠かさないた
 
 
 # ── H3 再帰・深さの上限・件数の上限 ────────────────────────────
-print("\n[H3] 再帰と上限（深さ5階層 / 2000件）")
+# v20260925_04 の仕様変更：以前は「常に5階層まで掘り、超えたら打ち切りとして
+# 理由を残す」だった。今は越智さんの指定で、Lv1〜4を選び（標準Lv2）、その先は
+# 画面の▶で1階層ずつ読み込む。そのため「深さに達した」は打ち切り（stopped）では
+# なく、「未読込のフォルダ数（unloaded）」として返す。期待値をこれに合わせて更新した。
+print("\n[H3] 再帰と上限（指定した深さLv / 2000件）")
 deep = {}
 for level in range(1, 9):
     deep[f"L{level - 1}" if level > 1 else "ROOT01"] = [
         folder_item(f"L{level}", f"level{level}")]
 job, calls = run_explore(deep)
 depths = [r["depth"] for r in job["results"]]
-check("深さの上限で止まる（起点0＋5階層＝最大深さ5）",
-      max(depths) == dsm.EXPLORE_MAX_DEPTH, depths)
-check("上限に当たったことを理由として残す",
-      "深さの上限" in job["stopped"], job["stopped"])
-check("上限より深いフォルダは開きに行かない",
-      len([u for u in calls if "/items/" in u]) == dsm.EXPLORE_MAX_DEPTH,
+check("標準（Lv2）では深さ2で止まる（起点0＋2階層）",
+      max(depths) == dsm.EXPLORE_DEFAULT_LEVEL == 2, depths)
+check("深さに達したことは打ち切り扱いにしない（▶で続きを読めるため）",
+      job["stopped"] == "", job["stopped"])
+check("指定の深さにある、中身のあるフォルダの数を返す（画面の案内用）",
+      job.get("unloaded") == 1 and job.get("level") == 2, job)
+check("指定の深さより先のフォルダは開きに行かない",
+      len([u for u in calls if "/items/" in u]) == dsm.EXPLORE_DEFAULT_LEVEL,
       [u for u in calls if "/items/" in u])
 
 wide = {"ROOT01": [file_item(f"F{i}", f"f{i}.docx") for i in range(20)]}
@@ -400,8 +407,10 @@ for label, needle in [
 ]:
     check(label, needle in html, needle)
 
-check("探索の上限が画面の説明文と一致している（5階層・2000件）",
-      dsm.EXPLORE_MAX_DEPTH == 5 and dsm.EXPLORE_MAX_ITEMS == 2000
-      and "5階層" in html and "2000件" in html)
+# v20260925_04：深さは固定の5階層から、Lv1〜4の選択（標準Lv2）に変わった。
+check("探索の深さ・上限が画面の説明文と一致している（Lv1〜4・標準Lv2・2000件）",
+      dsm.EXPLORE_LEVELS == (1, 2, 3, 4) and dsm.EXPLORE_DEFAULT_LEVEL == 2
+      and dsm.EXPLORE_MAX_ITEMS == 2000
+      and "深さ Lv2（標準）" in html and "2000件" in html and "5階層" not in html)
 
 check.finish()
