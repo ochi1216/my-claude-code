@@ -864,6 +864,16 @@ class ReportGenerator:
         レンダリングする。lang="ja"/"en"はbilingual_ja_enモード専用。
         lang=Noneは非併記モード（item自体が既にその言語の文字列）で使う。
         """
+        # 変更点(20260928_03): オーバーフロー注記（上限超過時の「他n件」）が
+        # lang（"en"）に関わらず常に日本語文言だったのを修正。英語ブロック
+        # （Key Updates）にも日本語の「…他 N 件」が混入していた。
+        def _more_note(hidden_count: int) -> str:
+            if hidden_count <= 0:
+                return ""
+            if lang == "en":
+                return f"<li class='more-note'>…{hidden_count} more</li>"
+            return f"<li class='more-note'>…他 {hidden_count} 件</li>"
+
         html = ""
         if isinstance(updates, dict):
             for category, items in updates.items():
@@ -871,15 +881,13 @@ class ReportGenerator:
                 item_list = items if isinstance(items, list) else [items]
                 for item in item_list[:UPDATES_MAX]:
                     html += ReportGenerator._render_update_item(item, lang)
-                if len(item_list) > UPDATES_MAX:
-                    html += f"<li class='more-note'>…他 {len(item_list) - UPDATES_MAX} 件</li>"
+                html += _more_note(len(item_list) - UPDATES_MAX)
                 html += "</ul>"
         elif isinstance(updates, list):
             html += "<ul>"
             for u in updates[:UPDATES_MAX]:
                 html += ReportGenerator._render_update_item(u, lang)
-            if len(updates) > UPDATES_MAX:
-                html += f"<li class='more-note'>…他 {len(updates) - UPDATES_MAX} 件</li>"
+            html += _more_note(len(updates) - UPDATES_MAX)
             html += "</ul>"
         return html
 

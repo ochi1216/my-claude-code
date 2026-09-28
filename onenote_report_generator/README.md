@@ -106,6 +106,12 @@ AI要約を実行した時点で、探索したパスと元のエラーを含む
    python onenote_report_generator_20260928_01.py
    ```
 
+   Windowsでは、代わりに `start_onenote_report_generator.bat` をダブルクリックしても
+   よい（VERSION 20260928_01でリポジトリ管理下に追加）。フォルダ内で最も新しい
+   `onenote_report_generator_*.py` を自動検出して実行し、起動直前にポート5000を
+   使用中の旧`python.exe`/`pythonw.exe`プロセスを自動終了する。`cd /d %~dp0` で
+   自分自身の場所を基準にするため、どこにcloneしても書き換え不要。
+
    初回はブラウザで Device Code Flow の認証画面が開くので、表示されたコードで
    サインインする。認証トークンは `token_cache.bin` にキャッシュされ、以降は
    再認証不要（プロセス再起動時も有効。ただし現状はプロセス内グローバル変数
@@ -150,6 +156,8 @@ onenote_report_generator/
 ├── onenote_report_generator_20260706_01.py   ← 旧バージョン（履歴保持のため残置）
 ├── templates/
 │   └── index.html                             ← VERSION 20260928_01
+├── start_onenote_report_generator.bat         ← 起動ランチャー（最新の.pyを自動検出して
+│                                                  実行。VERSION 20260928_01でコミット対象化）
 ├── config.example.json                        ← config.json のテンプレート（コミット対象）
 ├── requirements.txt
 ├── CHANGELOG.md
