@@ -2,6 +2,7 @@
 import os
 import json
 import re
+import subprocess
 import sys
 import time
 import threading
@@ -1400,8 +1401,90 @@ def cleanup_reports():
             deleted += 1
     return jsonify({"deleted": deleted})
 
+# ==========================================
+# 起動前のポート解放（越智さんの依頼、v20260928_01追記）
+#
+# 越智さんは本ツールを頻繁に更新し、そのたびにランチャーから起動し直す運用の
+# ため、直前に起動したFlaskプロセスが終了しないまま残っていると、新しい
+# プロセスが同じポートを使えず、ブラウザが古いプロセスの画面につながった
+# まま（＝最新のコードを更新したつもりが反映されない）になる不具合が実機で
+# 発生した。tool_launcher自身の「応答なしプロセスの自動終了」と同じ考え方
+# （①対象がpython.exe/pythonw.exeであることを確認 → ②終了する。判定に迷えば
+# 終了しない）を、このツール自身の起動処理にも適用する。
+# 追加ライブラリ（psutil等）は使わず、Windows標準コマンド（netstat/tasklist/
+# taskkill）のみで行う。Windows以外では何もしない。
+# ==========================================
+def _find_pids_listening_on(port: int):
+    """netstatの出力から、指定ポートでLISTENING状態のPID一覧を返す。"""
+    try:
+        result = subprocess.run(
+            ["netstat", "-ano"],
+            capture_output=True, text=True, timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+    except Exception as e:
+        print(f"⚠️  ポート{port}の使用状況を確認できませんでした（無視して起動を続けます）: {e}")
+        return []
+
+    pids = []
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) < 5 or parts[0].upper() != "TCP":
+            continue
+        local_addr, state, pid_str = parts[1], parts[3], parts[-1]
+        if not local_addr.endswith(f":{port}") or state.upper() != "LISTENING":
+            continue
+        if pid_str.isdigit():
+            pids.append(int(pid_str))
+    return pids
+
+
+def _process_image_name(pid: int) -> str:
+    """指定PIDの実行ファイル名（例: python.exe）を返す。取得できなければ空文字。"""
+    try:
+        result = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+    except Exception:
+        return ""
+    line = result.stdout.strip().splitlines()[0] if result.stdout.strip() else ""
+    if not line or "," not in line:
+        return ""
+    return line.split(",")[0].strip('"')
+
+
+def _free_port_if_stale(port: int) -> None:
+    """指定ポートを使っている既存プロセスがあれば、安全確認のうえ終了する。"""
+    if sys.platform != "win32":
+        return
+    my_pid = os.getpid()
+    for pid in _find_pids_listening_on(port):
+        if pid == my_pid:
+            continue
+        image_name = _process_image_name(pid)
+        if image_name.lower() not in ("python.exe", "pythonw.exe"):
+            print(f"⚠️  ポート{port}を使用中のプロセス（PID {pid}, "
+                  f"{image_name or '不明'}）はpython.exe/pythonw.exeではないため、"
+                  "終了せずに起動を試みます。")
+            continue
+        print(f"⚠️  既存のプロセス（PID {pid}, {image_name}）がポート{port}を"
+              "使用中のため、終了して起動し直します。")
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/PID", str(pid)],
+                capture_output=True, text=True, timeout=10,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            time.sleep(1)
+        except Exception as e:
+            print(f"⚠️  PID {pid} の終了に失敗しました（無視して起動を続けます）: {e}")
+
+
 if __name__ == "__main__":
     print("OneNote Report Generator 20260928_01 を起動します...")
+    _free_port_if_stale(5000)
     print("ブラウザで http://localhost:5000 を開いてください")
     webbrowser.open("http://localhost:5000")
     app.run(debug=False, threaded=True, port=5000)
