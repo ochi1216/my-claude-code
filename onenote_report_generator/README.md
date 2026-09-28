@@ -7,13 +7,18 @@ Graph API 直接取得方式へ完全移行済み（`CHANGELOG.md` 参照）。
 
 ## 現在のVERSION
 
-`20260812_02`（Python本体）／`20260815_01`（templates/index.html）
+`20260928_01`（Python本体／templates/index.html 共通）
 
-- Python本体：Gemini APIプロキシ対応＋共通モジュールの探索先自動判定
-- index.html：ブックマーク復元の初回失敗への対策（タイムアウト延長・自動再試行・認証待ち）
+- 青文字（今週の更新）の抽出処理を全面刷新し、OneNoteで最も一般的な書き方
+  （行まるごと青）・16進数の色指定・表セル内の青でもマーカーが付くようにした
+- プロンプトを「青文字優先」に変更。黒文字単独の話題はupdatesに出なくなった
+  （詳細情報には引き続き格納される）
+- 各週のレポートに青文字の検出行数・警告（青なし／前週と同文）を表示
+- 3つ目の要約モード「日本語＋英語で要約」を追加（自分・上司の確認用）
 
 いずれもリモートセッションでの自動テストのみ実施済み。**実機での確認は未実施**
-（特にプロキシ経由の応答、およびブックマーク復元が初回から成功するようになったか）
+（特に、実際に使っている青が閾値内に入るか、黒文字単独の話題が実際にupdatesから
+消えているか、日英併記モードの日本語の質）。詳細は `CHANGELOG.md` 参照。
 
 ## 必要要件
 
@@ -41,7 +46,7 @@ PythonScripts/
 │   └── outlook_total_organizer_*.py
 └── Onenote/
     └── onenote_report_generator/
-        └── onenote_report_generator_20260812_02.py
+        └── onenote_report_generator_20260928_01.py
 ```
 
 探索の優先順位は以下のとおり。
@@ -98,7 +103,7 @@ AI要約を実行した時点で、探索したパスと元のエラーを含む
 3. スクリプトを実行する。
 
    ```
-   python onenote_report_generator_20260812_02.py
+   python onenote_report_generator_20260928_01.py
    ```
 
    初回はブラウザで Device Code Flow の認証画面が開くので、表示されたコードで
@@ -121,21 +126,30 @@ AI要約を実行した時点で、探索したパスと元のエラーを含む
    - 「要約の言語」選択（既定「日本語に翻訳して要約」）で、原文が英語・
      中国語等でも日本語に翻訳するか、原文の言語のまま要約するかを選べる
      （VERSION 20260729_02_01）。原文の言語判定はGemini自身のベストエフォート。
+     3つ目の選択肢「日本語＋英語で要約」（VERSION 20260928_01）では、
+     エグゼクティブ・サマリーと主な更新内容(updates)を日本語・英語の両方で
+     出力する（日本語が先。英語は自分・上司の内容確認用で、詳細情報・
+     残アクションは日本語のみ）。出力トークンが増えるため利用料金はやや高くなる。
    - ブックマーク選択欄は**認証が完了するまで無効**になっている（VERSION 20260815_01）。
      復元に失敗した場合は自動で1回だけ再試行する。
+   - 各週のレポート見出し下に「青文字 n行を検出」を表示する（VERSION 20260928_01）。
+     0行の場合は「⚠ 青文字なし：前回データとの比較で推定」、直前ページと文言が
+     完全一致する青がある場合は「⚠ 前週と同文の青 k行（コピー残りの可能性）」と
+     警告する。除外はせず警告表示のみ。
 
 ## システム構成
 
 ```
 onenote_report_generator/
-├── onenote_report_generator_20260812_02.py   ← メインFlaskアプリ（最新版）
+├── onenote_report_generator_20260928_01.py   ← メインFlaskアプリ（最新版）
+├── onenote_report_generator_20260812_02.py   ← 旧バージョン（履歴保持のため残置）
 ├── onenote_report_generator_20260812_01.py   ← 旧バージョン（履歴保持のため残置）
 ├── onenote_report_generator_20260729_02.py   ← 旧バージョン（履歴保持のため残置）
 ├── onenote_report_generator_20260729_01.py   ← 旧バージョン（履歴保持のため残置）
 ├── onenote_report_generator_20260727_01.py   ← 旧バージョン（履歴保持のため残置）
 ├── onenote_report_generator_20260706_01.py   ← 旧バージョン（履歴保持のため残置）
 ├── templates/
-│   └── index.html                             ← VERSION 20260815_01
+│   └── index.html                             ← VERSION 20260928_01
 ├── config.example.json                        ← config.json のテンプレート（コミット対象）
 ├── requirements.txt
 ├── CHANGELOG.md
@@ -147,10 +161,13 @@ onenote_report_generator/
 
 1. **`OneNoteGraphExtractor`**：Microsoft Graph API 経由で OneNote のサイト/
    ノートブック/セクション/ページを取得。`extract_with_color()` が HTML→テキスト
-   変換を担当（青文字＝更新ポイントの判定、`<table>` の Markdown 表形式への変換）
+   変換を担当（文書順に1回走査する線形化方式。青文字＝更新ポイントの判定、
+   箇条書き階層・見出しの保持、`<table>` の `| a | b |` 形式への変換。
+   VERSION 20260928_01 で全面刷新、詳細は `CHANGELOG.md` 参照）
 2. **`GeminiProcessor`**：Gemini AI でテキストを要約・構造化 JSON 化
+   （青文字優先ルールと3つの言語モードをプロンプトに反映）
 3. **`ReportGenerator.generate_html()`**：構造化 JSON からアコーディオン付き
-   HTML レポートを生成
+   HTML レポートを生成（青文字検出状況の表示、日英併記の表示を含む）
 
 ## 既知の未解決事項
 
@@ -174,6 +191,15 @@ onenote_report_generator/
   前回データとの差分比較用JSON（`prev_context`）の言語が混在する可能性がある
   （VERSION 20260729_02_01、未対応）。また`extract_with_color()`が付与する
   固定マーカー「【更新ポイント】」は原文が英語でも日本語のまま埋め込まれる。
+- **Gemini API利用料金の概算に思考トークンを含んでいない**：`_token_usage`は
+  `candidatesTokenCount`のみを集計しており、`thoughtsTokenCount`（モデル内部の
+  思考トークン）を含まない。表示される概算費用は実際より低く出ている可能性がある
+  （既存の問題、VERSION 20260928_01のスコープ外）。
+- **青文字の閾値・運用ミスは実機での確認が必要**：`config.json`の`blue_detection`
+  閾値（既定 `min_b:100`）では、濃紺（例: `#002060`）は検出されない。また、
+  ハイパーリンクに色が付く場合や、前週ページをコピーして青が残っている場合への
+  対策はレポート上の警告表示のみで、自動除外はしない（VERSION 20260928_01、
+  越智さんの確認により警告表示のみとした）。
 
 ## 開発ルール
 
