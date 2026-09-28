@@ -1,5 +1,34 @@
 ## VERSION 20260928_01
 
+### 変更（追記6）: フォルダ構成の整理（コードを`app/`フォルダへ移動）
+
+越智さんより「バージョンアップしたコードが`onenote_report_generator/`直下に
+平置きされて見づらい。極力`app/`のような配下フォルダを作ってコードを管理し、
+直下はバッチファイルのみに近い状態にしてほしい」との依頼を受けて対応した。
+
+- **移動したもの**（`app/`フォルダへ）：全バージョンの`onenote_report_generator_*.py`
+  （現行版・旧版とも）、`templates/`、`requirements.txt`、`config.example.json`
+- **直下に残したもの**：`start_onenote_report_generator.bat`、`README.md`、
+  `CHANGELOG.md`、および実行時データ（`config.json`・`token_cache.bin`・
+  `bookmarks.json`・`logs/`・`reports/`。いずれも認証情報・業務データを含み
+  `.gitignore`対象）。実行時データを`app/`と分離したのは、越智さんへの確認の
+  結果（データ置き場についてご確認いただき「直下に残す」を選択）。
+- **パス解決を`TOOL_ROOT`（`app/`の1つ上）基準に統一**：従来は
+  `config.json`/`token_cache.bin`がカレントディレクトリ相対、
+  `bookmarks.json`/`reports/`がスクリプト自身の場所（`__file__`）相対と
+  混在しており、`app/`フォルダへ移動するとこれらの置き場所がバラバラに
+  なってしまう問題があった。すべて`TOOL_ROOT = os.path.dirname(os.path.dirname(
+  os.path.abspath(__file__)))`基準に統一し、起動時のカレントディレクトリにも
+  スクリプトの配置階層にも依存しないようにした。
+- **Gemini共通モジュール（`gemini_client.py`）の探索先に`../../../common`を追加**：
+  `app/`フォルダの導入でスクリプト自身がもう1階層深くなったため
+  （`PythonScripts\Onenote\onenote_report_generator\app\`）、既存の`../common`・
+  `../../common`に加え、実際の配置先`PythonScripts\common\`に届く
+  `../../../common`を候補に追加した（`_resolve_common_dirs()`）。
+- **起動バッチ（`start_onenote_report_generator.bat`）を`app/`配下を見るよう修正**：
+  最新スクリプトの検索・実行パスを`app\onenote_report_generator_*.py`に変更。
+  ログ（`logs/`）・実行時データの置き場は変更なし（従来どおり直下）。
+
 ### 修正（追記4）: 別セッションのコミットとの統合に伴う軽微な不整合の修正
 
 `claude/onenote-organizer-s01-6zudff`ブランチに、本ツールと並行して別セッション

@@ -15,10 +15,16 @@ Graph API 直接取得方式へ完全移行済み（`CHANGELOG.md` 参照）。
   （詳細情報には引き続き格納される）
 - 各週のレポートに青文字の検出行数・警告（青なし／前週と同文）を表示
 - 3つ目の要約モード「日本語＋英語で要約」を追加（自分・上司の確認用）
+- 日英併記モードをJP/EN段落混在からブロック単位のレイアウトに変更
+- 起動時にポート5000を塞いでいる旧プロセスを自動終了
+- **コードファイル一式を `app/` フォルダへ移動**し、`onenote_report_generator/`
+  直下は起動ランチャー（`.bat`）と実行時データ（`config.json`等）のみに整理した
+  （越智さんのご要望。詳細は下記「システム構成」参照）
 
 いずれもリモートセッションでの自動テストのみ実施済み。**実機での確認は未実施**
 （特に、実際に使っている青が閾値内に入るか、黒文字単独の話題が実際にupdatesから
-消えているか、日英併記モードの日本語の質）。詳細は `CHANGELOG.md` 参照。
+消えているか、日英併記モードの日本語の質、`app/`フォルダ移動後のGemini共通
+モジュール自動探索）。詳細は `CHANGELOG.md` 参照。
 
 ## 必要要件
 
@@ -46,21 +52,25 @@ PythonScripts/
 │   └── outlook_total_organizer_*.py
 └── Onenote/
     └── onenote_report_generator/
-        └── onenote_report_generator_20260928_01.py
+        ├── start_onenote_report_generator.bat
+        └── app/
+            └── onenote_report_generator_20260928_01.py
 ```
 
 探索の優先順位は以下のとおり。
 
 1. 環境変数 `GEMINI_COMMON_DIR`（設定されていればこれのみを使う）
 2. `../common`（他ツールと同じ階層構成の場合）
-3. `../../common`（本ツールのようにもう1階層深い場合）
+3. `../../common`（VERSION 20260928_01より前の、`app/`フォルダ導入前の配置の場合）
+4. `../../../common`（本ツールの現行配置、`app/`フォルダのもう1階層深い場合）
 
 上記のいずれにも該当しない場所に置く場合のみ、環境変数
 `GEMINI_COMMON_DIR` でフォルダを指定する。
 
-> **補足**：本ツールは他ツールより1階層深い `PythonScripts\Onenote\onenote_report_generator\`
-> にあるため、VERSION 20260812_01 の既定（`../common` のみ）では
-> `PythonScripts\common` に届かなかった。20260812_02 でこれを自動解決している。
+> **補足**：本ツールは他ツールより2階層深い
+> `PythonScripts\Onenote\onenote_report_generator\app\`（VERSION 20260928_01で
+> コードを`app/`フォルダへ移動したため）にあるため、`../../../common`まで
+> 自動探索するようにしている（`_resolve_common_dirs()`参照）。
 
 ### 環境変数
 
@@ -85,13 +95,22 @@ AI要約を実行した時点で、探索したパスと元のエラーを含む
 
 ## セットアップ手順
 
-1. 依存パッケージをインストールする。
+**VERSION 20260928_01より、コードファイル一式は `app/` フォルダの中にある。**
+`config.json` / `bookmarks.json` / `token_cache.bin` / `reports/` などの実行時
+データは、従来どおり `onenote_report_generator/` 直下（起動バッチと同じ場所）に
+置く。
+
+1. 依存パッケージをインストールする（`app/`フォルダの中で）。
 
    ```
+   cd app
    pip install -r requirements.txt
+   cd ..
    ```
 
-2. `config.example.json` を `config.json` にコピーし、環境に合わせて編集する。
+2. `app/config.example.json` を **`onenote_report_generator/` 直下**に
+   `config.json` としてコピーし、環境に合わせて編集する（`app/`の中ではない点に
+   注意）。
 
    - `CLIENT_ID` / `TENANT_ID`：Entra ID アプリ登録の値
    - `GEMINI_API_KEY`：**VERSION 20260812_01 以降は使用しない**（空でよい）。
@@ -103,14 +122,20 @@ AI要約を実行した時点で、探索したパスと元のエラーを含む
 3. スクリプトを実行する。
 
    ```
-   python onenote_report_generator_20260928_01.py
+   python app\onenote_report_generator_20260928_01.py
    ```
 
-   Windowsでは、代わりに `start_onenote_report_generator.bat` をダブルクリックしても
-   よい（VERSION 20260928_01でリポジトリ管理下に追加）。フォルダ内で最も新しい
-   `onenote_report_generator_*.py` を自動検出して実行し、起動直前にポート5000を
-   使用中の旧`python.exe`/`pythonw.exe`プロセスを自動終了する。`cd /d %~dp0` で
-   自分自身の場所を基準にするため、どこにcloneしても書き換え不要。
+   Windowsでは、代わりに `start_onenote_report_generator.bat`（`onenote_report_generator/`
+   直下）をダブルクリックしてもよい（VERSION 20260928_01でリポジトリ管理下に追加）。
+   `app/`フォルダ内で最も新しい `onenote_report_generator_*.py` を自動検出して
+   実行し、起動直前にポート5000を使用中の旧`python.exe`/`pythonw.exe`プロセスを
+   自動終了する。`cd /d %~dp0` で自分自身の場所を基準にするため、どこにcloneしても
+   書き換え不要。
+
+   スクリプトが読み書きするファイル（`config.json`・`token_cache.bin`・
+   `bookmarks.json`・`reports/`）は、実行時のカレントディレクトリに関わらず、
+   常に `onenote_report_generator/` 直下（`app/`の1つ上、`TOOL_ROOT`）を指す
+   （VERSION 20260928_01で`__file__`基準に統一）。
 
    初回はブラウザで Device Code Flow の認証画面が開くので、表示されたコードで
    サインインする。認証トークンは `token_cache.bin` にキャッシュされ、以降は
@@ -147,23 +172,35 @@ AI要約を実行した時点で、探索したパスと元のエラーを含む
 
 ```
 onenote_report_generator/
-├── onenote_report_generator_20260928_01.py   ← メインFlaskアプリ（最新版）
-├── onenote_report_generator_20260812_02.py   ← 旧バージョン（履歴保持のため残置）
-├── onenote_report_generator_20260812_01.py   ← 旧バージョン（履歴保持のため残置）
-├── onenote_report_generator_20260729_02.py   ← 旧バージョン（履歴保持のため残置）
-├── onenote_report_generator_20260729_01.py   ← 旧バージョン（履歴保持のため残置）
-├── onenote_report_generator_20260727_01.py   ← 旧バージョン（履歴保持のため残置）
-├── onenote_report_generator_20260706_01.py   ← 旧バージョン（履歴保持のため残置）
-├── templates/
-│   └── index.html                             ← VERSION 20260928_01
-├── start_onenote_report_generator.bat         ← 起動ランチャー（最新の.pyを自動検出して
-│                                                  実行。VERSION 20260928_01でコミット対象化）
-├── config.example.json                        ← config.json のテンプレート（コミット対象）
-├── requirements.txt
+├── start_onenote_report_generator.bat         ← 起動ランチャー（app/内の最新.pyを自動
+│                                                  検出して実行。VERSION 20260928_01でコミット対象化）
+├── README.md
 ├── CHANGELOG.md
-├── bookmarks.json                              ← 実行時に自動生成（.gitignore対象）
-└── reports/                                    ← 生成済みHTMLレポート格納フォルダ（.gitignore対象）
+├── app/                                        ← コード一式（VERSION 20260928_01で新設）
+│   ├── onenote_report_generator_20260928_01.py   ← メインFlaskアプリ（最新版）
+│   ├── onenote_report_generator_20260812_02.py   ← 旧バージョン（履歴保持のため残置）
+│   ├── onenote_report_generator_20260812_01.py   ← 旧バージョン（履歴保持のため残置）
+│   ├── onenote_report_generator_20260729_02.py   ← 旧バージョン（履歴保持のため残置）
+│   ├── onenote_report_generator_20260729_01.py   ← 旧バージョン（履歴保持のため残置）
+│   ├── onenote_report_generator_20260727_01.py   ← 旧バージョン（履歴保持のため残置）
+│   ├── onenote_report_generator_20260706_01.py   ← 旧バージョン（履歴保持のため残置）
+│   ├── templates/
+│   │   └── index.html                             ← VERSION 20260928_01
+│   ├── config.example.json                        ← config.json のテンプレート（コミット対象）
+│   └── requirements.txt
+├── config.json                                 ← 実行時データ（.gitignore対象、直下に配置）
+├── token_cache.bin                             ← 実行時データ（.gitignore対象、直下に配置）
+├── bookmarks.json                              ← 実行時に自動生成（.gitignore対象、直下に配置）
+├── logs/                                       ← バッチの実行ログ（.gitignore対象、直下に配置）
+└── reports/                                    ← 生成済みHTMLレポート格納フォルダ（.gitignore対象、直下に配置）
 ```
+
+**設計方針（VERSION 20260928_01）**：`app/`にはコード（バージョン管理対象）のみを
+置き、`onenote_report_generator/`直下は起動ランチャーと、認証情報・業務データを
+含む実行時データ（すべて`.gitignore`対象）だけにした。これにより `git clone`／
+`git pull` のたびに実行時データが巻き込まれる心配がなく、直下を見れば「何を
+バックアップ・引き継げばよいか」が一目で分かる。パス解決は`TOOL_ROOT`
+（`app/`の1つ上）に統一しており、起動時のカレントディレクトリに依存しない。
 
 ### コアアーキテクチャ（3コンポーネント）
 

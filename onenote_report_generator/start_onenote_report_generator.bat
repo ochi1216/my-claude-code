@@ -6,6 +6,10 @@ set PYTHONIOENCODING=utf-8
 rem ========================================
 rem OneNote Report Generator Runner (Log Version)
 rem VERSION: 20260727_02 (PowerShell/Tee-Object廃止・cmd標準リダイレクトのみに変更)
+rem 変更点(20260928_04): コードファイルをapp\フォルダへ移動したため、
+rem 最新スクリプトの検索・実行パスをapp\配下に変更した。
+rem config.json/token_cache.bin/bookmarks.json/logs/reportsは従来どおり
+rem このバッチと同じonenote_report_generator直下に置く。
 rem ========================================
 
 rem 作業フォルダに移動
@@ -31,7 +35,7 @@ rem ========================================
 echo [1/2] Searching for latest generator script...
 
 set "LATEST_SCRIPT="
-for /f "delims=" %%f in ('dir /b /o-n onenote_report_generator_*.py 2^>nul') do (
+for /f "delims=" %%f in ('dir /b /o-n app\onenote_report_generator_*.py 2^>nul') do (
     set "LATEST_SCRIPT=%%f"
     goto :found
 )
@@ -60,7 +64,7 @@ echo [2/2] Executing Python script...
 echo (出力はコンソールには表示されません。ログファイルに記録されます: %LOG_FILE%)
 echo (ブラウザが自動で開きます。終了するにはこのウィンドウで Ctrl+C を押してください)
 
-python "%CD%\!LATEST_SCRIPT!" >> "%LOG_FILE%" 2>&1
+python "%CD%\app\!LATEST_SCRIPT!" >> "%LOG_FILE%" 2>&1
 
 set "EXIT_CODE=%ERRORLEVEL%"
 

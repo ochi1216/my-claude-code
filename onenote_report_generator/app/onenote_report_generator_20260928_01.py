@@ -20,9 +20,23 @@ import requests as http_requests
 from google.genai import types
 
 # ==========================================
+# 変更点(20260928_04): onenote_report_generator/ 直下にコードファイルが平置き
+# されていたのを、app/ フォルダへ移動して整理した（バッチファイルのみに近い
+# 状態にしたいというご要望）。これに伴い、config.json / token_cache.bin /
+# bookmarks.json / reports/ といった実行時データ（認証情報・業務データを含み
+# git管理外）は、コードの移動先（app/）ではなく「onenote_report_generator/
+# 直下」（app/の1つ上）に置き続ける方針とした。TOOL_ROOTはその基準パスで、
+# CWD（起動時のカレントディレクトリ）にもスクリプト自身の配置階層にも依存せず、
+# 常にonenote_report_generator/直下を指す。
+# ==========================================
+TOOL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# ==========================================
 # 設定読み込み
 # ==========================================
-def load_config(path="config.json"):
+def load_config(path=None):
+    if path is None:
+        path = os.path.join(TOOL_ROOT, "config.json")
     with open(path, encoding="utf-8") as f:
         return json.load(f)
 
@@ -42,7 +56,10 @@ CONFIG = load_config()
 #   PythonScripts\Onenote\onenote_report_generator\
 # にあるため、既定の "../common" では PythonScripts\Onenote\common\ を探してしまい、
 # 実際の配置先 PythonScripts\common\ に届かなかった。
-# 環境変数 GEMINI_COMMON_DIR が最優先。未設定なら "../common" → "../../common" の順に
+# 変更点(20260928_04): app/フォルダへの再配置でスクリプト自身がさらに1階層
+# 深くなった（PythonScripts\Onenote\onenote_report_generator\app\）ため、
+# "../../../common" を候補に追加した。環境変数 GEMINI_COMMON_DIR が最優先。
+# 未設定なら "../common" → "../../common" → "../../../common" の順に
 # gemini_client.py が実在するフォルダを自動探索する。
 def _resolve_common_dirs():
     """gemini_client.py の探索先候補を優先順に返す。"""
@@ -51,8 +68,9 @@ def _resolve_common_dirs():
         return [env_dir]
     here = os.path.dirname(os.path.abspath(__file__))
     return [
-        os.path.normpath(os.path.join(here, "..", "common")),        # 他ツールと同じ階層の場合
-        os.path.normpath(os.path.join(here, "..", "..", "common")),  # 本ツールのようにもう1階層深い場合
+        os.path.normpath(os.path.join(here, "..", "common")),              # 他ツールと同じ階層の場合
+        os.path.normpath(os.path.join(here, "..", "..", "common")),        # 旧レイアウト（1階層深い）の場合
+        os.path.normpath(os.path.join(here, "..", "..", "..", "common")),  # app/配下（もう1階層深い）の場合
     ]
 
 
@@ -216,7 +234,9 @@ class OneNoteGraphExtractor:
     _BLOCK_LINE_TAGS = {"p", "li", "h1", "h2", "h3", "h4", "h5", "h6"}
 
     def __init__(self):
-        self.token_cache_path = "token_cache.bin"
+        # 変更点(20260928_04): CWD相対からTOOL_ROOT基準に変更（app/フォルダ
+        # 再配置に伴い、CWDに依存せず常にonenote_report_generator/直下を指す）。
+        self.token_cache_path = os.path.join(TOOL_ROOT, "token_cache.bin")
         self.cache = msal.SerializableTokenCache()
         if os.path.exists(self.token_cache_path):
             with open(self.token_cache_path, "r") as f:
@@ -1043,7 +1063,8 @@ _status_lock = threading.Lock()
 _extractor   = OneNoteGraphExtractor()
 # --- ブックマーク機能: 新規追加 ---
 _bookmark_lock = threading.Lock()
-BOOKMARKS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bookmarks.json")
+# 変更点(20260928_04): CWD相対からTOOL_ROOT基準に変更（app/フォルダ再配置）。
+BOOKMARKS_PATH = os.path.join(TOOL_ROOT, "bookmarks.json")
 
 def update_status(state, message, progress=0, total=0, report_path=""):
     with _status_lock:
@@ -1355,7 +1376,7 @@ def _generate_worker(page_ids, section_name, notebook_name, site_id, reverse_ord
         }
 
         update_status("running", "HTMLレポート生成中...", len(page_ids), len(page_ids))
-        rep_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reports")
+        rep_dir = os.path.join(TOOL_ROOT, "reports")
         os.makedirs(rep_dir, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -1384,14 +1405,14 @@ def status():
 
 @app.route("/reports")
 def reports_list():
-    rep_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reports")
+    rep_dir = os.path.join(TOOL_ROOT, "reports")
     os.makedirs(rep_dir, exist_ok=True)
     files = sorted([f for f in os.listdir(rep_dir) if f.endswith(".html")], reverse=True)
     return jsonify(files)
 
 @app.route("/reports/open/<filename>")
 def open_report(filename):
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reports", filename)
+    path = os.path.join(TOOL_ROOT, "reports", filename)
     if os.path.exists(path):
         webbrowser.open(path)
         return jsonify({"status": "opened"})
@@ -1399,7 +1420,7 @@ def open_report(filename):
 
 @app.route("/reports/cleanup", methods=["POST"])
 def cleanup_reports():
-    rep_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reports")
+    rep_dir = os.path.join(TOOL_ROOT, "reports")
     cutoff  = time.time() - (7 * 24 * 60 * 60)
     deleted = 0
     for f in os.listdir(rep_dir):
