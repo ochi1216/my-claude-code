@@ -1352,7 +1352,7 @@ def cleanup_reports():
     return jsonify({"deleted": deleted})
 
 if __name__ == "__main__":
-    print("OneNote Report Generator 20260812_02 を起動します...")
+    print("OneNote Report Generator 20260928_01 を起動します...")
     print("ブラウザで http://localhost:5000 を開いてください")
     webbrowser.open("http://localhost:5000")
     app.run(debug=False, threaded=True, port=5000)
