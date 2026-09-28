@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>OneNote Report Generator 20260815_01</title>
+    <title>OneNote Report Generator 20260928_01</title>
     <style>
         body { font-family: 'Segoe UI', Meiryo, sans-serif; margin: 0; background: #f0f2f5; }
         .container { max-width: 800px; margin: 40px auto; background: white; border-radius: 8px; padding: 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
@@ -49,7 +49,7 @@
 <body>
 <div class="container">
     <h1>📓 OneNote Report Generator</h1>
-    <small>VERSION 20260815_01</small>
+    <small>VERSION 20260928_01</small>
 
     <div class="auth-box" id="authBox">
         <strong>🔐 認証状態：</strong><span id="authStatus">確認中...</span>
@@ -109,14 +109,16 @@
             <small>※OneNoteのページが古い→新しい順の場合はON（既定）。既に新しい→古い順の場合はOFFにしてください。</small>
         </div>
 
-        <!-- 要約言語オプション（VERSION 20260729_02追加） -->
+        <!-- 要約言語オプション（VERSION 20260729_02追加、VERSION 20260928_01で日英併記を追加） -->
         <div style="margin-top:14px;">
             <label>要約の言語</label>
             <select id="languageMode">
                 <option value="translate_ja" selected>日本語に翻訳して要約（既定）</option>
                 <option value="keep_original">原文の言語のまま要約</option>
+                <option value="bilingual_ja_en">日本語＋英語で要約（自分・上司の確認用）</option>
             </select>
-            <small>※原文の言語判定はAIによるベストエフォートです（完全な保証はありません）。</small>
+            <small>※原文の言語判定はAIによるベストエフォートです（完全な保証はありません）。
+            「日本語＋英語」は出力トークンが増えるため、Gemini利用料金がやや高くなります。</small>
         </div>
 
         <!-- ブックマーク保存UI（VERSION 20260529_01_01追加） -->
