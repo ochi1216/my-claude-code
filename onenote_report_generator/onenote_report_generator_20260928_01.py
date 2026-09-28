@@ -820,26 +820,76 @@ class ReportGenerator:
     # 変更点(20260928_01): 日英併記モード(bilingual_ja_en)のupdates項目
     # {"en":..., "ja":...} を表示するためのレンダラ。文字列や、en/jaの
     # どちらかが欠けた場合、未知の形にも対応する（黙って消さない）。
+    # 変更点(20260928_02): 越智さんの依頼により、JP/ENを行単位で混在させる
+    # のをやめ、ブロック単位（日本語ブロック→英語ブロック）で分けて表示する
+    # 構成に変更した。lang引数でこの1件をどちらの言語として出すかを指定する
+    # （lang=Noneのときは、非併記モードとの後方互換のため従来どおり
+    # 「日本語＋英語を1行に併記」の挙動を維持する）。
     @staticmethod
-    def _render_update_item(item):
-        if isinstance(item, dict):
-            ja = item.get("ja", "")
-            en = item.get("en", "")
-            if ja and en:
-                return f"<li>{ja}<br><span class='en-sub' lang='en'>{en}</span></li>"
+    def _render_update_item_fallback(item):
+        fallback = " / ".join(str(v) for v in item.values() if v)
+        return f"<li>{fallback}</li>"
+
+    @staticmethod
+    def _render_update_item(item, lang=None):
+        if not isinstance(item, dict):
+            return f"<li>{item}</li>"
+        ja = item.get("ja", "")
+        en = item.get("en", "")
+        if lang == "ja":
             if ja:
                 return f"<li>{ja}</li>"
             if en:
                 return f"<li lang='en'>{en}</li>"
-            fallback = " / ".join(str(v) for v in item.values() if v)
-            return f"<li>{fallback}</li>"
-        return f"<li>{item}</li>"
+            return ReportGenerator._render_update_item_fallback(item)
+        if lang == "en":
+            if en:
+                return f"<li lang='en'>{en}</li>"
+            if ja:
+                return f"<li>{ja}</li>"
+            return ReportGenerator._render_update_item_fallback(item)
+        # lang未指定（非併記モード向けの後方互換）: 従来どおり1行に併記する。
+        if ja and en:
+            return f"<li>{ja}<br><span class='en-sub' lang='en'>{en}</span></li>"
+        if ja:
+            return f"<li>{ja}</li>"
+        if en:
+            return f"<li lang='en'>{en}</li>"
+        return ReportGenerator._render_update_item_fallback(item)
+
+    @staticmethod
+    def _render_updates_block(updates, lang):
+        """updates（カテゴリ→箇条書きの辞書、またはリスト）を1言語分だけ
+        レンダリングする。lang="ja"/"en"はbilingual_ja_enモード専用。
+        lang=Noneは非併記モード（item自体が既にその言語の文字列）で使う。
+        """
+        html = ""
+        if isinstance(updates, dict):
+            for category, items in updates.items():
+                html += f"<h4>■ {category}</h4><ul>"
+                item_list = items if isinstance(items, list) else [items]
+                for item in item_list[:UPDATES_MAX]:
+                    html += ReportGenerator._render_update_item(item, lang)
+                if len(item_list) > UPDATES_MAX:
+                    html += f"<li class='more-note'>…他 {len(item_list) - UPDATES_MAX} 件</li>"
+                html += "</ul>"
+        elif isinstance(updates, list):
+            html += "<ul>"
+            for u in updates[:UPDATES_MAX]:
+                html += ReportGenerator._render_update_item(u, lang)
+            if len(updates) > UPDATES_MAX:
+                html += f"<li class='more-note'>…他 {len(updates) - UPDATES_MAX} 件</li>"
+            html += "</ul>"
+        return html
 
     @staticmethod
     def generate_html(results, out_path, section_name="General", cost_info=None, language_mode="translate_ja"):
         bilingual_heading = (language_mode == "bilingual_ja_en")
-        exec_summary_label = "【エグゼクティブ・サマリー】 / Executive Summary" if bilingual_heading else "【エグゼクティブ・サマリー】"
-        updates_heading    = "主な更新内容 (差分) / Key Updates" if bilingual_heading else "主な更新内容 (差分)"
+        # 変更点(20260928_02): 併記モードはJP/ENをブロック単位で分けて表示する
+        # ようになったため、見出しも各ブロック側でその言語のものだけを使う
+        # （下のbilingual_heading分岐を参照）。ここでの値は非併記モード専用。
+        exec_summary_label = "【エグゼクティブ・サマリー】"
+        updates_heading    = "主な更新内容 (差分)"
         html_content = f"""<!DOCTYPE html>
         <html lang="ja">
         <head>
@@ -897,35 +947,34 @@ class ReportGenerator:
                 stat_parts.append(f"⚠ 前週と同文の青 {same_as_prev}行（コピー残りの可能性）")
             blue_stat_html = f'<div class="blue-stat">{" ／ ".join(stat_parts)}</div>'
 
-            summary_html = f"<strong>{exec_summary_label}</strong><br>{summary}"
-            if summary_en:
-                summary_html += f"<br><span class='en-sub' lang='en'>{summary_en}</span>"
-
             html_content += f"""
             <h2>{week_title}</h2>
             {blue_stat_html}
-            <div class="summary-box">{summary_html}</div>
             """
-            if updates:
-                html_content += f"<h3>{updates_heading}</h3>"
-                if isinstance(updates, dict):
-                    for category, items in updates.items():
-                        html_content += f"<h4>■ {category}</h4><ul>"
-                        if isinstance(items, list):
-                            for item in items[:UPDATES_MAX]:
-                                html_content += ReportGenerator._render_update_item(item)
-                            if len(items) > UPDATES_MAX:
-                                html_content += f"<li class='more-note'>…他 {len(items) - UPDATES_MAX} 件</li>"
-                        else:
-                            html_content += ReportGenerator._render_update_item(items)
-                        html_content += "</ul>"
-                elif isinstance(updates, list):
-                    html_content += "<ul>"
-                    for u in updates[:UPDATES_MAX]:
-                        html_content += ReportGenerator._render_update_item(u)
-                    if len(updates) > UPDATES_MAX:
-                        html_content += f"<li class='more-note'>…他 {len(updates) - UPDATES_MAX} 件</li>"
-                    html_content += "</ul>"
+            if bilingual_heading:
+                # 変更点(20260928_02): 越智さんの依頼により、JP/ENを段落・箇条書き
+                # 単位で混在させるのをやめ、「日本語ブロック（サマリー＋主な更新
+                # 内容）→英語ブロック（Executive Summary＋Key Updates）」の順に
+                # まとめて表示する構成に変更した。詳細情報・残アクションの形式は
+                # 変更しない（従来どおり日本語のみ）。
+                ja_summary_html = f"<strong>【エグゼクティブ・サマリー】</strong><br>{summary}"
+                html_content += f'<div class="summary-box">{ja_summary_html}</div>'
+                if updates:
+                    html_content += "<h3>主な更新内容 (差分)</h3>"
+                    html_content += ReportGenerator._render_updates_block(updates, "ja")
+
+                if summary_en:
+                    en_summary_html = f"<strong>Executive Summary</strong><br>{summary_en}"
+                    html_content += f'<div class="summary-box">{en_summary_html}</div>'
+                    if updates:
+                        html_content += "<h3>Key Updates</h3>"
+                        html_content += ReportGenerator._render_updates_block(updates, "en")
+            else:
+                summary_html = f"<strong>{exec_summary_label}</strong><br>{summary}"
+                html_content += f'<div class="summary-box">{summary_html}</div>'
+                if updates:
+                    html_content += f"<h3>{updates_heading}</h3>"
+                    html_content += ReportGenerator._render_updates_block(updates, None)
             if details:
                 html_content += '<details><summary>■ 詳細情報 (クリックして展開)</summary><div class="details-content">'
                 if isinstance(details, dict):
