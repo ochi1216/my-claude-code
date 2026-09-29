@@ -81,6 +81,33 @@ Enovia検索を使うには、**画面の「Enoviaにログイン」ボタン**�
 コミットされません。** 会社PCのEdgeプロファイル（`enovia_profile/` フォルダ）も
 同様です。
 
+### 赤い「XSLT」の警告が出る場合（拡張機能 XSLT Polyfill を1回だけ入れる）
+
+2026-09下旬から、Enoviaの旧画面に「This site uses XSLT; that functionality is
+being removed from this browser very soon ... install a browser extension」という
+赤い警告が出るようになりました。Chrome／Edgeが**XSLT機能を廃止する**ためです。
+
+- **ツールの検索には影響しません**（検索はXSLTを使わない検索APIを直接呼ぶため）。
+  ログインさえ完了すれば、警告が出たままでも検索は通常どおり使えます。
+- 警告を消すには、**ツールが開くログイン用Edgeに拡張機能「XSLT Polyfill」を
+  1回だけ入れます**。ツールのEdgeは、ふだんのEdgeとは**別のプロファイル**
+  （`enovia_profile/`）なので、ふだんのEdgeに入れた拡張はここには入っていません。
+  v20260929_01から、ツールのEdgeでも拡張機能が動くようにしました。
+
+**手順（1回だけ）**
+
+1. 「Enoviaにログイン」を押して開いたEdgeで、Chromeウェブストアの
+   「XSLT Polyfill」のページを開きます。
+2. 画面上部の **「拡張機能の入手」** を押します（「他のストアからの拡張機能を
+   許可」を聞かれたら「許可」）。**Googleへのログインは不要です。**
+3. Enoviaの画面を開き直し、赤い警告が消えれば完了です。拡張は
+   `enovia_profile/` に残るので、次回以降は入れ直す必要はありません。
+
+**「Chrome に追加」からGoogleにログインしようとすると「このブラウザまたは
+アプリは安全でない可能性があります」と拒否されます。** ツールのEdgeは
+プログラムから操作されているため、Googleがログインを拒否する仕様です。
+ツール側では回避しません（上記の「拡張機能の入手」を使ってください）。
+
 **Playwrightが使えない環境の場合**：`config.json` の `enovia_auth_mode` を
 `"manual"` にし、`enovia_manual_cookie` にブラウザのF12で確認した
 `Cookie` ヘッダーの値をそのまま貼り付けてください（Cookieが切れるたびに
@@ -515,6 +542,12 @@ Graphの `/search/query` が `Sites.Read.All` では拒否された場合です�
 閉じてください。会社PCの制限で `channel="msedge"` が使えない場合は、
 `config.json` の `enovia_auth_mode` を `"manual"` にしてCookieを直接
 貼り付ける方式に切り替えてください（前述「Enoviaへのログイン」参照）。
+
+### Enoviaのログイン画面に赤い「XSLT」の警告が出る／Googleにログインできない
+
+検索には影響しません。警告を消したい場合は、前述「赤い「XSLT」の警告が出る
+場合」の手順で、ツールのEdgeに「XSLT Polyfill」を1回だけ入れてください。
+Googleへのログインは拒否されますが、不要です（Edgeの「拡張機能の入手」を使う）。
 
 ### `SSLCertVerificationError` / `unable to get local issuer certificate` と出る
 

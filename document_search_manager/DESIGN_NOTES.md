@@ -1137,6 +1137,52 @@ SharePoint Siteの中の`TEST_Product_Engineering`という名前のフォルダ
 
 ---
 
+### 3-11. Enoviaの旧画面のXSLT廃止警告と、ログイン用Edgeの拡張機能（v20260929_01）
+
+**事象（2026-09-29 越智さんの報告）**：ツールの「Enoviaにログイン」で開くEdgeに、
+Enovia旧画面の「This site uses XSLT; ... install a browser extension」という赤い
+警告が出る。案内されたChromeウェブストアの「XSLT Polyfill」を入れようとして
+「Chrome に追加」からGoogleにログインすると「このブラウザまたはアプリは安全で
+ない可能性があります」と拒否される。ふだんのEdgeでは拡張を入れて解決済み。
+
+**調査で分かったこと**
+
+- ChromiumはXSLTを段階的に廃止中（安定版での機能停止は**Chrome 158・2026-11-17**
+  予定と報じられている。Edgeの時期は未確認）。警告はそれに伴うもの。
+- ツールのEdgeは `enovia_profile/` の**別プロファイル**。ふだんのEdgeの拡張は入って
+  いない。
+- Playwrightは既定の起動引数に **`--disable-extensions`** を含める
+  （playwright 1.62 の `chromiumSwitches` で確認）。このため**拡張を入れても動かない**。
+- Googleのログイン拒否は、自動操作されているブラウザに対するGoogle側の仕様。
+- **ツールの検索（`federated/search`）はXSLTを使わない**。越智さんが実機で
+  「ログインできれば通常どおり使える」ことを確認済み（影響はログイン画面の警告のみ）。
+
+**対処（案B・越智さん選択）**：`launch_persistent_context` に
+`ignore_default_args=["--disable-extensions"]`（定数
+`ENOVIA_LOGIN_IGNORE_DEFAULT_ARGS`）を渡し、**拡張の無効化だけを外す**。
+Polyfillは越智さんがツールのEdgeで「拡張機能の入手」から1回だけ入れる
+（Googleログイン不要。拡張は `enovia_profile/` に残る）。
+
+**やらないこと（理由）**
+
+- 自動操作の目印（`--enable-automation`、`AutomationControlled`）は外さない。
+  Googleの判定を回避する行為になり、社内ルール上も好ましくないため。
+- `ignore_default_args=True`（既定引数を全部外す）にしない。Playwrightの動作に
+  必要な引数まで外れるため。
+- 拡張ファイルを `--load-extension` で読み込む方式（案C）は採らない。拡張ファイル
+  の管理（更新・配置）が必要になるため。
+
+**実環境での確認**：この開発環境のChromiumで実際に起動し、プロセスの起動引数から
+`--disable-extensions` が消えること（指定なしでは付くこと）を確認した。
+越智さんの会社PCのPlaywrightの版は未確認。版によって拡張の導入を妨げる別の既定
+引数がある場合は、原因を調べてから追加で外すものを決める（推測で広げない）。
+
+**全社への影響（水平展開）**：XSLTの機能停止後は、ツールと無関係にEnovia旧画面
+自体が全社のChrome／Edgeで動かなくなるおそれがある。IT部門・Dassault側の対応予定
+（企業ポリシーでの延命を含む）を確認し、他拠点へも共有することを越智さんに提案済み。
+
+---
+
 ## 4. 実装上の重要な設計判断
 
 ### 4-1. アーキテクチャ

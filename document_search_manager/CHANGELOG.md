@@ -1,5 +1,41 @@
 # Document Search Manager — CHANGELOG
 
+## VERSION 20260929_01
+
+Enoviaのログイン用Edgeで**拡張機能を使えるようにした**。Enoviaの旧画面に
+XSLT廃止の赤い警告が出るようになり、案内される拡張「XSLT Polyfill」が、
+ツールの開くEdgeでは動かなかったため（越智さんの報告、2026-09-29）。
+
+### 変更
+
+- ログイン用Edgeの起動時に、Playwrightが既定で付ける **`--disable-extensions`
+  だけを外す**ようにした（`ignore_default_args`、定数
+  `ENOVIA_LOGIN_IGNORE_DEFAULT_ARGS`）。これで、ツールのEdge（`enovia_profile/`）
+  に1回だけ「XSLT Polyfill」を入れれば、次回以降も有効になる。
+  入れ方はREADME「赤い「XSLT」の警告が出る場合」参照（**Googleログインは不要**）。
+
+### 変更しないこと（宣誓）
+
+- 自動操作の目印（`--enable-automation` 等）は外していない。Googleの
+  「安全でない可能性があります」というログイン拒否は回避しない（Googleの判定を
+  回避する行為になるため）。
+- ログインの流れ（ウィンドウを閉じたらCookie保存・件数表示）、検索処理、画面、
+  `config.json` の項目は変えていない。
+- 旧バージョンファイル（`old/document_search_manager_20260925_04.py`）は削除していない。
+
+### 検証結果
+
+- `python -m py_compile document_search_manager_20260929_01.py`: 合格。
+- 新規テスト `tests/test_31_enovia_login_extensions.py`（**24項目**）：外す引数が
+  `--disable-extensions` だけであること／起動時に `ignore_default_args` が渡ること
+  （msedge・chrome）／プロファイル・headless・channelは従来どおり／ログインの流れと
+  Cookie保存／起動失敗時の案内は従来どおり。Playwrightはスタブで、実ブラウザは
+  起動しない。
+- 全テスト **1373件合格**、画面の確認（`tests/ui_check.py`）**112件合格**。
+- この開発環境のChromiumを実際に起動し、プロセスの起動引数から
+  `--disable-extensions` が消えることを確認した（指定しない場合は付く）。
+- **実機（会社PCのEdge）での拡張の導入は未確認**（越智さんに確認をお願いする）。
+
 ## VERSION 20260925_04
 
 フォルダ探索で**深さ（Lv）を選べる**ようにし、その先のフォルダは**▶で開いた
