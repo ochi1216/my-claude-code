@@ -204,7 +204,8 @@
       "kind": "py",
       "path": "rtocs_organizer/rtocs_organizer_",
       "gemini": "proxy",
-      "status": "planned_move"
+      "status": "planned_move",
+      "note": "デバッグ用Chromeプロファイル（ポート9222）に接続する。同時に2つ以上起動すると1つのChromeを共有するため、ランチャーの「実行中」タブで警告表示の対象（20260928_01）"
     },
     {
       "id": "rtocs_dashboard",
@@ -224,7 +225,8 @@
       "kind": "py",
       "path": "bbt_lecture_organizer/BBT_lecture_script_getter_",
       "gemini": "proxy",
-      "status": "planned_move"
+      "status": "planned_move",
+      "note": "デバッグ用Chromeプロファイル（ポート9222）に接続する。同時に2つ以上起動すると1つのChromeを共有するため、ランチャーの「実行中」タブで警告表示の対象（20260928_01）"
     },
 
     {
