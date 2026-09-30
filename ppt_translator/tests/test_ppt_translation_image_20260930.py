@@ -160,7 +160,7 @@ TR = {  # 訳文（日本語）
     "Teamwork and Collaboration": "チームワークと協働",
     "Performance Management": "パフォーマンスマネジメント",
     "My Group": "自分のグループ",
-    "Nexperia": "Nexperia",
+    "Acme": "Acme",
 }
 
 
@@ -213,7 +213,7 @@ def make_slide_image(size=(1920, 1080), with_junk_left=False, marker=0):
 
     # ロゴ風の図形(文字なし) と 固有名詞(訳さない)
     d.ellipse([int(W * 0.85), int(H * 0.15), int(W * 0.93), int(H * 0.15) + int(W * 0.08)], fill=(230, 70, 40))
-    put("Nexperia", (int(W * 0.86), int(H * 0.30)), _font(int(H * 0.03)), (0, 112, 122), blocks)
+    put("Acme", (int(W * 0.86), int(H * 0.30)), _font(int(H * 0.03)), (0, 112, 122), blocks)
 
     # スライドごとに違う画像にする目印（偽Geminiが送信画像のmd5でスライドを見分けるため）
     d.rectangle([W - 30, H - 30, W - 10, H - 10], fill=((marker * 37) % 256, (marker * 91) % 256, 200))
@@ -338,7 +338,7 @@ for bad, label in (("25", "範囲外"), ("0", "0番"), ("3-1", "逆順"), ("a", 
 # --- 数字・記号だけのブロックを除く専用判定 ---
 for t in ("80%", "60.0%", "( n=5 )", "( n=6,797 )", "65.8% (-15.8)", "1", "•", "12"):
     check(f"_has_letters: {t!r} は文字なし(除外)", mod._has_letters(t) is False)
-for t in ("Favorability %", "Nexperia", "Top 5 Scoring Questions", "日本語のテキスト", "My Group"):
+for t in ("Favorability %", "Acme", "Top 5 Scoring Questions", "日本語のテキスト", "My Group"):
     check(f"_has_letters: {t!r} は文字あり(対象)", mod._has_letters(t) is True)
 check("(参考)既存の is_translatable は '80%' を True にする=専用判定が必要な根拠",
       mod.is_translatable("80%") is True)
@@ -519,7 +519,7 @@ try:
           "【画像内テキストの翻訳】" in n0 and "エグゼクティブサマリー" in n0 and "ウェルビーイング" in n0)
     check("メモ欄に原文も併記される", "（原文: Executive Summary）" in n0)
     check("数字だけのブロック(80%)はメモ欄に入らない", "80%" not in n0 and "n=5" not in n0)
-    check("訳文が原文と同じ固有名詞(Nexperia)はメモ欄に入らない", "Nexperia" not in n0)
+    check("訳文が原文と同じ固有名詞(Acme)はメモ欄に入らない", "Acme" not in n0)
     n1 = notes_text(out, 1)
     check("既存のメモは消えず、区切り線のあとに追記される",
           n1.startswith("備考") and "----------" in n1 and "【画像内テキストの翻訳】" in n1)
@@ -797,8 +797,330 @@ for keep in ("translate_batch_gemini", "translate_super_fast_parallel", "is_tran
 # ============================================================
 # 6. 重ね貼り(_02 のみ)
 # ============================================================
+def run_overlay_tests():
+    import subprocess
+    from lxml import etree as _et
+    from pptx.oxml.ns import qn as _qn
+    from pptx.util import Emu as _Emu
+
+    def overlay_group(slide):
+        for sh in slide.shapes:
+            if sh.shape_type == 6 and sh.name == "翻訳オーバーレイ":   # 6 = GROUP
+                return sh
+        return None
+
+    def group_pairs(group):
+        rects = [s for s in group.shapes if s.name == "翻訳_背景"]
+        boxes = [s for s in group.shapes if s.name == "翻訳_文字"]
+        return rects, boxes
+
+    def truth_emu(blk, size, pic, crop=(0, 0, 0, 0)):
+        W, H = size
+        l, t_, r, b_ = crop
+        x0, y0, x1, y1 = blk["box"]
+        cw, ch = W * (1 - l - r), H * (1 - t_ - b_)
+        return (pic["left"] + (x0 - l * W) / cw * pic["width"], pic["top"] + (y0 - t_ * H) / ch * pic["height"],
+                pic["left"] + (x1 - l * W) / cw * pic["width"], pic["top"] + (y1 - t_ * H) / ch * pic["height"])
+
+    def rect_of(shape):
+        return (shape.left, shape.top, shape.left + shape.width, shape.top + shape.height)
+
+    def overlap_area(a, b):
+        w = min(a[2], b[2]) - max(a[0], b[0])
+        h = min(a[3], b[3]) - max(a[1], b[1])
+        return max(0, w) * max(0, h)
+
+    def area(a):
+        return max(1, (a[2] - a[0]) * (a[3] - a[1]))
+
+    def fill_rgb(shape):
+        return tuple(shape.fill.fore_color.rgb)
+
+    def text_of(shape):
+        return shape.text_frame.text
+
+    def pic_geom(path, idx=0):
+        prs_ = Presentation(path)
+        for sh in prs_.slides[idx].shapes:
+            if sh.shape_type == 13:
+                return {"left": sh.left, "top": sh.top, "width": sh.width, "height": sh.height}
+
+    tmp2 = tempfile.mkdtemp()
+    cwd1 = os.getcwd()
+    os.chdir(tmp2)
+    try:
+        # ---------- 基本: 1枚の合成スライド ----------
+        src2 = os.path.join(tmp2, "ov.pptx")
+        specs2, truth2 = build_deck(src2, 1)
+        RESPONDER["fn"] = build_responder(specs2)
+        pic0 = pic_geom(src2)
+        orig2 = picture_md5(src2)
+        run_flow(src2, "")
+        out2 = os.path.join(tmp2, "ov_ja.pptx")
+        info = next((c[2] for c in MESSAGEBOX.CALLS if c[0] == "info"), "")
+        prs_out = Presentation(out2)
+        slide = prs_out.slides[0]
+        group = overlay_group(slide)
+        blocks_t, nums_t, size_t, _crop = truth2[0]
+        check("重ね貼り: グループ「翻訳オーバーレイ」が作られる", group is not None, info)
+        rects, tboxes = group_pairs(group)
+        eligible_texts = [b["text"] for b in blocks_t if _tr(b["text"]) != b["text"]]
+        check("重ね貼り: 訳文のあるブロック(Acme除く)がすべて四角+文字のペアで重なる",
+              len(rects) == len(tboxes) == len(eligible_texts),
+              f"rects={len(rects)} boxes={len(tboxes)} 期待={len(eligible_texts)}")
+        check("重ね貼り: 完了メッセージに重ねた個数が出る", f"訳文を重ねて貼ったブロック: {len(rects)}個" in info, info)
+        check("重ね貼り: 元の画像は位置・バイト列とも完全に同じ", picture_md5(out2) == orig2)
+        kids = list(slide.shapes._spTree)
+        pic_i = next(i for i, e in enumerate(kids) if e.tag.endswith("}pic"))
+        grp_i = next(i for i, e in enumerate(kids) if e.tag.endswith("}grpSp"))
+        check("重ね貼り: グループは画像より前面(後ろ)に置かれる", grp_i > pic_i)
+        check("重ね貼り: メモ欄への追記も従来どおり行われる", "【画像内テキストの翻訳】" in notes_text(out2, 0))
+
+        by_text = {}
+        for r_, tb_ in zip(rects, tboxes):
+            by_text[text_of(tb_)] = (r_, tb_)
+        tol = pic0["width"] * 0.002
+        contain_ok, cont_detail = True, []
+        for blk in blocks_t:
+            tr = _tr(blk["text"])
+            if tr == blk["text"]:
+                continue
+            r_, _tb = by_text[tr]
+            te = truth_emu(blk, size_t, pic0)
+            rr = rect_of(r_)
+            if not (rr[0] <= te[0] + tol and rr[1] <= te[1] + tol and rr[2] >= te[2] - tol and rr[3] >= te[3] - tol):
+                contain_ok = False
+                cont_detail.append(blk["text"])
+        check("重ね貼り: 各四角が元の文字の位置を完全に覆う(誤差なしの箱)", contain_ok, f"覆えない: {cont_detail}")
+
+        num_overlap = [n["text"] for n in nums_t
+                       for r_ in rects if overlap_area(rect_of(r_), truth_emu(n, size_t, pic0)) > 0.02 * area(truth_emu(n, size_t, pic0))]
+        check("重ね貼り: 数字だけのブロック(80% / 70% / ( n=5 ))は塗らない", not num_overlap, f"{num_overlap}")
+        rr_list = [rect_of(r_) for r_ in rects]
+        pair_bad = [(i, j) for i in range(len(rr_list)) for j in range(i + 1, len(rr_list))
+                    if overlap_area(rr_list[i], rr_list[j]) > 0.01 * min(area(rr_list[i]), area(rr_list[j]))]
+        check("重ね貼り: 隣り合う四角どうしが重ならない(訳文を隠さない)", not pair_bad, f"{pair_bad}")
+
+        def near(c1, c2, d=12):
+            return all(abs(a_ - b_) <= d for a_, b_ in zip(c1, c2))
+        check("背景色: 濃い帯(0,112,122)の上の文字は帯の色で塗る", near(fill_rgb(by_text[_tr("Executive Summary")][0]), (0, 112, 122)),
+              f"{fill_rgb(by_text[_tr('Executive Summary')][0])}")
+        check("背景色: 濃灰の帯(106,106,106)の上の文字は白い四角にならない",
+              near(fill_rgb(by_text[_tr("My Group")][0]), (106, 106, 106)), f"{fill_rgb(by_text[_tr('My Group')][0])}")
+        check("背景色: 縞々の行(249,250,249)の上の文字はその色で塗る",
+              near(fill_rgb(by_text[_tr("Wellbeing")][0]), (249, 250, 249), 6), f"{fill_rgb(by_text[_tr('Wellbeing')][0])}")
+
+        def color_of(tb_):
+            return tuple(tb_.text_frame.paragraphs[0].runs[0].font.color.rgb)
+        check("文字色: 帯の上の白い文字は白系のまま", min(color_of(by_text[_tr("Executive Summary")][1])) >= 200,
+              f"{color_of(by_text[_tr('Executive Summary')][1])}")
+        eb = color_of(by_text[_tr("Employee Engagement")][1])
+        check("文字色: 青い見出しは青系のまま", eb[2] > eb[0] + 40, f"{eb}")
+
+        sizes = [tb_.text_frame.paragraphs[0].runs[0].font.size.pt for tb_ in tboxes]
+        check("文字サイズ: すべて下限(5.5pt)以上・40pt以下", all(5.5 <= s <= 40 for s in sizes), f"{sizes}")
+        fit_ok = True
+        for r_, tb_ in zip(rects, tboxes):
+            run_ = tb_.text_frame.paragraphs[0].runs[0]
+            w_pt = (tb_.width - tb_.text_frame.margin_left) / 12700.0
+            h_pt = tb_.height / 12700.0
+            n_ = mod._estimate_lines(text_of(tb_), run_.font.size.pt, w_pt)
+            fit_ok &= n_ * run_.font.size.pt * 1.2 * 0.9 <= h_pt + 0.5
+        check("文字サイズ: 訳文が枠に収まる(見積もり)", fit_ok)
+        r0, t0 = by_text[_tr("Executive Summary")]
+        rPr = t0.text_frame.paragraphs[0].runs[0]._r.get_or_add_rPr()
+        check("フォント: 日本語は Yu Gothic を latin と ea(東アジア文字)の両方に指定",
+              rPr.find(_qn("a:latin")).get("typeface") == "Yu Gothic" and rPr.find(_qn("a:ea")).get("typeface") == "Yu Gothic")
+        check("図形: 影・既定スタイル(p:style)が付いていない", r0._element.find(_qn("p:style")) is None)
+        body = t0.text_frame._txBody.find(_qn("a:bodyPr"))
+        check("テキストボックス: 自動サイズ無効・折り返しあり・上下右の余白0",
+              len(list(body)) == 0 and body.get("wrap") == "square"
+              and t0.text_frame.margin_top == 0 and t0.text_frame.margin_bottom == 0 and t0.text_frame.margin_right == 0)
+        check("文字の左端が元の文字の左端に合う(四角より右へ余白を取る)",
+              t0.text_frame.margin_left >= 0)
+
+        # ---------- 言語ごとのフォント ----------
+        for lang, font in (("English", "Arial"), ("Chinese Simplified", "Microsoft YaHei")):
+            run_flow(src2, "", language=lang)
+            o = os.path.join(tmp2, f"ov_{'en' if lang == 'English' else 'cn'}.pptx")
+            g = overlay_group(Presentation(o).slides[0])
+            f_ = g.shapes[1].text_frame.paragraphs[0].runs[0].font.name if g is not None else None
+            check(f"言語ごとのフォント: {lang} は {font}", f_ == font, f"{f_}")
+        RESPONDER["fn"] = build_responder(specs2)
+
+        # ---------- 数字の保存検査 ----------
+        for o_, t_, exp, label in (
+                ("6,797", "6797", True, "桁区切りの有無"), ("80%", "80％", True, "全角%"), ("80%", "８０%", True, "全角数字"),
+                ("1.2 million sales", "売上120万", True, "million→万"), ("$3.5B", "35億ドル", True, "B→億"),
+                ("10,000 units", "1万台", True, "10,000→1万"), ("2026-09-30", "2026年9月30日", True, "先頭の0"),
+                ("Q3 results", "第3四半期の結果", True, "Q3"), ("no numbers here", "数字なし", True, "数字なし"),
+                ("Top 5", "上位3", False, "数字が変わった"), ("n=5", "n=6", False, "数字が変わった(2)"),
+                ("Score 80%", "スコア", False, "数字が消えた")):
+            check(f"数字の保存検査: {label} ({o_!r} → {t_!r}) は {exp}", mod._numbers_preserved(o_, t_) is exp)
+
+        # ---------- 枠に収まらない / 数字が変わった → 重ねずメモのみ ----------
+        def reply_with(mut):
+            rep = copy.deepcopy(specs2[0]["reply"])
+            mut(rep)
+            return rep
+        def long_wellbeing(rep):
+            for b in rep:
+                if b["text"] == "Wellbeing":
+                    b["translation"] = "とても長い訳文" * 40
+        specs_nf = [dict(specs2[0], reply=reply_with(long_wellbeing))]
+        RESPONDER["fn"] = build_responder(specs_nf)
+        run_flow(src2, "")
+        info = next((c[2] for c in MESSAGEBOX.CALLS if c[0] == "info"), "")
+        g = overlay_group(Presentation(out2).slides[0])
+        check("枠に収まらないブロック: 重ねず、完了メッセージで個数を知らせる", "枠に収まらず、メモ欄のみにしたブロック: 1個" in info, info)
+        check("枠に収まらないブロック: 他のブロックは重ねる", g is not None and len(group_pairs(g)[0]) == len(eligible_texts) - 1)
+        check("枠に収まらないブロック: 訳文はメモ欄に全文入る", "とても長い訳文" in notes_text(out2, 0))
+
+        def drop_number(rep):
+            for b in rep:
+                if b["text"].startswith("The Engagement Index"):
+                    b["translation"] = "エンゲージメント指数は質問で構成されています。"
+        specs_nm = [dict(specs2[0], reply=reply_with(drop_number))]
+        RESPONDER["fn"] = build_responder(specs_nm)
+        run_flow(src2, "")
+        info = next((c[2] for c in MESSAGEBOX.CALLS if c[0] == "info"), "")
+        g = overlay_group(Presentation(out2).slides[0])
+        check("数字が変わった訳: 重ねず、完了メッセージで個数を知らせる", "訳文で数字が変わっていたため、メモ欄のみにしたブロック: 1個" in info, info)
+        check("数字が変わった訳: 重ねないがメモ欄には残る",
+              g is not None and len(group_pairs(g)[0]) == len(eligible_texts) - 1
+              and "質問で構成されています" in notes_text(out2, 0))
+
+        # ---------- 重ねるものが1つも無ければ空のグループを残さない ----------
+        only_num = [dict(specs2[0], reply=[{"box_2d": [100, 100, 150, 400], "text": "Score is 80%",
+                                             "translation": "スコアは", "lines": 1}])]
+        RESPONDER["fn"] = build_responder(only_num)
+        run_flow(src2, "")
+        check("重ねるブロックが無いスライドに空のグループを残さない", overlay_group(Presentation(out2).slides[0]) is None)
+
+        # ---------- 重ね貼りの失敗はメモ欄だけ残して続行 ----------
+        RESPONDER["fn"] = build_responder(specs2)
+        real_add = mod._add_overlay_group
+        mod._add_overlay_group = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("overlay boom"))
+        try:
+            run_flow(src2, "")
+        finally:
+            mod._add_overlay_group = real_add
+        info = next((c[2] for c in MESSAGEBOX.CALLS if c[0] == "info"), "")
+        check("重ね貼りが失敗しても、メモ欄は残り、失敗したスライドの番号を知らせる",
+              "重ね貼りに失敗したスライド（メモ欄のみ）: 1" in info
+              and "【画像内テキストの翻訳】" in notes_text(out2, 0)
+              and overlay_group(Presentation(out2).slides[0]) is None, info)
+        check("重ね貼りが失敗しても、翻訳したスライドとして数える", "翻訳したスライド: 1枚" in info, info)
+
+        # ---------- 確認ダイアログの説明 ----------
+        RESPONDER["fn"] = build_responder(specs2)
+        pw, cap = run_flow(src2, "")
+        check("確認ダイアログ: 重ね貼りと「選んで削除すれば元に戻る」を説明する",
+              "重ねて貼ります" in cap["message"] and "削除すれば元に戻ります" in cap["message"] and "加工しません" in cap["message"],
+              cap["message"])
+
+        # ---------- 箱の誤差(σ=3/1000) があっても数字は巻き込まない ----------
+        im_j, blocks_j, nums_j = make_slide_image(marker=1)
+        prs_j = new_prs(); add_picture_slide(prs_j, im_j)
+        jpath = os.path.join(tmp2, "jit.pptx"); prs_j.save(jpath)
+        pic_j = pic_geom(jpath)
+        for jit in (2, 4):
+            rep_j = expected_response(blocks_j, nums_j, im_j.size, jitter=jit)
+            RESPONDER["fn"] = build_responder([{"blob": png_bytes(im_j), "crop": (0, 0, 0, 0), "reply": rep_j}])
+            run_flow(jpath, "")
+            gj = overlay_group(Presentation(os.path.join(tmp2, "jit_ja.pptx")).slides[0])
+            rj, tj = group_pairs(gj) if gj is not None else ([], [])
+            bad_num = [n["text"] for n in nums_j for r_ in rj
+                       if overlap_area(rect_of(r_), truth_emu(n, im_j.size, pic_j)) > 0.05 * area(truth_emu(n, im_j.size, pic_j))]
+            check(f"箱の誤差(±{jit}/1000)があっても数字のブロックを塗りつぶさない", gj is not None and not bad_num, f"{bad_num}")
+            rl = [rect_of(r_) for r_ in rj]
+            check(f"箱の誤差(±{jit}/1000)があっても四角どうしが重ならない",
+                  not [(i, j) for i in range(len(rl)) for j in range(i + 1, len(rl))
+                       if overlap_area(rl[i], rl[j]) > 0.01 * min(area(rl[i]), area(rl[j]))])
+            check(f"箱の誤差(±{jit}/1000)があっても、ほとんどのブロックを重ねられる(6個以上)", len(rj) >= 6, f"{len(rj)}個")
+
+        # ---------- トリミングされた画像・端にずれて配置された画像 ----------
+        csrc = os.path.join(tmp2, "cr.pptx")
+        cspecs2, ctruth2 = build_deck(csrc, 2, crop_slide=1)
+        RESPONDER["fn"] = build_responder(cspecs2)
+        cpic = pic_geom(csrc, 1)
+        run_flow(csrc, "")
+        gc = overlay_group(Presentation(os.path.join(tmp2, "cr_ja.pptx")).slides[1])
+        rc, tc = group_pairs(gc)
+        cb, cn, cs, ccrop = ctruth2[1]
+        bt = {text_of(t_): r_ for r_, t_ in zip(rc, tc)}
+        # 左10%が切り落とされるので、完全に見えているブロック(My Group)で比べる
+        visible = next(b for b in cb if b["text"] == "My Group")
+        te = truth_emu(visible, cs, cpic, ccrop)
+        rr = rect_of(bt[_tr(visible["text"])])
+        tol2 = cpic["width"] * 0.004
+        check("トリミングされた画像: 四角が、トリミング後の表示位置で元の文字を覆う",
+              rr[0] <= te[0] + tol2 and rr[1] <= te[1] + tol2 and rr[2] >= te[2] - tol2 and rr[3] >= te[3] - tol2,
+              f"rect={rr} truth={tuple(round(v) for v in te)}")
+
+        offs = new_prs()
+        im_o, blocks_o, nums_o = make_slide_image(marker=3)
+        add_picture_slide(offs, im_o, left=int(offs.slide_width * 0.06), top=int(offs.slide_height * 0.04),
+                          width=int(offs.slide_width * 0.9), height=int(offs.slide_height * 0.9))
+        opath = os.path.join(tmp2, "off.pptx"); offs.save(opath)
+        RESPONDER["fn"] = build_responder([{"blob": png_bytes(im_o), "crop": (0, 0, 0, 0),
+                                            "reply": expected_response(blocks_o, nums_o, im_o.size)}])
+        run_flow(opath, "")
+        go = overlay_group(Presentation(os.path.join(tmp2, "off_ja.pptx")).slides[0])
+        ro, to = group_pairs(go)
+        opic = pic_geom(opath)
+        bo = {text_of(t_): r_ for r_, t_ in zip(ro, to)}
+        te = truth_emu(blocks_o[0], im_o.size, opic)
+        rr = rect_of(bo[_tr(blocks_o[0]["text"])])
+        check("縮小して端にずれて配置された画像(90%): 四角が元の文字の位置を覆う",
+              rr[0] <= te[0] + tol2 and rr[1] <= te[1] + tol2 and rr[2] >= te[2] - tol2 and rr[3] >= te[3] - tol2)
+
+        # ---------- 塗り漏れを客観的に測る(LibreOfficeで描画) ----------
+        soffice = shutil.which("soffice") or shutil.which("libreoffice")
+        if not soffice:
+            skip("塗り漏れの描画テスト", "LibreOffice(soffice)が無い")
+        else:
+            real_pick = mod._pick_text_color
+            mod._pick_text_color = lambda ink, bg: bg     # 訳文を背景色にして見えなくし、元の英字の残りだけを測る
+            try:
+                for jit, limit in ((0, 0.5), (2, 3.0)):
+                    im_r, blocks_r, nums_r = make_slide_image(marker=5)
+                    prs_r = new_prs(); add_picture_slide(prs_r, im_r)
+                    rpath = os.path.join(tmp2, f"leak{jit}.pptx"); prs_r.save(rpath)
+                    RESPONDER["fn"] = build_responder([{"blob": png_bytes(im_r), "crop": (0, 0, 0, 0),
+                                                        "reply": expected_response(blocks_r, nums_r, im_r.size, jitter=jit)}])
+                    run_flow(rpath, "")
+                    routp = os.path.join(tmp2, f"leak{jit}_ja.pptx")
+                    subprocess.run([soffice, "--headless", "--convert-to", "png", "--outdir", tmp2, routp],
+                                   capture_output=True, timeout=180)
+                    png = os.path.join(tmp2, f"leak{jit}_ja.png")
+                    if not os.path.exists(png):
+                        skip(f"塗り漏れの描画テスト(誤差{jit})", "描画に失敗")
+                        continue
+                    rendered = Image.open(png).convert("RGB")
+                    sx, sy = rendered.width / im_r.width, rendered.height / im_r.height
+                    total = leak = 0
+                    for blk in blocks_r:
+                        if _tr(blk["text"]) == blk["text"]:
+                            continue     # 訳さないブロックは元のまま残るのが正しい
+                        x0, y0, x1, y1 = blk["box"]
+                        region = rendered.crop((round(x0 * sx), round(y0 * sy), round(x1 * sx), round(y1 * sy)))
+                        px = list(region.getdata())
+                        med = tuple(sorted(p[i] for p in px)[len(px) // 2] for i in range(3))
+                        total += len(px)
+                        leak += sum(1 for p in px if max(abs(p[i] - med[i]) for i in range(3)) > 40)
+                    pct = 100.0 * leak / max(1, total)
+                    check(f"塗り漏れ(描画して測定, 箱の誤差±{jit}/1000): 元の英字が透けて残る画素が{limit}%未満", pct < limit,
+                          f"{pct:.2f}%")
+            finally:
+                mod._pick_text_color = real_pick
+    finally:
+        os.chdir(cwd1)
+        shutil.rmtree(tmp2, ignore_errors=True)
+
+
 if HAS_OVERLAY:
-    exec(open(os.path.join(HERE, "test_ppt_translation_image_overlay_20260930.py"), encoding="utf-8").read())
+    run_overlay_tests()
 else:
     skip("重ね貼りのテスト", "このバージョン(_01)には重ね貼りが無い")
 
