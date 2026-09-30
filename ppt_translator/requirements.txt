@@ -8,4 +8,5 @@
 #   requests を書き忘れると gemini_client の import に失敗する（起動はするが翻訳できない）。
 
 python-pptx>=0.6.21
+Pillow         # 画像スライドの処理で直接使用（python-pptx も依存）
 requests      # gemini_client.py が使用
