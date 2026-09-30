@@ -2,7 +2,24 @@
 """
 daily_journal_20260903_01.py
 学びジャーナル - ホットキー起動の入力ポップアップUI
-Version: 0.47.1
+Version: 0.48.0
+
+v0.48.0での変更点：
+定時リマインドで自動的に開く回と、自分でホットキーを押して開く回を
+分けた。記録を見直したところ、ひれぶりは「無」72・「喜」42に偏り、
+LKPTは1か月で1件だけだった。「無」を足す前は「喜」に偏っていた
+経緯とあわせると、原因はボタンの種類ではなく、時計に促されて開いた
+画面に感情の欄があり、中身を確かめずに押して閉じる反射が起きていた
+ことだと判断した。
+- 定時リマインド・起動直後のチェックイン（queue_reminder_popup()）は
+  新設のreminderモードで開く。時間記録のタグだけを出し、ひれぶり・
+  LKPTは出さない（タグを押すと既存の自動クローズで閉じる）
+- ひれぶりの行を📓 Journalパネルの外（ウィンドウ直下）に移した。
+  自分で開いた回は、パネルを畳んだタスク特化起動でも常に見える
+- キューに積む値をbool(task_focus)からモード文字列
+  (POPUP_MODE_NORMAL/TASK/REMINDER)に変えた。引数無しの
+  queue_popup_trigger()は従来通り通常モード
+（未記録の時間が短い回の定時リマインド抑制はscheduler.py v0.10.0側）
 
 v0.47.1での変更点：
 タブバー本体の配色を、複数選択時の「移動先」チップと完全に統一した。
@@ -497,7 +514,7 @@ HOTKEY = "ctrl+shift+j"
 # する）専用のホットキー。Windows標準では未使用で、他アプリとの衝突も
 # 確認されていない組み合わせを選んだ
 HOTKEY_FOCUS = "ctrl+shift+t"
-VERSION = "0.47.1"
+VERSION = "0.48.0"
 
 # ファイル名（daily_journal_yyyymmdd_NN.py）そのものがバージョン識別子を
 # 兼ねる運用のため、ここに手で書いた文字列を置くと更新を忘れて古いまま
@@ -556,15 +573,31 @@ def _parse_hotkey(hotkey: str) -> tuple:
     return modifiers, ord(key.upper())
 
 
-def queue_popup_trigger(task_focus: bool = False) -> None:
+POPUP_MODE_NORMAL = "normal"
+POPUP_MODE_TASK = "task"
+POPUP_MODE_REMINDER = "reminder"
+
+
+def queue_popup_trigger(task_focus: bool = False, reminder: bool = False) -> None:
     """
     外部モジュール（scheduler.py等）からポップアップ表示をトリガーするための
     公開関数。ホットキー検知と同じキューを使うため、スレッドセーフに扱える。
-    task_focus=Trueを渡すと、📓 Journalパネルを畳んだタスク特化モードで
-    開くようトリガーする。scheduler.py等、既存の引数無し呼び出し元は
-    そのまま通常モード（False）として動く
+    task_focus=Trueならタスク特化モード、reminder=Trueなら定時リマインド
+    モード（時間記録のタグだけを出す）で開くようトリガーする。引数無しの
+    呼び出しは通常モードとして動く
     """
-    _trigger_queue.put(task_focus)
+    if reminder:
+        mode = POPUP_MODE_REMINDER
+    elif task_focus:
+        mode = POPUP_MODE_TASK
+    else:
+        mode = POPUP_MODE_NORMAL
+    _trigger_queue.put(mode)
+
+
+def queue_reminder_popup() -> None:
+    """定時リマインド・起動直後のチェックイン用。scheduler.pyに渡す引数無しの入口。"""
+    queue_popup_trigger(reminder=True)
 
 
 def _hotkey_listener_loop() -> None:
@@ -601,7 +634,7 @@ def _hotkey_listener_loop() -> None:
         while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
             if msg.message == _WM_HOTKEY:
                 task_focus = (msg.wParam == _HOTKEY_ID_FOCUS)
-                _trigger_queue.put(task_focus)
+                queue_popup_trigger(task_focus=task_focus)
                 print(f"⌨️ ホットキーを検知しました。(task_focus={task_focus})")
     finally:
         for hotkey_id in registered_ids:
@@ -631,6 +664,9 @@ class PopupWindow:
         self.subitem_free_var = tk.StringVar()
         self.subitem_free_entry = None
         self.journal_expanded = False
+        # 定時リマインドで自動的に開いた回かどうか。自分で開いた回と違い、
+        # 時間記録のタグだけを出し、ひれぶり・LKPTは出さない
+        self.reminder_mode = False
         self.journal_toggle_btn = None
         self._journal_frame = None
         self.version_label = None
@@ -767,19 +803,24 @@ class PopupWindow:
         for widget in self._themed_fg_widgets:
             widget.configure(fg=fg)
 
-    def show(self, task_focus: bool = False) -> None:
+    def show(self, task_focus: bool = False, reminder: bool = False) -> None:
         """
         ポップアップを表示する。既に表示中の場合は前面化のみ行う
         （この場合、既に開いているモードのまま前面に出るだけで、
-        後から来たtask_focusの値では切り替わらない）。
+        後から来たtask_focus/reminderの値では切り替わらない）。
 
         task_focus: Trueならタスク特化起動（Ctrl+Shift+T）。時間・タグ・
-        ひれぶり・LKPTをまとめた「📓 Journal」パネルを畳んだ状態で開き、
-        タスク一覧を主役にする。Falseなら通常起動（Ctrl+Shift+J）で、
-        同じJournalパネルを開いた状態で起動する。ボタンやパネルの構成
-        自体はどちらも同じで、既定の開閉状態だけが違う
+        LKPTをまとめた「📓 Journal」パネルを畳んだ状態で開き、タスク一覧を
+        主役にする。Falseなら通常起動（Ctrl+Shift+J）で、同じJournal
+        パネルを開いた状態で起動する。
+
+        reminder: Trueなら定時リマインド（自分で開いたのではない回）。
+        時間記録のタグだけを出し、ひれぶり・LKPTは出さない。時計に
+        促されて開いた画面に感情の欄があると、中身を確かめずに押して
+        閉じる反射が起きる（以前は「喜」、「無」を足してからは「無」に
+        偏った）ため、感情とLKPTは自分で開いた回だけに出す
         """
-        print(f"🪟 show()呼び出しを検知しました。(task_focus={task_focus})")
+        print(f"🪟 show()呼び出しを検知しました。(task_focus={task_focus}, reminder={reminder})")
         if self.window is not None and self.window.winfo_exists():
             self.window.lift()
             self.window.focus_force()
@@ -794,6 +835,7 @@ class PopupWindow:
         # 通常起動(Ctrl+Shift+J)では開いた状態、タスク特化起動
         # (Ctrl+Shift+T)では畳んだ状態で立ち上げる
         self.journal_expanded = not task_focus
+        self.reminder_mode = reminder
         for var in (self.l_var, self.k_var, self.p_var, self.t_var):
             var.set("")
         self.tag_chips = {}
@@ -913,7 +955,8 @@ class PopupWindow:
         ).pack(pady=(0, 10))
 
         # 「📓 Journal」ボタン：時間帯プレビュー・選択中バッジ・タグ・
-        # ひれぶり・LKPTを1つにまとめて開閉するアコーディオンの入口。
+        # LKPTを1つにまとめて開閉するアコーディオンの入口（ひれぶりは
+        # v0.48.0でパネルの外に出した）。
         # 通常起動(Ctrl+Shift+J)/タスク特化起動(Ctrl+Shift+T)のどちらでも
         # ボタン自体とパネルの中身は同じで、既定の開閉状態(journal_expanded)
         # だけが違う。タスク特化起動では、これらを畳むことで
@@ -1107,8 +1150,10 @@ class PopupWindow:
         self._update_time_preview()
 
         # 「魂のひれぶり」信号（喜怒無哀楽）。LKPTのようにテキストを書かなくても、
-        # タップ1回で今の気分を残せる。タグ・LKPTの開閉状態に関わらず常に
-        # 見えている位置に置き、書く気力が無い日でも記録が途切れないようにする。
+        # タップ1回で今の気分を残せる。📓 Journalパネルの外（ウィンドウ直下）に
+        # 置き、パネルを畳んだタスク特化起動でも常に見えるようにする。
+        # ただし定時リマインド(reminder_mode)では表示しない（自分で開いた
+        # 時の、本当に心が動いた瞬間だけを記録するため）。
         # 選ぶ・確定するという手順を増やしたくないため、タップした瞬間に
         # そのまま1件記録する（LKPTのような「入力→登録」の2段階にしない）
         # 表示は絵文字アイコンにする（漢字1文字の羅列は単調で見劣りするため）。
@@ -1121,8 +1166,9 @@ class PopupWindow:
         # 読み込めていればそちらを使い、失敗していた場合だけ絵文字文字列に
         # フォールバックする
         emotion_font = tkfont.Font(family="Yu Gothic UI", size=15)
-        self.emotion_frame = tk.Frame(self._journal_frame, bg=BG_COLOR)
-        self.emotion_frame.pack(pady=(0, 2), padx=15, fill="x")
+        self.emotion_frame = tk.Frame(self.window, bg=BG_COLOR)
+        if not self.reminder_mode:
+            self.emotion_frame.pack(pady=(0, 2), padx=15, fill="x")
         self._register_themed(self.emotion_frame)
         for emotion in EMOTION_LABELS:
             color = EMOTION_BUTTON_COLORS[emotion]
@@ -1145,19 +1191,22 @@ class PopupWindow:
             btn.pack(side="left", expand=True, fill="x", padx=3)
 
         self.emotion_feedback_label = tk.Label(
-            self._journal_frame, text="", bg=BG_COLOR, fg=PLACEHOLDER_COLOR,
+            self.window, text="", bg=BG_COLOR, fg=PLACEHOLDER_COLOR,
             font=tkfont.Font(family="Yu Gothic UI", size=8),
         )
-        self.emotion_feedback_label.pack(pady=(0, 4))
+        if not self.reminder_mode:
+            self.emotion_feedback_label.pack(pady=(0, 4))
         self._register_themed(self.emotion_feedback_label, bg=True)
 
         # LKPT（振り返り）の入力欄。以前は「LKPT」という独立したトグルで
         # さらに畳めるようになっていたが、外側の📓Journalボタンで
-        # 時間・タグ・ひれぶりと一緒にまとめて開閉できるようになったため、
+        # 時間・タグと一緒にまとめて開閉できるようになったため、
         # 二重にアコーディオンを重ねる意味が無くなった。Journalパネルが
-        # 開いていれば常にこの入力欄も見える
+        # 開いていれば常にこの入力欄も見える。定時リマインド
+        # (reminder_mode)では、ひれぶりと同じ理由で表示しない
         self._lkpt_frame = tk.Frame(self._journal_frame, bg=BG_COLOR)
-        self._lkpt_frame.pack(fill="x", padx=20, pady=(8, 0))
+        if not self.reminder_mode:
+            self._lkpt_frame.pack(fill="x", padx=20, pady=(8, 0))
         self._register_themed(self._lkpt_frame)
 
         lkpt_label_font = tkfont.Font(family="Yu Gothic UI", size=10, weight="bold")
@@ -1664,8 +1713,8 @@ class PopupWindow:
 
     def _toggle_journal(self) -> None:
         """
-        📓 Journalパネル（時間帯プレビュー・選択中バッジ・タグ・ひれぶり・
-        LKPT）の開閉を切り替える。通常起動・タスク特化起動のどちらでも
+        📓 Journalパネル（時間帯プレビュー・選択中バッジ・タグ・LKPT）の
+        開閉を切り替える。通常起動・タスク特化起動のどちらでも
         同じこのメソッドで開閉する（既定の開閉状態が違うだけ）。
 
         ウィンドウ自体の高さは変えない（常にexpanded_height）。畳んだ時に
@@ -3056,11 +3105,13 @@ def poll_trigger_queue(root: tk.Tk, popup: "PopupWindow") -> None:
     例外が発生してもループ自体は必ず継続する（自己修復設計）。
     """
     try:
-        task_focus = _trigger_queue.get_nowait()
+        mode = _trigger_queue.get_nowait()
+        task_focus = (mode == POPUP_MODE_TASK)
+        reminder = (mode == POPUP_MODE_REMINDER)
         # 修飾キー（Ctrl/Alt/L）が完全に離されるのを待ってから表示する。
         # 直後に表示すると、Windowsが Alt キー解放をシステムメニュー呼び出しと
         # 誤認識し、ウィンドウが一瞬で背面に回る不具合が発生するため。
-        root.after(150, lambda: popup.show(task_focus=task_focus))
+        root.after(150, lambda: popup.show(task_focus=task_focus, reminder=reminder))
     except queue.Empty:
         pass
     except Exception as e:
@@ -3083,7 +3134,7 @@ def run() -> None:
     # 循環importおよびモジュール二重読み込みを避けるため、
     # run()内で遅延importし、自モジュールの関数をコールバックとして渡す
     from scheduler import start_scheduler_loop, start_meeting_sync_loop
-    start_scheduler_loop(root, queue_popup_trigger)
+    start_scheduler_loop(root, queue_reminder_popup)
 
     # Outlook連携：終了した会議の自動記録／分類待ちの声かけ。既存の定時
     # リマインドループ(start_scheduler_loop)とは独立させてあるため、
@@ -3110,8 +3161,9 @@ def run() -> None:
 
     # 起動直後に一度ポップアップを表示し、本日最初のチェックイン（基準点）を
     # すぐに促す。Windowsスタートアップから自動起動された場合、次の定時
-    # リマインドまで何も表示されず待たされてしまうのを防ぐため
-    queue_popup_trigger()
+    # リマインドまで何も表示されず待たされてしまうのを防ぐため。自分で
+    # 開いたのではないので、定時リマインドと同じくタグだけの画面で開く
+    queue_reminder_popup()
 
     # 確認期日の来た読みがあれば答え合わせを促す。人は自分から見返さないので、
     # 向こうから出てくる必要がある。ロジックはforecast_ui側に置いてあるので、

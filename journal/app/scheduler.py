@@ -2,7 +2,17 @@
 """
 scheduler.py
 学びジャーナル - 定時強制リマインド＋ログオン時自動起動登録
-Version: 0.9.1
+Version: 0.10.0
+
+v0.10.0での変更点：
+定時リマインドの発火時、まだ記録されていない時間（前回の記録の終わり
+から今まで）がSKIP_IF_UNRECORDED_UNDER_MINUTES分未満なら、その回は
+ポップアップを出さないようにした（_has_little_unrecorded_time()）。
+定時リマインドの役目は時間の記録であり、記録すべき時間が無いのに
+割り込むのは邪魔でしかないため。会議はOutlook連携で自動記録される
+ので、直前が会議で埋まっている回もこの条件で自然に抑制される。
+本日最初の記録（基準点）がまだ無い場合や、判定に失敗した場合は
+これまで通り発火させる
 
 v0.9.1での変更点：
 コード本体をapp/フォルダに集約する整理に伴い、register_startup_task()/
@@ -60,8 +70,28 @@ REMINDER_TIMES = [
     "13:00", "14:00", "15:00", "16:00", "17:00", "18:00",
 ]
 
+# 未記録の時間がこの分数未満なら、定時リマインドを出さない
+SKIP_IF_UNRECORDED_UNDER_MINUTES = 15
+
 # 時刻ごとに「本日既に発火したか」を記録する内部辞書
 _last_triggered = {}
+
+
+def _has_little_unrecorded_time() -> bool:
+    """
+    前回の記録の終わりから今までが短く、定時リマインドで記録させる
+    時間がほとんど無いかどうかを返す。本日の基準点がまだ無い場合や、
+    判定自体に失敗した場合はFalse（＝これまで通り発火させる）を返す
+    """
+    try:
+        import storage
+        kind, start, end = storage.peek_next_time_range_v2()
+    except Exception as e:
+        print(f"ℹ️ 未記録時間の判定ができないため、通常通り発火します: {e}")
+        return False
+    if kind != "interval":
+        return False
+    return (end - start) < timedelta(minutes=SKIP_IF_UNRECORDED_UNDER_MINUTES)
 
 
 def _is_in_outlook_meeting() -> bool:
@@ -104,6 +134,9 @@ def check_reminders(trigger_callback) -> None:
                 _last_triggered[reminder_time] = today_str
                 if _is_in_outlook_meeting():
                     print(f"⏰ 定時リマインド({reminder_time})はOutlookの会議中のため抑制しました。")
+                    continue
+                if _has_little_unrecorded_time():
+                    print(f"⏰ 定時リマインド({reminder_time})は未記録の時間が短いため抑制しました。")
                     continue
                 print(f"⏰ 定時リマインド({reminder_time})を発火します。")
                 trigger_callback()
