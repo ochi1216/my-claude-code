@@ -10,9 +10,12 @@
 
 実行方法:
     pip install python-pptx
-    python3 tests/test_ppt_translation_image_20260930.py            # 最新版(_02)を検証
+    python3 tests/test_ppt_translation_image_20260930.py            # 最新版(_03)を検証
+    python3 tests/test_ppt_translation_image_20260930.py 02         # 重ね貼り版(_02)を検証
     python3 tests/test_ppt_translation_image_20260930.py 01         # ノート版(_01)を検証
 _01 には重ね貼りが無いので、重ね貼りのテストは自動的にスキップされる。
+_03 で追加した機能(文字の塊へのスナップ・太字/寄せ・確認画面の初期値・デバッグ出力)のテストは、
+_03 以降のときだけ実行される。
 """
 
 import copy
@@ -29,7 +32,7 @@ import types as pytypes
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.join(HERE, "..")
-VERSION = sys.argv[1] if len(sys.argv) > 1 else "02"
+VERSION = sys.argv[1] if len(sys.argv) > 1 else "03"
 TARGET = os.path.join(ROOT, f"ppt_translation_20260930_{VERSION}.py")
 PREV_TARGET = os.path.join(ROOT, "ppt_translation_20260911_01.py")
 
@@ -310,9 +313,10 @@ def run_flow(path, spec_value="", language="Japanese", m=None):
     MESSAGEBOX.CALLS.clear()
     captured = {}
 
-    def fake_ask(pw, message, validate):
+    def fake_ask(pw, message, validate, initial=""):
         captured["message"] = message
         captured["validate"] = validate
+        captured["initial"] = initial
         return spec_value
     m._ask_image_confirmation = fake_ask
     pw = FakeProgress()
@@ -503,9 +507,11 @@ try:
     check("payload: 画像のあとにプロンプトのテキストが続く", "text" in parts[1] and "translate" in parts[1]["text"].lower())
     check("payload: 翻訳先言語がプロンプトに入る", "Japanese" in parts[1]["text"])
     gc = pl["generationConfig"]
-    check("payload: JSONモードとスキーマが載る(項目順 box_2d→text→translation→lines)",
+    check("payload: JSONモードとスキーマが載る(項目順 box_2d→text→translation→lines[→bold→align])",
           gc["responseMimeType"] == "application/json"
-          and gc["responseSchema"]["items"]["propertyOrdering"] == ["box_2d", "text", "translation", "lines"])
+          and gc["responseSchema"]["items"]["propertyOrdering"]
+          == (["box_2d", "text", "translation", "lines", "bold", "align"] if VERSION >= "03"
+              else ["box_2d", "text", "translation", "lines"]))
     check("payload: maxOutputTokens と thinkingBudget=0(2.5-flash)", gc["maxOutputTokens"] > 0
           and gc["thinkingConfig"] == {"thinkingBudget": 0})
     check("payload: safetySettings が4カテゴリ載る", len(pl["safetySettings"]) == 4)
@@ -795,7 +801,163 @@ for keep in ("translate_batch_gemini", "translate_super_fast_parallel", "is_tran
     check(f"AST: {keep} は直前版と完全一致", keep in a and a[keep] == b.get(keep))
 
 # ============================================================
-# 6. 重ね貼り(_02 のみ)
+# 5b. 20260930_03 で追加した部品(文字の塊へのスナップ・1行維持・確認画面の初期値・デバッグ出力)
+# ============================================================
+def run_v03_tests():
+    from PIL import ImageChops
+
+    # --- 応答の検証: bold / align ---
+    v = mod._validate_image_blocks(json.dumps([
+        {"box_2d": [10, 10, 50, 500], "text": "Head", "translation": "見出し", "lines": 1, "bold": True, "align": "center"},
+        {"box_2d": [10, 10, 50, 500], "text": "Body", "translation": "本文", "lines": 1, "bold": "yes", "align": "middle"},
+        {"box_2d": [10, 10, 50, 500], "text": "None", "translation": "無し", "lines": 1}]))
+    check("応答の検証: bold は真偽値だけ受け取り、それ以外は False", [b["bold"] for b in v] == [True, False, False])
+    check("応答の検証: align は left/center/right だけ受け取り、それ以外は left",
+          [b["align"] for b in v] == ["center", "left", "left"])
+    sc = mod.IMAGE_RESPONSE_SCHEMA["items"]
+    check("スキーマ: bold は BOOLEAN、align は left/center/right の列挙で、必須項目",
+          sc["properties"]["bold"]["type"] == "BOOLEAN" and sc["properties"]["align"]["enum"] == ["left", "center", "right"]
+          and "bold" in sc["required"] and "align" in sc["required"])
+    check("プロンプトに bold と align の説明が入る", "bold:" in mod._build_image_prompt("Japanese")
+          and "align:" in mod._build_image_prompt("Japanese"))
+
+    # --- 水平方向の膨らませ ---
+    m0 = Image.new("L", (20, 5), 0)
+    m0.putpixel((5, 2), 255); m0.putpixel((8, 2), 255)
+    d = mod._dilate_horizontal(m0, 2)
+    check("水平の膨らませ: 3px離れた2点(間が2px)がつながる", all(d.getpixel((x, 2)) for x in range(3, 11)))
+    check("水平の膨らませ: 縦には広がらない", d.getpixel((5, 1)) == 0 and d.getpixel((5, 3)) == 0)
+    m1 = Image.new("L", (10, 3), 0)
+    m1.putpixel((0, 1), 255)
+    d1 = mod._dilate_horizontal(m1, 3)
+    check("水平の膨らませ: 画像の端で反対側へ回り込まない", d1.getpixel((9, 1)) == 0 and d1.getpixel((7, 1)) == 0)
+
+    # --- 文字の塊へのスナップ ---
+    def text_image(size=(400, 120), items=(("Hello World", (50, 40)),), fsize=26, bg=(255, 255, 255), fg=(0, 0, 0)):
+        im_ = Image.new("RGB", size, bg)
+        dr = ImageDraw.Draw(im_)
+        boxes_ = []
+        for txt, xy in items:
+            dr.text(xy, txt, font=_font(fsize), fill=fg)
+            boxes_.append(list(dr.textbbox(xy, txt, font=_font(fsize))))
+        return im_, boxes_
+
+    im_s, (tb_s,) = text_image()
+    th = tb_s[3] - tb_s[1]
+    small = [tb_s[0] + 20, tb_s[1] + 0.3 * th, tb_s[2] - 20, tb_s[3] - 0.3 * th]   # 文字より小さく内側に寄った箱
+    snapped = mod._snap_to_ink(im_s, small, (255, 255, 255), 1, [0, 0, 400, 120])
+    ink_truth = ImageChops.difference(im_s, Image.new("RGB", im_s.size, (255, 255, 255))).getbbox()   # 実際のインクの範囲
+    pad = mod.IMAGE_SNAP_PAD_PX   # 薄いアンチエイリアスの縁(しきい値未満)は、四角の余白で覆う
+    check("スナップ: 文字より小さい箱でも、実際のインクの範囲まで広がる(余白込みで縁まで覆う・3px以内)",
+          snapped is not None and all(abs(a_ - b_) <= 3 for a_, b_ in zip(snapped, ink_truth))
+          and snapped[0] - pad <= ink_truth[0] and snapped[1] - pad <= ink_truth[1]
+          and snapped[2] + pad >= ink_truth[2] and snapped[3] + pad >= ink_truth[3], f"{snapped} vs {ink_truth}")
+    check("スナップ: 文字の外(余白)まで広げすぎない(各辺6px以内)",
+          snapped is not None and snapped[0] >= tb_s[0] - 6 and snapped[2] <= tb_s[2] + 6
+          and snapped[1] >= tb_s[1] - 6 and snapped[3] <= tb_s[3] + 6, f"{snapped}")
+    im_s2, (a_s, b_s) = text_image(size=(700, 120), items=(("Hello World", (30, 40)), ("Faraway", (520, 40))))
+    box_a = [a_s[0] + 10, a_s[1] + 2, a_s[2] - 10, a_s[3] - 2]
+    sn2 = mod._snap_to_ink(im_s2, box_a, (255, 255, 255), 1, [0, 0, 700, 120])
+    check("スナップ: 離れた別の文字(Faraway)は巻き込まない", sn2 is not None and sn2[2] < b_s[0] - 20, f"{sn2}")
+    limited = mod._snap_to_ink(im_s, small, (255, 255, 255), 1, [0, 0, tb_s[0] + 60, 120])
+    check("スナップ: 上限(limit)の外には出ない", limited is not None and limited[2] <= tb_s[0] + 60, f"{limited}")
+    blob = Image.new("RGB", (400, 120), (255, 255, 255))
+    ImageDraw.Draw(blob).rectangle([20, 30, 380, 90], fill=(0, 0, 0))
+    check("スナップ: 極端に大きい塊(棒グラフ・罫線など)は無視する",
+          mod._snap_to_ink(blob, [100, 50, 140, 70], (255, 255, 255), 1, [0, 0, 400, 120]) is None)
+    check("スナップ: インクが無ければ None",
+          mod._snap_to_ink(Image.new("RGB", (100, 50), (255, 255, 255)), [10, 10, 60, 30], (255, 255, 255), 1, [0, 0, 100, 50]) is None)
+    im_w, (tw,) = text_image(items=(("Header", (60, 40)),), fsize=30, bg=(0, 112, 122), fg=(255, 255, 255))
+    hw = tw[3] - tw[1]
+    sn_w = mod._snap_to_ink(im_w, [tw[0], tw[1] + 0.4 * hw, tw[2], tw[3]], (0, 112, 122), 1, [0, 0, 400, 120])
+    check("スナップ: 濃い帯の上の白い文字でも、箱の上に飛び出した上部まで届く(実機で残った例)",
+          sn_w is not None and sn_w[1] <= tw[1] + 1, f"{sn_w} vs {tw}")
+
+    # --- 背景色の推定(箱が文字より小さくても、文字の色を背景と取り違えない) ---
+    bar = Image.new("RGB", (420, 90), (255, 255, 255))
+    dbar = ImageDraw.Draw(bar)
+    dbar.rectangle([0, 0, 420, 62], fill=(0, 112, 122))
+    dbar.text((20, 8), "HEADER TEXT", font=_font(38), fill=(255, 255, 255))
+    tbb = dbar.textbbox((20, 8), "HEADER TEXT", font=_font(38))
+    hh = tbb[3] - tbb[1]
+    small_box = [tbb[0] + 6, tbb[1] + 0.3 * hh, tbb[2] - 6, tbb[3] - 0.1 * hh]   # 白い文字の中にほぼ収まる小さい箱
+    bg_est = mod._estimate_background(bar, small_box)
+    check("背景色の推定: 濃い帯の上の白い大きな文字で、箱が文字より小さくても、帯の色(白でなく)を返す",
+          max(abs(a_ - b_) for a_, b_ in zip(bg_est, (0, 112, 122))) <= 8, f"{bg_est}")
+    stripe = Image.new("RGB", (300, 90), (255, 255, 255))
+    dstripe = ImageDraw.Draw(stripe)
+    dstripe.rectangle([0, 30, 300, 60], fill=(249, 250, 249))
+    dstripe.text((20, 36), "Label", font=_font(16), fill=(30, 30, 30))
+    sb = dstripe.textbbox((20, 36), "Label", font=_font(16))
+    check("背景色の推定: 縞々の行の上の文字は、その行の色を返す",
+          max(abs(a_ - b_) for a_, b_ in zip(mod._estimate_background(stripe, sb), (249, 250, 249))) <= 4)
+
+    # --- 1行維持のサイズ決定 ---
+    s_single = mod._fit_font_size("ウェルビーイング", 70, 30, 10, single_line=True)
+    s_multi = mod._fit_font_size("ウェルビーイング", 70, 30, 10, single_line=False)
+    check("サイズ: 原文が1行なら、折り返す前に縮めて1行に収める",
+          s_single is not None and mod._estimate_lines("ウェルビーイング", s_single, 70) == 1 and 7.5 <= s_single < 10,
+          f"single={s_single}")
+    check("サイズ: 従来(single_line=False)は大きさを優先して折り返す",
+          s_multi == 10.0 and mod._estimate_lines("ウェルビーイング", s_multi, 70) == 2, f"multi={s_multi}")
+    s_fallback = mod._fit_font_size("ウェルビーイング", 40, 30, 10, single_line=True)
+    check("サイズ: 75%まで縮めても1行に収まらなければ、折り返しを許して従来どおり決める",
+          s_fallback is not None and mod._estimate_lines("ウェルビーイング", s_fallback, 40) >= 2, f"{s_fallback}")
+
+    # --- 確認画面の初期値・デバッグ出力 ---
+    tmp3 = tempfile.mkdtemp()
+    cwd3 = os.getcwd()
+    os.chdir(tmp3)
+    try:
+        prs_i = new_prs()
+        imx, bx, nx = make_slide_image(marker=1)
+        add_picture_slide(prs_i, imx, width=int(prs_i.slide_width * 0.5), height=int(prs_i.slide_height * 0.5))   # 1枚目: 対象外
+        imy, by, ny = make_slide_image(marker=2)
+        add_picture_slide(prs_i, imy)                                                                        # 2枚目: 対象
+        ipath = os.path.join(tmp3, "init.pptx"); prs_i.save(ipath)
+        RESPONDER["fn"] = build_responder([{"blob": png_bytes(imy), "crop": (0, 0, 0, 0),
+                                            "reply": expected_response(by, ny, imy.size)}])
+        pw_i, cap_i = run_flow(ipath, "")
+        check("確認画面: 初期値は、先頭の対象スライドの番号(ここでは2)", cap_i.get("initial") == "2", f"{cap_i.get('initial')!r}")
+        check("確認画面: 文言に、先頭1枚が入っていることと、全部は欄を空にすることが書かれる",
+              "先頭の1枚（スライド2）" in cap_i["message"] and "欄を空にして" in cap_i["message"], cap_i["message"])
+
+        # デバッグ出力
+        dpath = os.path.join(tmp3, "dbg.pptx")
+        dspecs, dtruth = build_deck(dpath, 2)
+        RESPONDER["fn"] = build_responder(dspecs)
+        os.environ.pop(mod.IMAGE_DEBUG_ENV, None)
+        run_flow(dpath, "")
+        check("デバッグ出力: 環境変数が無ければ作らない", not os.path.exists(os.path.join(tmp3, "dbg_ja_boxes_debug.json")))
+        os.environ[mod.IMAGE_DEBUG_ENV] = "1"
+        try:
+            run_flow(dpath, "")
+        finally:
+            os.environ.pop(mod.IMAGE_DEBUG_ENV, None)
+        jpath = os.path.join(tmp3, "dbg_ja_boxes_debug.json")
+        check("デバッグ出力: 環境変数 PPT_IMAGE_DEBUG_BOXES=1 で出力ファイルの隣にJSONを作る", os.path.exists(jpath))
+        raw_dbg = open(jpath, encoding="utf-8").read() if os.path.exists(jpath) else ""
+        data_dbg = json.loads(raw_dbg) if raw_dbg else {}
+        blocks_dbg = data_dbg.get("1", {}).get("blocks", [])
+        check("デバッグ出力: スライドごとにブロックの箱・行数・太字・寄せ・結果・塗った範囲が入る",
+              len(blocks_dbg) > 0 and all(k in blocks_dbg[0] for k in ("box_2d", "lines", "bold", "align", "result"))
+              and any(b.get("result") == "painted" and "paint_fill" in b and "font_pt" in b for b in blocks_dbg))
+        leaked = [s_ for s_ in ("Executive Summary", "Wellbeing", "Employee Engagement", "エグゼクティブ", "ウェルビーイング")
+                  if s_ in raw_dbg]
+        check("デバッグ出力: 原文・訳文は一切含まない(文字数だけ)", not leaked and "text_len" in raw_dbg, f"含まれた文字: {leaked}")
+    finally:
+        os.environ.pop(mod.IMAGE_DEBUG_ENV, None)
+        os.chdir(cwd3)
+        shutil.rmtree(tmp3, ignore_errors=True)
+
+
+if VERSION >= "03":
+    run_v03_tests()
+else:
+    skip("20260930_03 の追加機能のテスト", "このバージョンには無い")
+
+# ============================================================
+# 6. 重ね貼り(_02 以降)
 # ============================================================
 def run_overlay_tests():
     import subprocess
@@ -944,7 +1106,8 @@ def run_overlay_tests():
             run_flow(src2, "", language=lang)
             o = os.path.join(tmp2, f"ov_{'en' if lang == 'English' else 'cn'}.pptx")
             g = overlay_group(Presentation(o).slides[0])
-            f_ = g.shapes[1].text_frame.paragraphs[0].runs[0].font.name if g is not None else None
+            f_ = next((s.text_frame.paragraphs[0].runs[0].font.name for s in g.shapes if s.name == "翻訳_文字"), None) \
+                if g is not None else None
             check(f"言語ごとのフォント: {lang} は {font}", f_ == font, f"{f_}")
         RESPONDER["fn"] = build_responder(specs2)
 
@@ -1038,6 +1201,103 @@ def run_overlay_tests():
                   not [(i, j) for i in range(len(rl)) for j in range(i + 1, len(rl))
                        if overlap_area(rl[i], rl[j]) > 0.01 * min(area(rl[i]), area(rl[j]))])
             check(f"箱の誤差(±{jit}/1000)があっても、ほとんどのブロックを重ねられる(6個以上)", len(rj) >= 6, f"{len(rj)}個")
+
+        # ---------- 20260930_03: 太字・寄せ・貼る順序・偏った箱のずれ ----------
+        if VERSION >= "03":
+            def with_flags(rep, flags):
+                rep = copy.deepcopy(rep)
+                for b in rep:
+                    b.update(flags.get(b["text"], {}))
+                return rep
+
+            flag_rep = with_flags(specs2[0]["reply"], {"Executive Summary": {"bold": True},
+                                                       "My Group": {"align": "center", "bold": True},
+                                                       "Wellbeing": {"align": "right"}})
+            RESPONDER["fn"] = build_responder([dict(specs2[0], reply=flag_rep)])
+            run_flow(src2, "")
+            g3 = overlay_group(Presentation(out2).slides[0])
+            r3, t3 = group_pairs(g3)
+            by3 = {text_of(t_): t_ for t_ in t3}
+
+            def run_of(tb_):
+                return tb_.text_frame.paragraphs[0].runs[0]
+            check("太字: bold=true のブロックは太字になり、そうでないブロックは太字にならない",
+                  run_of(by3[_tr("Executive Summary")]).font.bold is True
+                  and run_of(by3[_tr("My Group")]).font.bold is True
+                  and run_of(by3[_tr("Employee Engagement")]).font.bold is False)
+            from pptx.enum.text import PP_ALIGN as _PA
+            check("寄せ: center / right / left(指定なし) がそのまま段落の寄せになる",
+                  by3[_tr("My Group")].text_frame.paragraphs[0].alignment == _PA.CENTER
+                  and by3[_tr("Wellbeing")].text_frame.paragraphs[0].alignment == _PA.RIGHT
+                  and by3[_tr("Employee Engagement")].text_frame.paragraphs[0].alignment == _PA.LEFT)
+            mg = next(b for b in blocks_t if b["text"] == "My Group")
+            te = truth_emu(mg, size_t, pic0)
+            tbx = by3[_tr("My Group")]
+            check("中央寄せ: 文字枠の中心が、元の文字の中心に合う(誤差1%以内)",
+                  abs((tbx.left + tbx.width / 2) - (te[0] + te[2]) / 2) < pic0["width"] * 0.01,
+                  f"枠の中心={tbx.left + tbx.width / 2:.0f} 元の中心={(te[0] + te[2]) / 2:.0f}")
+            wb = next(b for b in blocks_t if b["text"] == "Wellbeing")
+            te = truth_emu(wb, size_t, pic0)
+            tbw = by3[_tr("Wellbeing")]
+            check("右寄せ: 文字枠の右端が、元の文字の右端に合う(誤差1%以内)",
+                  abs((tbw.left + tbw.width) - te[2]) < pic0["width"] * 0.01,
+                  f"枠の右端={tbw.left + tbw.width:.0f} 元の右端={te[2]:.0f}")
+            names = [s.name for s in g3.shapes]
+            first_text = names.index("翻訳_文字")
+            check("貼る順序: 四角を全部貼ってから、文字を貼る(あとの四角が先の文字を隠さない)",
+                  all(n == "翻訳_背景" for n in names[:first_text]) and all(n == "翻訳_文字" for n in names[first_text:]),
+                  f"{names}")
+
+            # 偏った箱のずれ(実機で起きた種類): 箱を縦に縮める・縦にずらす・右端が短い
+            def bias_reply(fn):
+                rep = copy.deepcopy(specs2[0]["reply"])
+                for b in rep:
+                    y0, x0, y1, x1 = b["box_2d"]
+                    h_ = y1 - y0
+                    b["box_2d"] = fn(y0, x0, y1, x1, h_)
+                return rep
+
+            def ink_leak_pct(path):
+                """元の文字のインクのうち、四角の外に残った割合(%)。幾何で測る(描画しない)。"""
+                W_, H_ = size_t
+                pg = pic_geom(path)
+                gg = overlay_group(Presentation(path).slides[0])
+                rs = [((s.left - pg["left"]) / pg["width"] * W_, (s.top - pg["top"]) / pg["height"] * H_,
+                       (s.left + s.width - pg["left"]) / pg["width"] * W_, (s.top + s.height - pg["top"]) / pg["height"] * H_)
+                      for s in gg.shapes if s.name == "翻訳_背景"]
+                im_full = Image.open(io.BytesIO(specs2[0]["blob"])).convert("RGB")
+                own = leak = 0
+                for blk in blocks_t:
+                    if _tr(blk["text"]) == blk["text"]:
+                        continue
+                    x0, y0, x1, y1 = [int(round(v)) for v in blk["box"]]
+                    region = im_full.crop((x0, y0, x1, y1))
+                    from collections import Counter as _C
+                    bgc = _C((p_[0] // 8, p_[1] // 8, p_[2] // 8) for p_ in region.getdata()).most_common(1)[0][0]
+                    bgc = tuple(v_ * 8 + 4 for v_ in bgc)
+                    for k_, p_ in enumerate(region.getdata()):
+                        if max(abs(p_[i_] - bgc[i_]) for i_ in range(3)) > 60:
+                            x_, y_ = x0 + k_ % (x1 - x0), y0 + k_ // (x1 - x0)
+                            own += 1
+                            if not any(r_[0] <= x_ < r_[2] and r_[1] <= y_ < r_[3] for r_ in rs):
+                                leak += 1
+                return 100.0 * leak / max(1, own)
+
+            cases = (("箱を縦に15%縮めた", lambda y0, x0, y1, x1, h_: [y0 + 0.15 * h_, x0, y1 - 0.15 * h_, x1], 2.0),
+                     ("箱を縦に30%縮めた", lambda y0, x0, y1, x1, h_: [y0 + 0.30 * h_, x0, y1 - 0.30 * h_, x1], 5.0),
+                     ("箱が縦に30%ずれた", lambda y0, x0, y1, x1, h_: [y0 + 0.30 * h_, x0, y1 + 0.30 * h_, x1], 5.0),
+                     ("箱の右端が30%短い", lambda y0, x0, y1, x1, h_: [y0, x0, y1, x1 - 0.30 * h_], 2.0))
+            for label, fn, limit in cases:
+                RESPONDER["fn"] = build_responder([dict(specs2[0], reply=bias_reply(fn))])
+                run_flow(src2, "")
+                pct = ink_leak_pct(out2)
+                check(f"偏った箱のずれ({label}): 元の文字のインクが四角の外に残る割合が{limit}%未満", pct < limit, f"{pct:.2f}%")
+                gg_ = overlay_group(Presentation(out2).slides[0])
+                rr_, tt_ = group_pairs(gg_)
+                hdr_i = [text_of(x_) for x_ in tt_].index(_tr("Executive Summary"))
+                check(f"偏った箱のずれ({label}): 濃い帯の上の白いヘッダーの四角が、帯の色のまま(白にならない)",
+                      near(fill_rgb(rr_[hdr_i]), (0, 112, 122), 12), f"{fill_rgb(rr_[hdr_i])}")
+            RESPONDER["fn"] = build_responder(specs2)
 
         # ---------- トリミングされた画像・端にずれて配置された画像 ----------
         csrc = os.path.join(tmp2, "cr.pptx")

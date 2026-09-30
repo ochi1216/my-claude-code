@@ -5,7 +5,7 @@
 tkinter または画面(DISPLAY)が無い環境では、何もせず SKIP で正常終了する。
 
 実行方法(画面の無いLinuxなら仮想画面で):
-    xvfb-run -a python3 tests/test_ppt_translation_image_gui_20260930.py [01|02]
+    xvfb-run -a python3 tests/test_ppt_translation_image_gui_20260930.py [01|02|03]
 """
 import importlib.util
 import os
@@ -14,7 +14,7 @@ import threading
 import types as pytypes
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-VERSION = sys.argv[1] if len(sys.argv) > 1 else "02"
+VERSION = sys.argv[1] if len(sys.argv) > 1 else "03"
 TARGET = os.path.join(HERE, "..", f"ppt_translation_20260930_{VERSION}.py")
 
 try:
@@ -63,7 +63,7 @@ def widget_of(dialog, cls, text=None):
     return None
 
 
-def run_dialog(script, message="画像だけのスライドが 3 枚見つかりました。"):
+def run_dialog(script, message="画像だけのスライドが 3 枚見つかりました。", initial=""):
     """ワーカースレッドから _run_on_main_thread で確認ダイアログを出し、
     主スレッド(mainloop)側で script(dialog) が操作する。戻り値: ダイアログの結果。"""
     result = {}
@@ -72,9 +72,10 @@ def run_dialog(script, message="画像だけのスライドが 3 枚見つかり
 
     def worker():
         try:
+            kwargs = {"initial": initial} if initial else {}
             result["value"] = mod._run_on_main_thread(
                 parent, lambda: mod._show_image_confirm_dialog(
-                    parent, message, lambda s: mod.parse_slide_spec(s, 24)))
+                    parent, message, lambda s: mod.parse_slide_spec(s, 24), **kwargs))
         except Exception as e:
             result["error"] = e
         finally:
@@ -165,6 +166,27 @@ r = run_dialog(bad_then_good)
 check("ダイアログ: 範囲外(99)はエラー文言を出し、閉じずに再入力できる",
       seen.get("still_open") and any("範囲外" in t for t in seen.get("labels", [])), str(seen))
 check("ダイアログ: 直して実行すると入力どおり '1-3,5' が返る", r.get("value") == "1-3,5", str(r))
+
+# 5b. 初期値(20260930_03 以降): 入力欄に最初から入っていて、そのまま実行できる
+if VERSION >= "03":
+    shown = {}
+
+    def read_initial(d):
+        shown["entry"] = next(w.get() for w in all_widgets(d) if isinstance(w, tk.Entry))
+        click(d, "実行")
+
+    r = run_dialog(read_initial, initial="6")
+    check("ダイアログ: 初期値「6」が入力欄に最初から入っていて、そのまま実行すると '6' が返る",
+          shown.get("entry") == "6" and r.get("value") == "6", f"{shown} {r}")
+
+    def clear_then_run(d):
+        set_entry(d, "")
+        click(d, "実行")
+
+    r = run_dialog(clear_then_run, initial="6")
+    check("ダイアログ: 初期値を消して(空欄で)実行すると、全部を意味する空文字が返る", r.get("value") == "", str(r))
+else:
+    print("SKIP: 初期値のテスト  (このバージョンには無い)")
 
 # 6. 文言と入力欄の説明
 captured = {}
