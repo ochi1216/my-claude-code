@@ -5,6 +5,16 @@
 dict でない JSON は「キャッシュ無し」)、期間表示の「未取得/AI失敗」は対象者ごと (各人のレポートはその人だけ、保存する結果と
 完了ステータスは合算)、「前月のみ」は前月が一覧に無いとき案内ダイアログ、窓幅は12月 (1年12か月が1行) も630pxで切れない。
 
+A7a (振り返りの費用の事前見積り・確認 = _20261004_05 以降) への追随 (A3 の観点は弱めていない。_03 / _04 でもそのまま通る):
+  - _run_review は self.config['gemini_model'] を読む (実機の __init__ は self.config = load_config() を持つ) ので、
+    偽GUIにも config (DEFAULT_CONFIG のコピー) を持たせる。無いと AttributeError → 「❌ 失敗しました」になり、
+    完了を待つテストが毎回タイムアウト (15秒) していた。
+  - 完了ステータスの形が変わった: 「✅ 振り返り生成完了」+ 費用の文言 +（あれば）A3 の「（⚠ 未取得…）」通知。
+    今回の実行でAI分析に失敗した「月×対象者」があれば、先頭は「⚠ 振り返り生成完了（AI失敗N件。その月を再実行で再試行）」(費用の文言は「成功{N件−失敗}/{件数}件」)。
+    失敗は「❌ 失敗しました: …」(+エラーダイアログ)、費用の確認で中止は「⏹ …」。split_done_status が形を厳密に分け、
+    A3 の観点 (通知がステータスの末尾に出る/出ない・未取得/AI失敗の件数) は、分けた「通知」の部分に対してこれまでどおり確かめる。
+  - 失敗・中止のステータスが出たら、15秒待たずにその場で原因つきで失敗にする。
+
 【なぜ必要か】 レビューで「_run_review を実行するテストが無く、all_months に選択月を渡す誤り
 (= 常に「全月更新」になる / 12か月ぶんの表示にならない) が全73件をすり抜ける」と指摘された。
 このファイルは、偽のOutlook・偽のAIを載せた画面で、本物の _run_review / generate_review_data /
@@ -1177,6 +1187,7 @@ def make_fake_summarizer(fail=()):
     s.total_input_tokens = 0
     s.total_output_tokens = 0
     s.ai_calls = []
+    s.fail_set = set(fail)                              # 失敗させる (YYYYMM, タグ) の組。完了ステータスの「AI失敗N件」の確認に使う
 
     def fake_call(prompt, schema, override_model=None):
         ids = re.findall(r"スレッドID: (conv-(\d{6})-([a-z]+))", prompt)
@@ -1194,6 +1205,51 @@ def make_fake_summarizer(fail=()):
 
     s._run_genai_call_with_schema = fake_call
     return s
+
+
+# ---- 完了ステータスの形 (A7a = _20261004_05 以降で変わった。_03 / _04 は A3 のまま) ---------------------------------
+#   _03 / _04 : 「✅ 振り返り生成完了」+ A3 の通知 (あれば)
+#   _05 以降  : 「✅ 振り返り生成完了」+ 費用の文言 + A3 の通知 (あれば)
+#               今回の実行でAI分析に失敗した「月×対象者」があるときは、先頭が「⚠ 振り返り生成完了（AI失敗N件。その月を再実行で再試行）」(費用の文言は「成功{N件−失敗}/{件数}件」) (A7a 追記2)
+# A3 の通知 = 「（⚠ 未取得Nか月・AI失敗Mか月あり。レポートの期間表示を確認してください）」(欠けがあるときだけ・必ず末尾)。
+DONE_HEAD = "✅ 振り返り生成完了"
+AI_FAIL_HEAD_RE = r"⚠ 振り返り生成完了（AI失敗(?P<failed>\d+)件。その月を再実行で再試行）"
+COST_TEXT_RE = r"（今回のAI費用 約\d+(?:\.\d+)?円・(?:成功(?P<ok>\d+)/)?(?P<calls>\d+)件）|（新しい分析は不要でした）"
+GAP_NOTE_RE = r"（⚠ [^（）]*あり。レポートの期間表示を確認してください）"
+ABORT_PREFIXES = ("❌ 失敗しました", "⏹ 費用の確認で中止しました")        # _05 以降の失敗・中止のステータス (待たずに失敗にする)
+DONE_PREFIXES = (DONE_HEAD, "⚠ 振り返り生成完了（AI失敗")                         # 完了 (AI失敗ありの完了を含む)
+
+
+def has_cost_report():
+    """このリビジョンが A7a (振り返りの費用の事前見積り・確認。_20261004_05 以降) を含むか。完了ステータスの形が変わる。"""
+    return hasattr(oto(), "estimate_review_cost")
+
+
+def split_done_status(status):
+    """完了ステータスを head (先頭) / cost (費用の文言) / note (A3の通知) に分けて SimpleNamespace で返す。
+    _03 / _04 では cost は空。head がAI失敗ありの完了のときは failed にその件数 (それ以外は None)、
+    cost が「N件」(AI失敗ありのときは「成功X/N件」) のときは calls に N (「新しい分析は不要」・_03/_04 は None)。
+    AI失敗ありの先頭なら費用の文言は必ず「成功{N−失敗}/{N}件」、失敗が無いなら「成功X/N件」の形にならないことも確かめる。
+    想定の形 (上の説明) でなければ AssertionError。先頭・費用・通知の他に余計な文言が混じっても失敗にする。"""
+    if has_cost_report():
+        pattern = rf"(?P<head>{DONE_HEAD}|{AI_FAIL_HEAD_RE})(?P<cost>{COST_TEXT_RE})(?P<note>{GAP_NOTE_RE})?"
+    else:
+        pattern = rf"(?P<head>{DONE_HEAD})(?P<cost>)(?P<note>{GAP_NOTE_RE})?"
+    m = re.fullmatch(pattern, status)
+    if m is None:
+        raise AssertionError(f"完了ステータスが想定の形でない: {status!r}")
+    groups = m.groupdict()
+    failed = int(groups["failed"]) if groups.get("failed") else None
+    ok = int(groups["ok"]) if groups.get("ok") else None
+    calls = int(groups["calls"]) if groups.get("calls") else None
+    if failed is not None and (ok is None or calls is None or ok != calls - failed):
+        raise AssertionError(f"AI失敗ありの完了なのに、費用の文言が「成功{{N−失敗}}/{{N}}件」でない: {status!r}")
+    if failed is None and ok is not None:
+        raise AssertionError(f"AI失敗が無いのに、費用の文言が「成功X/N件」の形: {status!r}")
+    return types.SimpleNamespace(
+        head=groups["head"], cost=groups["cost"], note=groups["note"] or "",
+        failed=int(groups["failed"]) if groups.get("failed") else None,
+        calls=int(groups["calls"]) if groups.get("calls") else None)
 
 
 class ReviewRunCase(a3m.ReviewGuiCase):
@@ -1245,24 +1301,69 @@ class ReviewRunCase(a3m.ReviewGuiCase):
         gui.summarizer = self.summarizer
         gui.reporter = oto().HTMLReportGenerator(os.path.join(os.getcwd(), "out"), 8765)
         gui._set_status = lambda text, *a, **k: self.statuses.append(text)
+        # 実機の MailManagerGUI.__init__ は self.config = load_config() を持つ。A7a (_05 以降) の _run_review は
+        # config の gemini_model を読む (費用の事前見積り・実績ログ用) ので、__new__ で作る偽GUIにも用意する。
+        # (load_config() は json/ を作ってしまうため使わず、既定値のコピーを置く。test_a1_gui_smoke.py と同じ)
+        gui.config = dict(oto().DEFAULT_CONFIG)
         return gui
 
     # ---- 実行 (ワーカースレッドの完了まで mainloop を回して待つ) ----------------------
-    def _run(self, gui, method, done_prefix, timeout=15):
+    def _run(self, gui, method, done_prefix, timeout=15, abort_prefixes=()):
+        """method を実行し、done_prefix (文字列か、その組) で始まるステータスが出るまで待つ。abort_prefixes で始まるステータス
+        (失敗・中止) が出たら、残りの時間を待たずに、そのステータスと出たダイアログを添えて失敗にする。"""
+        done = (done_prefix,) if isinstance(done_prefix, str) else tuple(done_prefix)
+        abort = tuple(abort_prefixes)
         n = len(self.statuses)
         getattr(gui, method)()
-        ok = self.pump(lambda: any(s.startswith(done_prefix) for s in self.statuses[n:]), timeout=timeout)
+        ok = self.pump(lambda: any(s.startswith(done + abort) for s in self.statuses[n:]), timeout=timeout)
         self.assertTrue(ok, f"{method} が {timeout}秒で終わらない。ステータス: {self.statuses[n:][-5:]}")
+        aborted = [s for s in self.statuses[n:] if s.startswith(abort)] if abort else []
+        if aborted:
+            self.fail(f"{method} が完了せずに終わった: {aborted[-1]!r}。ダイアログ: {self.dialogs}")
         self.pump(lambda: not self.worker_threads(), timeout=5)
         self.settle(0.05)
         self.assertEqual(self.thread_errors, [], "ワーカースレッドで例外")
         self.assertEqual(self.callback_errors, [], "Tkコールバックで例外 (生成処理の途中で落ちた疑い)")
-        self.assertEqual(self.dialogs, [], "エラー等のダイアログが出た")
-        return [s for s in self.statuses[n:] if s.startswith(done_prefix)][-1]
+        # A7a (_05 以降): 見込みが100円以上なら「AI費用の確認」(askyesno) が出る。これは正常な動き (偽の messagebox が「はい」を返して続行する。
+        # 単価表や既定モデルが変わっても A3 のテストが巻き込まれないよう、このダイアログだけは許す)。それ以外のダイアログは従来どおり失敗。
+        unexpected = [d for d in self.dialogs if not (d[0] == "askyesno" and d[1] and d[1][0] == "AI費用の確認")]
+        self.assertEqual(unexpected, [], "エラー等のダイアログが出た")
+        return [s for s in self.statuses[n:] if s.startswith(done)][-1]
 
     def run_review(self, gui):
-        """「📈 振り返りを生成」を実行し、完了時のステータス文言を返す。"""
-        return self._run(gui, "_run_review", "✅ 振り返り生成完了")
+        """「📈 振り返りを生成」を実行し、完了時のステータス文言を返す。
+        完了 =「✅ 振り返り生成完了…」か (A7a: 今回AI分析に失敗した月×対象者があるとき)「⚠ 振り返り生成完了（AI失敗N件。…）」。
+        「❌ 失敗しました」「⏹ 費用の確認で中止しました」(_05 以降) は完了とみなさず、その場で失敗にする。"""
+        n_ai = len(self.summarizer.ai_calls)
+        status = self._run(gui, "_run_review", DONE_PREFIXES, abort_prefixes=ABORT_PREFIXES)
+        self.check_done_status(status, self.summarizer.ai_calls[n_ai:])
+        return status
+
+    def check_done_status(self, status, ai_calls):
+        """完了ステータスの形が想定どおりで、(_05 以降は) 費用の文言の件数・AI失敗の件数が、今回の実行で偽AIが実際に呼ばれた回数・
+        失敗させた回数と合うことを確かめる。A3 の通知 (未取得・AI失敗の月数) の確認は、各テストが note に対して行う。"""
+        done = split_done_status(status)
+        if not has_cost_report():
+            return done
+        failed = [c for c in ai_calls if c in self.summarizer.fail_set]
+        if ai_calls:
+            self.assertEqual(done.calls, len(ai_calls), f"費用の文言の件数が、偽AIの呼ばれた回数と違う: {status}")
+        else:
+            self.assertEqual(done.cost, "（新しい分析は不要でした）", f"AIを呼んでいないのに費用の文言が違う: {status}")
+        if failed:
+            self.assertEqual(done.failed, len(failed), f"AI失敗の件数が、偽AIが失敗させた回数と違う: {status}")
+        else:
+            self.assertEqual((done.head, done.failed), (DONE_HEAD, None), f"AI失敗が無いのに先頭が成功の形でない: {status}")
+        return done
+
+    def assert_plain_status(self, status):
+        """欠けが無いときの完了ステータス: 先頭は「✅ 振り返り生成完了」で、A3 の通知は付かない。
+        _03 / _04 は「✅ 振り返り生成完了」だけ。_05 以降はその後ろに費用の文言だけが付く。"""
+        done = split_done_status(status)
+        self.assertEqual(done.head, DONE_HEAD, status)
+        self.assertEqual(done.note, "", f"欠けが無いのに通知が付いた: {status}")
+        if not has_cost_report():
+            self.assertEqual(status, DONE_HEAD)
 
     def reformat_review(self, gui):
         """「🎨 フォーマットのみ再生成」を実行し、完了時のステータス文言を返す。"""
@@ -1579,65 +1680,101 @@ class TestRunReviewAiFailureLabel(ReviewRunCase):
 
 
 class TestRunReviewCompletionStatus(ReviewRunCase):
-    """完了ステータス: missing/failed があれば「✅ 振り返り生成完了（⚠ 未取得Nか月・AI失敗Mか月あり。レポートの期間表示を確認してください）」、
-    無ければ従来どおり「✅ 振り返り生成完了」。ゼロ件の側を書くか省くかは仕様に明記が無いので、件数のある側だけを確かめる。"""
+    """完了ステータス: 欠け (未取得・AI失敗) があれば、末尾に「（⚠ 未取得Nか月・AI失敗Mか月あり。レポートの期間表示を確認してください）」が付く。
+    欠けが無ければその通知は付かない (_03 / _04 は「✅ 振り返り生成完了」だけ。A7a の _05 以降は「✅ 振り返り生成完了」+ 費用の文言だけ)。
+    ゼロ件の側を書くか省くかは仕様に明記が無いので、件数のある側だけを確かめる。
+    ステータスの形 (先頭・費用の文言・通知) は split_done_status が厳密に分け、余計な文言が混じれば失敗にする。"""
 
-    WARNING_HEAD = "✅ 振り返り生成完了（⚠ "
+    WARNING_HEAD = "（⚠ "                       # A3 の通知の書き出し (_03 では完了の文言の直後、_05 以降では費用の文言の直後)
     WARNING_TAIL = "レポートの期間表示を確認してください）"
 
     def test_status_warns_with_the_count_when_months_are_missing(self):
-        """未取得が10か月 (過去の月。当月は数えない) あるとき、完了ステータスは警告付き (「未取得10か月」を含む)。"""
+        """未取得が10か月 (過去の月。当月は数えない) あるとき、完了ステータスの末尾に警告が付く (「未取得10か月」を含む)。"""
         gui = self.make_run_gui(NOW_1004)
         status = self.run_review(gui)
-        self.assertTrue(status.startswith(self.WARNING_HEAD), status)
-        self.assertIn("未取得10か月", status)
+        done = split_done_status(status)
+        self.assertEqual(done.head, DONE_HEAD, status)
+        self.assertTrue(done.note.startswith(self.WARNING_HEAD), status)
+        self.assertIn("未取得10か月", done.note)
 
     def test_status_warns_with_the_count_when_ai_failed(self):
-        """AI失敗が1か月のとき、完了ステータスは警告付き (「AI失敗1か月」を含む)。"""
+        """AI失敗が1か月のとき、完了ステータスの末尾に警告が付く (「AI失敗1か月」を含む)。
+        (キャッシュに残っていた失敗。今回の実行のAIは成功しているので、先頭は成功の「✅ 振り返り生成完了」)"""
         self.seed([mm for mm in ALL_1004 if mm != "202609"], error=("202608",))
         gui = self.make_run_gui(NOW_1004)
         status = self.run_review(gui)
-        self.assertTrue(status.startswith(self.WARNING_HEAD), status)
-        self.assertIn("AI失敗1か月", status)
+        done = split_done_status(status)
+        self.assertEqual(done.head, DONE_HEAD, status)
+        self.assertTrue(done.note.startswith(self.WARNING_HEAD), status)
+        self.assertIn("AI失敗1か月", done.note)
 
     def test_status_shows_both_counts(self):
         """未取得2か月 (2025年11・12月。当月 2026年10月 は数えない)・AI失敗2か月のとき、両方の件数が出る。"""
         self.seed([mm for mm in ALL_1004 if mm not in ("202609", "202610", "202511", "202512")], error=("202601", "202602"))
         gui = self.make_run_gui(NOW_1004)
-        status = self.run_review(gui)
-        self.assertIn("未取得2か月", status)
-        self.assertIn("AI失敗2か月", status)
+        done = split_done_status(self.run_review(gui))
+        self.assertIn("未取得2か月", done.note)
+        self.assertIn("AI失敗2か月", done.note)
 
     def test_warning_status_asks_to_check_the_period_label(self):
-        """警告付きのステータスは「レポートの期間表示を確認してください）」で終わる。"""
+        """警告付きのステータスは「レポートの期間表示を確認してください）」で終わる (_05 以降も、費用の文言の後ろ = 末尾)。"""
         gui = self.make_run_gui(NOW_1004)
         status = self.run_review(gui)
         self.assertTrue(status.endswith(self.WARNING_TAIL), status)
+        self.assertTrue(split_done_status(status).note.endswith(self.WARNING_TAIL), status)
+
+    def test_the_warning_appears_once_at_the_very_end(self):
+        """A3 の通知「（⚠ …あり。…）」は1つだけで、ステータスの最後にある (費用の文言などの後ろ)。"""
+        gui = self.make_run_gui(NOW_1004)
+        status = self.run_review(gui)
+        self.assertEqual(status.count("（⚠ "), 1, status)
+        self.assertEqual(status.count("未取得"), 1, status)
+        self.assertTrue(status.endswith(split_done_status(status).note), status)
+        self.assertTrue(status.rindex("（⚠ ") > status.index(DONE_HEAD), status)
+
+    def test_status_keeps_the_warning_when_this_runs_ai_failed(self):
+        """今回の実行で前月 (2026年9月) のAIが失敗したとき: 完了ステータスの末尾には、これまでどおり A3 の通知
+        (「未取得10か月・AI失敗1か月」) が付く。_05 以降は先頭がAI失敗ありの完了 (件数1) に変わり、
+        _03 / _04 は先頭が「✅ 振り返り生成完了」のまま。(A7a 追記2 で先頭は「⚠ 振り返り生成完了（AI失敗1件。その月を再実行で再試行）」)"""
+        gui = self.make_run_gui(NOW_1004, fail={("202609", "ochi")})
+        status = self.run_review(gui)
+        done = split_done_status(status)
+        if has_cost_report():
+            self.assertEqual(done.failed, 1, status)
+        else:
+            self.assertEqual(done.head, DONE_HEAD, status)
+        self.assertTrue(done.note.startswith(self.WARNING_HEAD), status)
+        self.assertIn("未取得10か月", done.note)
+        self.assertIn("AI失敗1か月", done.note)
+        self.assertTrue(status.endswith(self.WARNING_TAIL), status)
 
     def test_status_is_the_plain_message_after_updating_every_month(self):
-        """全月更新で何も欠けていなければ、従来どおり「✅ 振り返り生成完了」だけ。"""
+        """全月更新で何も欠けていなければ、通知の無い完了 (従来は「✅ 振り返り生成完了」だけ。_05 以降はそれに費用の文言)。"""
         gui = self.make_run_gui(NOW_1004)
         self.click(self.all_check())
-        self.assertEqual(self.run_review(gui), "✅ 振り返り生成完了")
+        self.assert_plain_status(self.run_review(gui))
 
     def test_status_has_no_warning_when_only_the_current_month_has_no_cache(self):
         """過去の月が全部そろっていて、キャッシュが無いのが進行中の当月だけなら、警告は出ない (毎回「未取得: 当月」と出さない)。"""
         self.seed(ALL_1004[:-2])
         gui = self.make_run_gui(NOW_1004)
-        self.assertEqual(self.run_review(gui), "✅ 振り返り生成完了")
+        self.assert_plain_status(self.run_review(gui))
 
     def test_status_is_the_plain_message_when_every_other_month_has_its_cache(self):
-        """他の11か月ぜんぶにキャッシュがあれば (欠けなし)、更新が前月だけでも「✅ 振り返り生成完了」だけ。"""
+        """他の11か月ぜんぶにキャッシュがあれば (欠けなし)、更新が前月だけでも通知の無い完了 (「✅ 振り返り生成完了」+ 費用の文言だけ)。"""
         self.seed([mm for mm in ALL_1004 if mm != "202609"])
         gui = self.make_run_gui(NOW_1004)
-        self.assertEqual(self.run_review(gui), "✅ 振り返り生成完了")
+        self.assert_plain_status(self.run_review(gui))
 
     def test_status_is_the_plain_message_for_a_cache_only_run_without_gaps(self):
-        """キャッシュのみの実行で欠けが無ければ、「✅ 振り返り生成完了」だけ。"""
+        """キャッシュのみの実行で欠けが無ければ、通知の無い完了 (_05 以降は費用の文言が「新しい分析は不要でした」)。"""
         self.seed(ALL_1004)
         gui = self.make_run_gui(NOW_1004)
         self.set_all_months(False)
-        self.assertEqual(self.run_review(gui), "✅ 振り返り生成完了")
+        status = self.run_review(gui)
+        self.assert_plain_status(status)
+        if has_cost_report():
+            self.assertEqual(split_done_status(status).cost, "（新しい分析は不要でした）", status)
 
 
 class TestRunReviewUsesReviewCacheGaps(ReviewRunCase):
@@ -1733,10 +1870,11 @@ class TestRunReviewUsesReviewCacheGaps(ReviewRunCase):
         self.assert_label_everywhere(BASE_1004 + f"{LPAR}2026年9月を更新{RPAR}")
 
     def test_run_status_is_the_plain_message_when_review_cache_gaps_raises(self):
-        """review_cache_gaps が例外のとき ([], [] 扱い)、完了ステータスは警告なしの「✅ 振り返り生成完了」。"""
+        """review_cache_gaps が例外のとき ([], [] 扱い)、完了ステータスは警告 (A3 の通知) なしの「✅ 振り返り生成完了」
+        (_05 以降はその後ろに費用の文言だけ)。"""
         self.raise_in_gaps()
         gui = self.make_run_gui(NOW_1004)
-        self.assertEqual(self.run_review(gui), "✅ 振り返り生成完了")
+        self.assert_plain_status(self.run_review(gui))
 
     def test_run_with_two_persons_continues_without_gap_notes_when_review_cache_gaps_raises(self):
         """対象者が2人でも、review_cache_gaps の例外は握りつぶす: 保存する結果も各人のレポートも、期間表示は欠けの注記なし。"""
@@ -1918,8 +2056,10 @@ class TestRunReviewPerPersonGaps(ReviewRunCase):
     def test_the_completion_status_is_the_combined_warning(self):
         """完了ステータスの警告も合算 (Saji の欠け 10か月を数える)。Ochi だけなら警告は出ない。"""
         status = self.run_ochi_complete_saji_missing()
-        self.assertTrue(status.startswith("✅ 振り返り生成完了（⚠ "), status)
-        self.assertIn("未取得10か月", status)
+        done = split_done_status(status)
+        self.assertEqual(done.head, DONE_HEAD, status)
+        self.assertTrue(done.note.startswith("（⚠ "), status)
+        self.assertIn("未取得10か月", done.note)
 
     def test_each_persons_own_gaps_are_not_mixed_when_the_months_differ(self):
         """Ochi は 2026年7月だけ欠け、Saji は 2026年3月だけ欠け (どちらも前月 9月は今回生成): 各レポートはその人の欠けだけ。
