@@ -2920,10 +2920,11 @@ class CommonFlowTests:
         self.cancelled()
         self.assertIn(ESTIMATE_PRINT_HEAD, self.printed.getvalue())
 
-    def test_cancel_leaves_the_token_totals_at_zero(self):
-        """中止すると、トークン累計は 0 のまま (開始時のリセット)。"""
+    def test_cancel_leaves_the_token_totals_unchanged(self):
+        """中止すると、トークン累計は実行前の値のまま (A7c fix1: 0へ戻すのは費用の確認の後・AIの直前。
+        確認で中止しただけで、他の画面で実行中のAIの集計を0にしない)。"""
         gui = self.cancelled(initial_totals=(777_000, 555_000))
-        self.assertEqual((gui.summarizer.total_input_tokens, gui.summarizer.total_output_tokens), (0, 0))
+        self.assertEqual((gui.summarizer.total_input_tokens, gui.summarizer.total_output_tokens), (777_000, 555_000))
 
     # ---- 実績ログ ---------------------------------------------------------------
     def test_success_appends_one_usage_line_for_the_run(self):

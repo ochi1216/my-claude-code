@@ -1254,6 +1254,11 @@ NEW_REV = "outlook_total_organizer_20261004_02.py"
 # B1 (仕様変更後): 費用表示を「今回の実行分」にするため、この5つの入口メソッドに累計リセットの2行を足す
 ENTRY_METHODS = ("_refresh_cockpit", "_sync_and_refresh_cockpit", "_run_cockpit_v2", "_run_action_dashboard", "_run_review")
 RESET_LINES = ("self.summarizer.total_input_tokens = 0", "self.summarizer.total_output_tokens = 0")
+# A7c fix1: 費用の確認がある入口と、その最初のAI呼び出し (リセットは確認の後・この呼び出しの前)
+RESET_AFTER_CONFIRM = {"_sync_and_refresh_cockpit": "summarize_project_threads",
+                       "_run_cockpit_v2": "generate_cockpit_v2_data",
+                       "_run_action_dashboard": "summarize_action_dashboard",
+                       "_run_review": "generate_review_data"}
 ALLOWED_TO_CHANGE = ({"_CommonUsageMetadata.__init__"} | {f"HTMLReportGenerator.{n}" for n in SIX_REPORTS}
                      | {f"MailManagerGUI.{n}" for n in ENTRY_METHODS})
 NEW_CONSTANTS = ("GEMINI_PRICES_USD_PER_1M", "GEMINI_PRICE_FALLBACK_MODEL", "COST_CONFIRM_THRESHOLD_YEN",
@@ -1492,7 +1497,8 @@ class TestTokenTotalsAreResetAtStart(unittest.TestCase):
 
     def test_reset_lines_directly_follow_the_start_timer_status_call(self):
         # 仕様: 開始時の self._set_status(..., start_timer=True) の直後に、累計 (入力/出力) を 0 に戻す2行
-        for name in ENTRY_METHODS:
+        # (A7c fix1 で、費用の確認がある4つの入口はリセットを確認の後へ移した。確認の無い _refresh_cockpit だけが開始時のまま)
+        for name in [n for n in ENTRY_METHODS if n not in RESET_AFTER_CONFIRM]:
             with self.subTest(method=name):
                 fn = method_node(_loader.target_path(), "MailManagerGUI", name)
                 found = start_timer_statements(fn)
@@ -1501,6 +1507,34 @@ class TestTokenTotalsAreResetAtStart(unittest.TestCase):
                     following = [ast.unparse(s) for s in lst[i + 1:i + 3]]
                     self.assertEqual(sorted(following), sorted(RESET_LINES),
                                      f"start_timer=True の直後の2文が累計リセットになっていない: {following}")
+
+    def test_reset_lines_sit_after_the_cost_confirmation_and_before_the_first_ai_call(self):
+        # A7c fix1: 費用の確認がある4つの入口は、累計リセットの2行が「_confirm_ai_cost の呼び出しより後・最初のAI呼び出しより前」
+        # にだけあり (2行は連続)、開始時 (start_timer=True の直後) には無い (確認で中止しても、他の画面の集計を0にしないため)
+        for name, first_ai in RESET_AFTER_CONFIRM.items():
+            with self.subTest(method=name):
+                fn = method_node(_loader.target_path(), "MailManagerGUI", name)
+                for lst, i in start_timer_statements(fn):
+                    following = [ast.unparse(s) for s in lst[i + 1:i + 3]]
+                    self.assertFalse(set(following) & set(RESET_LINES), f"開始時にリセットしている: {following}")
+                pos = lambda n: (n.lineno, n.col_offset)                          # noqa: E731
+                calls = [n for n in ast.walk(fn) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
+                confirms = [pos(n) for n in calls if n.func.attr == "_confirm_ai_cost"]
+                ai_calls = [pos(n) for n in calls if n.func.attr == first_ai]
+                self.assertTrue(confirms, "_confirm_ai_cost の呼び出しが無い")
+                self.assertTrue(ai_calls, f"{first_ai} の呼び出しが無い")
+                resets = []
+                for node in ast.walk(fn):
+                    for f in ("body", "orelse", "finalbody"):
+                        lst = getattr(node, f, None)
+                        if isinstance(lst, list):
+                            resets += [(lst, j) for j, st in enumerate(lst) if ast.unparse(st) in RESET_LINES]
+                self.assertEqual(len(resets), 2, f"リセットの文が2つ (入力・出力) でない: {len(resets)}")
+                (lst_a, ja), (lst_b, jb) = sorted(resets, key=lambda r: pos(r[0][r[1]]))
+                self.assertTrue(lst_a is lst_b and jb == ja + 1, "リセットの2行が連続していない")
+                self.assertEqual(sorted(ast.unparse(lst_a[j]) for j in (ja, jb)), sorted(RESET_LINES))
+                self.assertGreater(pos(lst_a[ja]), max(confirms), "リセットが費用の確認より前にある")
+                self.assertLess(pos(lst_b[jb]), min(ai_calls), f"リセットが最初のAI呼び出し ({first_ai}) より後にある")
 
 
 class _TokenAddingSummarizer(a1gui.StubSummarizer):

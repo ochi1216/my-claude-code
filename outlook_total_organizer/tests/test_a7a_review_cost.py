@@ -2267,10 +2267,11 @@ class TestReviewFlowCancel(ReviewCostCase):
         self.cancelled()
         self.assertIn(ESTIMATE_PRINT_HEAD, self.printed.getvalue())
 
-    def test_cancel_leaves_the_token_totals_at_zero(self):
-        """中止すると、トークン累計は 0 のまま (開始時のリセット=A2)。"""
+    def test_cancel_leaves_the_token_totals_unchanged(self):
+        """中止すると、トークン累計は実行前の値のまま (A7c fix1: 0へ戻すのは費用の確認の後・generate_review_data の直前。
+        確認で中止しただけで、他の画面で実行中のAIの集計を0にしない)。"""
         gui = self.cancelled(initial_totals=(777_000, 555_000))
-        self.assertEqual((gui.summarizer.total_input_tokens, gui.summarizer.total_output_tokens), (0, 0))
+        self.assertEqual((gui.summarizer.total_input_tokens, gui.summarizer.total_output_tokens), (777_000, 555_000))
 
     def test_cancel_in_a_multi_person_run_also_does_nothing(self):
         """複数人・複数月の実行 (「全て」× 3人 = 36件) で中止しても、AI・出力は何も行わない。"""
