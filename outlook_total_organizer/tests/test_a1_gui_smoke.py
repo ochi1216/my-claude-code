@@ -203,9 +203,9 @@ class GuiCase(unittest.TestCase):
         self.dialogs = []                 # messagebox 呼び出しの記録 (関数名, 引数, キーワード)
         self.callback_errors = []         # Tk コールバックの未処理例外
         self.thread_errors = []           # ワーカースレッドの未処理例外
-        # 既存コード (_run_action_dashboard の except 節) の既知バグ: lambda が except 変数 e を
-        # 参照するため、after(0) 実行時に NameError になる。その経路を通すテストでだけ許容する。
-        self.tolerate_known_closure_bug = False
+        # (A1.1) 旧版にあった「_run_action_dashboard の except 節の lambda が except 変数 e を参照して
+        # after(0) 実行時に NameError になる」既知バグは修正済みのため、Tk コールバックの未処理例外は
+        # (NameError も含め) すべて失敗として扱う。許容用のフラグ (tolerate_known_closure_bug) は廃止した。
         self._patch_messagebox()
         self._patch_thread_excepthook()
         self.baseline_threads = set(threading.enumerate())
@@ -266,7 +266,12 @@ class GuiCase(unittest.TestCase):
         gui.lbl_stat = ttk.Label(root, text="Ready")
         gui.lbl_stat.pack(side=tk.BOTTOM, fill=tk.X)
         gui.btn_run_action = ttk.Button(root, text="📋 アクション一覧を生成")
+        gui.btn_update_action = ttk.Button(root, text="🔄 解析のみ更新")          # A1.1: 解析のみ更新ボタン
         gui.btn_reformat_action = ttk.Button(root, text="🎨 フォーマットのみ再生成")
+        # 実機の MailManagerGUI.__init__ は self.config = load_config() を持つ。A1.1 の _run_action_dashboard が
+        # config の gemini_model を読む (費用の事前見積り・実績ログ用) ので、__new__ で作るスタブにも用意する。
+        # (load_config() は json/ を作ってしまうため使わず、既定値のコピーを置く。モデルを変えたいテストは書き換える)
+        gui.config = dict(oto().DEFAULT_CONFIG)
         gui.threads = {}
         gui.selected = set()
         self.gui = gui
@@ -310,11 +315,8 @@ class GuiCase(unittest.TestCase):
                 gui.root.destroy()
             except Exception:                               # noqa: BLE001
                 pass
-        errors = [e for e in self.callback_errors
-                  if not (self.tolerate_known_closure_bug and e.startswith("NameError")
-                          and "free variable 'e'" in e)]
-        if errors:
-            problems.append(f"Tkコールバックの未処理例外: {errors}")
+        if self.callback_errors:
+            problems.append(f"Tkコールバックの未処理例外: {self.callback_errors}")
         if self.thread_errors:
             problems.append(f"ワーカースレッドの未処理例外: {self.thread_errors}")
         if problems:
@@ -1687,7 +1689,6 @@ class TestRunActionDashboardHook(GuiCase):
                 self.assertIn(label, d["period_label"])
 
     def test_summarize_failure_does_not_save_last_run_but_still_refreshes(self):
-        self.tolerate_known_closure_bug = True              # 既存バグ (下の expectedFailure 参照) を通る
         gui = self.make_gui(select_action=True)
         gui.summarizer = StubSummarizer(fail=RuntimeError("AI解析で失敗しましたQQQ"))
         refreshes = self.run_dashboard(gui)
@@ -1698,26 +1699,25 @@ class TestRunActionDashboardHook(GuiCase):
 
     def test_report_failure_keeps_last_run_because_analysis_succeeded(self):
         # 仕様: summarize_action_dashboard 「成功直後」に save_action_last_run (HTML生成より前)
-        self.tolerate_known_closure_bug = True
         gui = self.make_gui(select_action=True)
         gui.reporter = StubReporter(fail=RuntimeError("HTML生成に失敗RRR"))
         refreshes = self.run_dashboard(gui)
         self.assertTrue(os.path.exists(LAST_RUN_PATH), "解析は成功したのに last_run が保存されていない")
         self.assertEqual(len(refreshes), 1)
 
-    @unittest.expectedFailure
-    def test_known_preexisting_bug_error_dialog_never_shows_on_failure(self):
-        """既存バグの記録 (A1範囲外。修正は越智さん承認後)。
+    def test_failure_shows_the_error_dialog_with_the_exception_message(self):
+        """失敗したら、エラーダイアログ (messagebox.showerror) が実際に1回表示され、本文に例外メッセージを含む。
 
-        _run_action_dashboard の except 節は `lambda: messagebox.showerror("エラー", str(e))` を
-        root.after(0, ...) に渡す。Python3 では except 節を抜けると e が消えるため、after 実行時に
-        NameError (free variable 'e') になり、エラーダイアログが出ない (直前版 20260821_02 から同じ)。
-        「失敗したらエラー内容が表示されること」をassertする。現状は表示されないので expectedFailure。
+        A1.1 で修正された旧版の既知バグの回帰テスト (旧: expectedFailure)。旧版は except 節の
+        `lambda: messagebox.showerror("エラー", str(e))` が after(0) 実行時に except 変数 e を参照できず
+        NameError になり、エラーダイアログが出なかった。再発すると、この表示の確認だけでなく
+        teardown の「Tkコールバックの未処理例外」(NameError) でも検知される。
         """
-        self.tolerate_known_closure_bug = True
         gui = self.make_gui(select_action=True)
         gui.summarizer = StubSummarizer(fail=RuntimeError("AI解析で失敗しましたQQQ"))
         self.run_dashboard(gui)
+        shown = [d for d in self.dialogs if d[0] == "showerror"]
+        self.assertEqual(len(shown), 1, f"showerror が1回だけ表示されるはず: {self.dialogs}")
         self.assertIn("QQQ", self.dialog_text({"showerror"}))
 
     def test_last_run_is_saved_before_report_generation(self):
