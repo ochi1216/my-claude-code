@@ -2002,10 +2002,12 @@ def _index_source(path):
 class TestScopeGuardExistingCodeUnchanged(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.target = _loader.find_target_path()
-        cls.baseline = _loader.find_baseline_path(cls.target)
-        if not cls.baseline or os.path.abspath(cls.baseline) == os.path.abspath(cls.target):
-            raise unittest.SkipTest("比較対象の直前リビジョンが無い")
+        # A1の「既存コードは変更しない」宣誓は、A1のリビジョン対(20260821_02 → 20261004_01)に対して検証する。
+        # (後続のリビジョン[A2以降]は、それぞれのテストで自分の変更範囲を検証する)
+        cls.target = os.path.join(_loader.TOOL_DIR, "outlook_total_organizer_20261004_01.py")
+        cls.baseline = os.path.join(_loader.TOOL_DIR, "outlook_total_organizer_20260821_02.py")
+        if not (os.path.isfile(cls.target) and os.path.isfile(cls.baseline)):
+            raise unittest.SkipTest("A1のリビジョン対(20260821_02 / 20261004_01)が無い")
         cls.old = _index_source(cls.baseline)
         cls.new = _index_source(cls.target)
 
