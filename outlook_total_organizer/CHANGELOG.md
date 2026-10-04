@@ -1,5 +1,59 @@
 # CHANGELOG — outlook_total_organizer
 
+## VERSION 20261004_01
+
+### 追加・修正
+	**アクションタブに「⚖️ 判断待ち」パネルを追加した(AXIS.mdの「毎日」の問い: 私の判断を待っている案件を落としていないか)**。判断待ちの集計・見出し・完了/無視は、AI・COM(Outlook)・ネットワークを使わず、解析済みキャッシュ(`analysis_cache/action_dashboard.json`)と手動ステータス(`json/action_status.json`)を読み書きするだけ(AI費用ゼロ)。COMを使うのは、ダブルクリックでOutlookを開くときだけ(検索タブと同じ既存の処理)。
+	**タブ見出しに件数と鮮度を表示する**(例「📋 アクション (判断待ち3・解析2時間前)」)。最終解析から24時間以上、記録なし、日時が5分超の未来(時計ずれ)のときは件数を出さず「(判断待ち?・要更新)」、キャッシュが読めないときは「(判断待ち?・読込失敗)」とし、「0件=安心」と誤解させない。解析に失敗したスレッドがある、または最終解析の範囲が7日未満(24H/今日/3日間)のときは、件数が「以上」なので「判断待ち3+」とし、「・解析失敗N件」「・24Hのみ」を併記する。起動時に開くタブは変えていない。
+	**判断待ちの定義(初版は狭く始める)**: アクション単位で、宛先(target)が自分(空・「あなた」・Ochi・越智・Outlook表示名/SMTPから作る別名。「さん/様/へ/宛て/部長」等は除去して判定。空のtargetは既存HTMLが「あなた」と表示するのに合わせる)、かつ スレッドのaction_typeが「承認・決裁/相談・質問」またはアクション文に「承認/決裁/判断」を含み(直後が「済」のものは除く)、かつ 進捗が無視でないもの。
+	**「完了」にした後で同じスレッドに新着があれば「新着」として再浮上する**(スレッド最終受信が完了日時より新しい場合)。状態キーがスレッドID+添字のため、完了後に来た新しい依頼が同じ添字に入ると完了が引き継がれて隠れ、見出しが「0」になるのを防ぐ。「無視」は再浮上しない(意図して静かにさせた依頼が何度も戻らないようにするため)が、無視した後に同じスレッドへ新着があった依頼の件数は状態文に開示する。
+	**対象範囲**は最終解析の範囲(最低7日)に届いたスレッド(アクションHTMLの既定の表示範囲と揃え、古い積み残しで件数が膨らまないようにする)。それより古い未対応は状態文に件数を出し、「🕰 古い案件も表示」で一覧に加えられる。判断語に当たらない自分宛ての依頼も、状態文に件数だけ出す(見落とし側の可視化)。
+	**一覧(tkinter)**: ダブルクリック=Outlookでスレッドを開く(検索タブ・HTMLのタイトルリンクと同じ方式)。右クリックまたはボタンで「完了」「無視」。「↩ 元に戻す」で直前の1操作を復元(「新着」で再浮上していた行は「未着手」へ戻す)。書込みは`/update_action_status`と同じ`action_status_lock`・同じ形式で、progressとupdated_atだけを更新する(優先度・コメント・他のキーは不変)。`action_status.json`が壊れている場合は上書きせずエラーを表示する。
+	**最終解析時刻**は新規ファイル`json/action_last_run.json`に、アクション一覧の解析成功直後に原子的に保存する(キャッシュのファイル更新時刻は、変化なしの再実行では更新されず、統括コックピット経由でも更新されるため根拠にしない)。範囲の表示名は解析開始時の値を保存する。起動の0.8秒後・アクションタブ選択時・解析完了時・120秒ごとに、ワーカースレッドで読み直す(画面を止めない。完了通知が届かなくても60秒で再読込の停止を解除する)。
+	**タブ見出しの幅対策**: 全タブの文言が窓幅に収まらないとき(半画面・表示倍率が大きい環境)は、ttk.Notebookがタブを縮めて件数が欠けるため、短い見出し(「📋 アクション ⚖3」。?=古い/記録なし、!=読込失敗、+=以上)に自動で切り替える(切り替わっているときは状態文に記号の凡例を出す)。
+
+### 変更関数
+	`MailManagerGUI.__init__`（末尾に`self.root.after(800, self._action_decision_tick)`の1行を追加）
+	`MailManagerGUI._ui_action_tab`（末尾に`self._ui_action_decision_panel(main)`の1行を追加）
+	`MailManagerGUI._run_action_dashboard`（解析開始時の範囲の表示名を保持する1行、`summarize_action_dashboard`成功直後に`save_action_last_run`をtry/exceptで保護して呼ぶ処理、finallyに`_refresh_action_decision_view`の予約を追加。他の挙動は変更なし）
+	既存の行は1行も変更・削除していない(`diff`で追加のみ: +847行・削除0・7か所)。
+
+### 新規追加：
+	定数: `ACTION_DASHBOARD_CACHE_FILE` / `ACTION_LAST_RUN_FILE` / `ACTION_TAB_BASE_TEXT` / `ACTION_DECISION_TYPES` / `ACTION_DECISION_KEYWORDS` / `ACTION_DECISION_STALE_HOURS` / `ACTION_DECISION_DEFAULT_HORIZON_DAYS` / `ACTION_DECISION_REFRESH_MS` / `ACTION_TAB_PADDING_PX` / `ACTION_DECISION_CLOCK_SKEW_SECONDS` / `ACTION_SELF_TARGET_ALIASES` / `ACTION_PROGRESS_VALUES`
+	関数: `normalize_action_target_token` / `is_target_self` / `build_self_aliases` / `is_decision_action` / `load_action_dashboard_cache` / `compute_pending_decisions` / `count_recent_error_threads` / `save_action_last_run` / `load_action_last_run` / `format_decision_age` / `build_decision_heading` / `build_decision_heading_compact` / `build_action_decision_snapshot` / `set_action_progress`（ほか内部補助`_collect_pending_self_actions` `_decision_freshness` `_decision_coverage` `_action_safe_ts` `_action_priority_rank` `_parse_action_iso` `_load_action_status_strict`）
+	メソッド: `MailManagerGUI._ui_action_decision_panel` / `_action_decision_tick` / `_on_action_decision_tab_changed` / `_refresh_action_decision_view` / `_choose_action_tab_heading` / `_apply_action_decision_view` / `_render_action_decision_rows` / `_on_action_decision_select` / `_on_action_decision_double_click` / `_on_action_decision_right_click` / `_action_decision_open_selected` / `_action_decision_open_row` / `_action_decision_set_progress` / `_action_decision_undo`
+	`diagnose_action_decisions.py`（判断待ちの定義が多すぎ/少なすぎにならないかを、手元のキャッシュで確認する読み取り専用の診断。件数分布と宛先(target)の値を表示する。件名・本文・要約は表示しない。書込み・ネットワーク・Outlookへの接続は行わない）
+	`tests/`（上記の検証ハーネス。`python tests/run_tests.py`）
+
+### 削除：
+	なし
+
+変更ファイル：
+	`outlook_total_organizer_20261004_01.py`（`_20260821_02`からのコピー＋上記。`_20260821_02`はそのまま残置）
+	`CHANGELOG.md` / `diagnose_action_decisions.py`（新規）/ `tests/`（新規）
+
+変更しないこと（宣誓）：
+	既存関数の挙動(`load_action_status`/`save_action_status`/`/update_action_status`/`summarize_action_dashboard`/HTMLレポート生成/他のタブ)、AIプロンプト、キャッシュ・保存ファイルの形式、起動時に開くタブ、バージョン管理方針は変更していない。
+	既知の潜在競合は**修正せず記録のみ**(越智さんの承認後に対応): `summarize_action_dashboard`の旧キー移行の保存(`if statuses_migrated: save_action_status(action_statuses)`)は、ロックの外で、カード生成の直前に読んだ状態を丸ごと書き戻す。AI解析の後の短い区間(カード生成中)に、判断待ちパネルやHTMLで付けた完了/無視が、旧キー移行が発生した回に限り、稀に失われうる。`tests/test_a1_concurrency.py`に期待される失敗(expectedFailure)として再現を記録している。
+	もう1件の既存の不具合を記録のみ(修正しない): `_run_action_dashboard`の`except Exception as e:`内で、`lambda`が`e`を後から参照するため、エラーダイアログが表示されない(Pythonは`except`節を出ると`e`を消す)。`tests/test_a1_gui_smoke.py`に期待される失敗として記録している。
+
+今回は見送った指摘（次の段階で対応）：
+	・解析に失敗したスレッドの一覧表示(現状は件数と再試行の案内のみ)。
+	・語・別名の設定ファイル化(現状は定数。診断スクリプトの結果を見て、新リビジョンで調整する運用)。
+	・「解析のみ更新(ブラウザを開かない)」ボタン。見出しの鮮度を保つには、現状は「📋 アクション一覧を生成」(AI費用・数分・ブラウザ起動)が必要。費用の事前表示(1回100円以上)の対象にもなるため、次の段階で提案する。
+	・自分が返信済みのスレッドの自動判別(アクションの取得が受信トレイのみで、送信済みを読んでいないため)。完了は手動で付ける。
+	・「その他の自分宛て」(判断語に当たらない依頼)の中身の表示(現状は件数のみ)。
+	・統括コックピットv2は同じキャッシュのmetaを送信メール込みで更新するため、完了後に自分が返信してからコックピットを実行すると、偽の「新着」として再浮上する可能性がある(コードを読んだ範囲の見立てで、実機では未確認)。
+	・宛先の言い回し: 「あなたと中井さん」「…および…」のような複数宛先の文章は自分宛てと判定しない。診断スクリプトで実データの表記ゆれを見てから、別名・区切りを調整する。
+	・「新着」の再浮上判定の精度: HTMLで優先度やコメントを編集しても`updated_at`が進むため、完了済みで再浮上中の行は編集すると再び隠れる(完了日時と編集日時を分けるには状態ファイルへ新しい項目が必要)。`tests/test_a1_decision_logic.py`に既知の制限として記録している。
+
+動作確認時の注意：
+	本ツールはWindows専用のため、本リビジョンはLinux環境で次の範囲までを確認している: 構文チェック、判断待ちの判定・集計・見出し・進捗更新の単体検証、並行書込みの検証、tkinterのパネルをXvfb(仮想ディスプレイ)上で動かしたスモークテスト(`python tests/run_tests.py`。723件: 成功719・失敗0・既知の問題を記録したexpectedFailure4)。**Outlook実機・本物のキャッシュでの確認は未実施**。
+	実機で確認してほしいこと: (1)起動の約1秒後にタブ見出しが「(判断待ち?・要更新)」または件数つきに変わる (2)「📋 アクション一覧を生成」後に見出しが「(判断待ちN・解析1時間以内)」になる (3)一覧の行をダブルクリックしてOutlookでスレッドが開く (4)完了/無視/元に戻すが効き、アクションHTMLの進捗にも反映される (5)見出しが窓幅に収まる(収まらないときは短い見出し「⚖3」に切り替わる)。
+	判断待ちの「多すぎ/少なすぎ」は、実機で先に`python diagnose_action_decisions.py`を1回実行して件数分布を確認することを推奨する(読み取り専用・数秒。`--samples 5`を付けたときだけ、判断待ち上位の依頼内容の先頭40文字も画面に出る)。語や別名は、その結果を見て新リビジョンで調整する。
+	一覧の列は、窓幅が約760px未満だと右端(期限・受信)が見切れる場合がある(窓を広げると縮み直す)。
+	判断待ちの件数は、アクション(依頼)単位であり、スレッド(案件)単位より多くなりうる。「承認済み」等の語を含む依頼は判断語として数えないが、AIが付けたstatus(済/完了)では除外しない。
+
 ## VERSION 20260821_02
 
 ### 追加・修正
