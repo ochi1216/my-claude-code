@@ -1,5 +1,40 @@
 # CHANGELOG — outlook_total_organizer
 
+## VERSION 20261004_14
+
+### 追加・修正
+	**統括コックピットの全自動同期で、結果を使っていない統合(Stage2)を省いた**(費用と待ち時間の削減。A7cで「要相談」としていたもの。PM判断で実施)。同期は、全PJ・全スタッフの解析の戻り値を捨てており、統合(Stage2)の結果はファイル・ナレッジ・キャッシュのどれにも残らない(決勝戦・HTML・再生成は、スレッドごとの解析(Stage1)の解析キャッシュだけを読む)。同期では Stage1 だけを実行するようにした。**同期1回あたり、AIの呼び出しが「スレッドのある対象の数」(約10回)減り、費用の見込みは約30円減る**(100円の確認が出る回数も減る見込み)。同期の出力(コックピット・HTML・保存結果)は変わらない。
+	**見積り・件数・実績ログも Stage1 分に合わせた**: 同期の費用の見込みは Stage1 と決勝戦だけを数える。完了表示の件数も同じ。実績ログは`feature="project_s1"`/`"staff_s1"`に記録し(俯瞰2画面の`"project"`/`"staff"`(Stage1とStage2の平均)と分けるため)、同期の見積りが優先して読む。
+	**プロジェクト俯瞰・スタッフ俯瞰は従来どおり**(Stage2を含む。経緯の更新もこちらだけ)。
+
+### 変更関数
+	`MailSummarizer.summarize_project_threads` / `summarize_staff_threads`(引数`stage1_only`(既定False)を追加。Trueなら Stage1 の後で返す)
+	`estimate_overview_cost`(引数`include_stage2`(既定True)を追加) / `estimate_cockpit_sync_cost`(Stage1分だけ数える)
+	`MailManagerGUI._sync_and_refresh_cockpit`(`stage1_only=True`を渡す・件数・実績ログの名前)
+	`_20261004_13`との差分: +39行/−20行。
+
+### 新規追加：
+	`tests/test_a7e_sync_stage1.py`
+
+### 削除：
+	なし
+
+変更ファイル：
+	`outlook_total_organizer_20261004_14.py`（`_20261004_13`からのコピー＋上記。`_13`はそのまま残置）
+	`CHANGELOG.md` / `tests/test_a7e_sync_stage1.py`（新規） / `tests/test_a7b_overview_cost.py`(見積りの引数に`include_stage2`を追加)・`tests/test_a7c_cockpit_cost.py`(同期の偽のsummarizeが`stage1_only`を受け取る・件数と実績ログ名を新仕様に。Stage2が0回であることの確認を追加)
+
+変更しないこと（宣誓）：
+	俯瞰2画面(Stage2を含む解析・経緯の更新・レポート)、決勝戦、コックピットのHTML・保存形式、解析キャッシュの形式、プロンプト、AIの呼び出し方(Stage1)。
+
+注意・見送り：
+	・同期の見込みは、実績(project_s1/staff_s1)が溜まるまでは、俯瞰2画面の実績(Stage1とStage2の平均。Stage1だけより大きい)か既定値で数えるので、多めに出る(このとき確認画面には「直近の実績から」と出る)。
+	・スタッフのStage1(実際は安いflash-lite)も設定モデルの単価で数えるため(従来から)、Stage2が無くなった分、多めに出る割合が上がる。実機で実費と比べてほしい。
+	・同期の後に俯瞰2画面を開いても、経緯(history_summary)は同期では更新されない(従来から。Stage2を省いたことで変わったわけではない)。
+
+動作確認時の注意：
+	Linux環境で、偽のAIで同期を通し、`_13`と出力(コックピット・HTML・保存結果・キャッシュ・ナレッジ)が同じで、AIの呼び出しが減ることを確認している。実機での費用は未確認。
+	実機で確認してほしいこと: 全自動同期を1回実行して、コックピットの内容が従来どおりで、完了のステータスの件数・費用が前より少ないこと。
+
 ## VERSION 20261004_13
 
 ### 追加・修正

@@ -14,6 +14,8 @@
   (fix1: A7C_SPEC_DELTA_fix1.md) 同期の実績ログは段ごと (project / staff / cockpit_summary)、決勝戦の見積りは実績
   "cockpit_summary" で校正、集計の0リセットは確認の後 (同期・v2・アクション解析・振り返り)、決勝戦の回数 (0回/出力0で失敗)、
   v2 の成否未確認、同期の HTML 失敗。
+  (A7e: A7E_SPEC.md で更新) 同期はプロジェクト・スタッフの Stage1 だけを行う (summarize_* に stage1_only=True)。見積りは
+  include_stage2=False、完了表示の件数は Stage1 + 決勝戦、実績ログの feature は "project_s1" / "staff_s1" / "cockpit_summary"。
 
 方針: 一時cwd の中だけで動かす (json/ analysis_cache/ を SB に作らない)。固定時間の sleep は使わない (mainloop で待つ)。
 日付は「今からの相対時刻」だけを使い、特定の日付に依存しない。ネットワーク・実Outlook・実ブラウザには触れない。
@@ -228,8 +230,8 @@ class TestEstimateCockpitV2Cost(InTempCwd):
 class TestEstimateCockpitSyncCost(InTempCwd):
     def stages(self, pt, st, know, model=MODEL):
         m = oto()
-        p = m.estimate_overview_cost("project", pt, know, model)
-        s = m.estimate_overview_cost("staff", st, know, model)
+        p = m.estimate_overview_cost("project", pt, know, model, include_stage2=False)      # (A7e) 同期は Stage1 だけ
+        s = m.estimate_overview_cost("staff", st, know, model, include_stage2=False)
         sm = m.estimate_ai_cost_yen(30000 * 4, 4, 4000, model)
         return p, s, sm
 
@@ -254,7 +256,7 @@ class TestEstimateCockpitSyncCost(InTempCwd):
         self.assertFalse(est["calibrated"])
 
     def test_stage_dicts(self):
-        """段ごとの dict: project / staff は estimate_overview_cost の結果、summary は決勝戦の見込み (n_calls=4)。"""
+        """段ごとの dict: project / staff は estimate_overview_cost(..., include_stage2=False) の結果 (A7e)、summary は決勝戦の見込み (n_calls=4)。"""
         pt, st, know = self.data()
         est = oto().estimate_cockpit_sync_cost(pt, st, know, MODEL)
         p, s, sm = self.stages(pt, st, know)
@@ -399,7 +401,8 @@ class TestV2EstimateMatchesActual(RealAiCase):
 class TestSyncEstimateCoversActual(RealAiCase):
     def test_call_counts(self):
         """本物の summarize_project_threads / summarize_staff_threads / generate_cockpit_summary を偽AIで動かすと、
-        Stage1 の実回数は見積りと一致し、全体の実回数は見積り (n_calls) 以下。"""
+        Stage1 の実回数は見積りと一致し、全体の実回数は見積り (n_calls) 以下。
+        (A7e) 同期と同じく summarize_* は stage1_only=True で動かす: Stage2 は0回で、全体の実回数は見積りと一致する。"""
         m = oto()
         rules = ["ルールA"]
         know = {"projects": {"P1": {"master_history": "経緯", "ai_correction_rules": rules}, "P2": {}},
@@ -414,15 +417,18 @@ class TestSyncEstimateCoversActual(RealAiCase):
         est = m.estimate_cockpit_sync_cost(pt, st, know, MODEL)
         s = self.summarizer
         for name, threads in pt.items():
-            s.summarize_project_threads(name, copy.deepcopy(threads), know)
+            s.summarize_project_threads(name, copy.deepcopy(threads), know, stage1_only=True)
         for name, threads in st.items():
-            s.summarize_staff_threads(name, copy.deepcopy(threads), know)
+            s.summarize_staff_threads(name, copy.deepcopy(threads), know, stage1_only=True)
         s.generate_cockpit_summary()
         stage1 = [c for c in self.calls if "thread_id" in ((c[1] or {}).get("properties") or {})]
         self.assertEqual(len(stage1), est["project"]["n_calls_s1"] + est["staff"]["n_calls_s1"])
         self.assertEqual(len(stage1), 4, "前提: a1, b1, s1, s2 の4回")
         self.assertLessEqual(len(self.calls), est["n_calls"])
-        self.assertGreater(len(self.calls), len(stage1), "前提: Stage2 / 決勝戦も実際に呼ばれている")
+        stage2 = [c for c in self.calls if "manager_actions" in ((c[1] or {}).get("properties") or {})]
+        self.assertEqual(stage2, [], "(A7e) stage1_only=True なのに Stage2 が呼ばれた")
+        self.assertEqual(len(self.calls), len(stage1) + 4, "前提: 決勝戦 (4回) も実際に呼ばれている")
+        self.assertEqual(len(self.calls), est["n_calls"])
 
 
 # ============================================================
@@ -594,12 +600,13 @@ class CockpitCase(a1gui.GuiCase):
             self.release.wait(FLOW_TIMEOUT)
 
     def _fake_overview(self, kind):
-        def run(name, threads, knowledge, retry_callback=None, progress_callback=None):
+        def run(name, threads, knowledge, retry_callback=None, progress_callback=None, stage1_only=False):
             self.events.append(f"ai:{kind}:{name}")
             self._first_ai()
             threads = threads or {}
             ok_any = any(cid not in self.fail_cids for cid in threads)
-            self.burn(len(threads) + (1 if ok_any else 0))      # Stage1 はスレッドごと、Stage2 は成功した要約がある対象だけ
+            # Stage1 はスレッドごと、Stage2 は成功した要約がある対象だけ。(A7e) stage1_only=True なら Stage2 は行わない
+            self.burn(len(threads) + (1 if ok_any and not stage1_only else 0))
             safe = "".join(c for c in name if c.isalnum() or c in " ._-")
             cache = {"rules_hash": "", "threads": {
                 cid: {"mail_count": len(t["mails"]),
@@ -751,11 +758,11 @@ class TestSyncSmallCost(CockpitCase):
         self.assertEqual(self.browser, ["report.html"])
         self.assertTrue(os.path.exists(oto().COCKPIT_LAST_RESULT_FILE))
         # (fix1) 実績ログは段ごと (増分のトークン・成功回数)。"cockpit_sync" は記録しない
-        # project: Stage1 3 (a1,a2,b1) + Stage2 2 (P1,P2) = 5 / staff: 1 + 1 = 2 / 決勝戦 4
-        self.assertEqual(self.records(), [rec("project", 5, 5), rec("staff", 2, 2), rec("cockpit_summary", 4, 4)])
+        # (A7e) 同期は Stage1 だけ: project_s1 3 (a1,a2,b1) / staff_s1 1 / 決勝戦 4
+        self.assertEqual(self.records(), [rec("project_s1", 3, 3), rec("staff_s1", 1, 1), rec("cockpit_summary", 4, 4)])
         # 集計は確認の後 (AIの直前) に0へ戻すので、前回までの分 (111/222) は混ざらない
-        self.assertEqual(self.totals(), tok(11))
-        self.assert_cost_in_status("✅ 全解析同期完了", "11件")
+        self.assertEqual(self.totals(), tok(8))
+        self.assert_cost_in_status("✅ 全解析同期完了", "8件")
         self.assertEqual(str(gui.btn_sync_cockpit.cget("state")), "normal")
         self.assertEqual(str(gui.btn_sync_cockpit.cget("text")), SYNC_BTN_TEXT)
         self.assertEqual(str(gui.btn_refresh_cockpit.cget("state")), "normal")
@@ -766,22 +773,23 @@ class TestSyncSmallCost(CockpitCase):
         self.fail_cids = {"a1", "s1"}
         self.run_flow(gui._sync_and_refresh_cockpit)
         est = self.estimate()
-        self.assertEqual(est["n_calls"], 10, "前提: 見積り(上限) = Stage1 4 + Stage2 2 + 決勝戦4")
-        # 実際: Stage1 4 (a1,a2,a3,s1) + Stage2 1 (P1 だけ。S1 は唯一の要約が失敗で Stage2 が走らない) + 決勝戦4 = 9
-        self.assert_cost_in_status("⚠ 完了（AI失敗2件。もう一度実行すると再試行）", "成功7/9件")
-        # project: 4回 (a1 失敗) → 成功3 / staff: 1回 (s1 失敗) → 成功0 なので記録しない / 決勝戦 4
-        self.assertEqual(self.records(), [rec("project", 3, 4), rec("cockpit_summary", 4, 4)])
+        self.assertEqual(est["n_calls"], 8, "前提: 見積り = Stage1 4 + 決勝戦4 (A7e: 同期は Stage2 を省く)")
+        # 実際: Stage1 4 (a1,a2,a3,s1) + 決勝戦4 = 8
+        self.assert_cost_in_status("⚠ 完了（AI失敗2件。もう一度実行すると再試行）", "成功6/8件")
+        # project_s1: 3回 (a1 失敗) → 成功2 / staff_s1: 1回 (s1 失敗) → 成功0 なので記録しない / 決勝戦 4
+        self.assertEqual(self.records(), [rec("project_s1", 2, 3), rec("cockpit_summary", 4, 4)])
 
     def test_count_is_actual_calls_when_stage2_is_skipped(self):
-        """(fix1) 完了表示・実績ログの件数は見積り(上限)ではなく実際の回数: Stage1 が全部失敗した対象は Stage2 を数えない。"""
+        """(fix1) 完了表示・実績ログの件数は見積り(上限)ではなく実際の回数: Stage1 が全部失敗した対象は Stage2 を数えない。
+        (A7e) 同期は Stage2 を行わないので、件数は Stage1 + 決勝戦。"""
         gui = self.build(["P1", "P2"], [], {"P1": mails_for({"a1": 1, "a2": 1}), "P2": mails_for({"b1": 1})})
         self.fail_cids = {"a1", "a2"}
         self.run_flow(gui._sync_and_refresh_cockpit)
-        self.assertEqual(self.estimate()["n_calls"], 9, "前提: 見積り(上限) = Stage1 3 + Stage2 2 + 決勝戦4")
-        # 実際: Stage1 3 + Stage2 1 (P2 だけ) + 決勝戦4 = 8、成功 = 8 − 2 = 6
-        self.assert_cost_in_status("⚠ 完了（AI失敗2件。もう一度実行すると再試行）", "成功6/8件")
-        # project: 4回 (a1,a2 失敗) → 成功2 / staff: 対象なし (記録なし) / 決勝戦 4
-        self.assertEqual(self.records(), [rec("project", 2, 4), rec("cockpit_summary", 4, 4)])
+        self.assertEqual(self.estimate()["n_calls"], 7, "前提: 見積り = Stage1 3 + 決勝戦4 (A7e: 同期は Stage2 を省く)")
+        # 実際: Stage1 3 + 決勝戦4 = 7、成功 = 7 − 2 = 5
+        self.assert_cost_in_status("⚠ 完了（AI失敗2件。もう一度実行すると再試行）", "成功5/7件")
+        # project_s1: 3回 (a1,a2 失敗) → 成功1 / staff: 対象なし (記録なし) / 決勝戦 4
+        self.assertEqual(self.records(), [rec("project_s1", 1, 3), rec("cockpit_summary", 4, 4)])
 
     def test_html_write_failure_shows_report_failed(self):
         """(fix1 Minor4) HTML の書き出し失敗 (path が空): ブラウザは開かず、ダイアログは出さず、保存結果は保存する。
@@ -797,7 +805,7 @@ class TestSyncSmallCost(CockpitCase):
         self.assertIsNotNone(m, self.status())
         spent = self.spent()
         self.assertIn(float(m.group(1)), {round(spent), round(spent, 1), round(spent, 2)})
-        self.assertEqual(self.records(), [rec("project", 2, 2), rec("cockpit_summary", 4, 4)])
+        self.assertEqual(self.records(), [rec("project_s1", 1, 1), rec("cockpit_summary", 4, 4)])      # (A7e) Stage1 だけ
 
     def test_summary_without_analyzed_data_counts_zero_calls(self):
         """(fix1 Minor1) 決勝戦が _error (解析済みのデータが無くAIを呼ばなかった) なら、決勝戦は0回 (記録もしない)。"""
@@ -805,8 +813,8 @@ class TestSyncSmallCost(CockpitCase):
         self.summary_burn = 0
         self.summary_result = {"_error": True, "summary": "解析済みデータがありません。"}
         self.run_flow(gui._sync_and_refresh_cockpit)
-        self.assert_cost_in_status("✅ 全解析同期完了", "2件")             # Stage1 1 + Stage2 1 (決勝戦0)
-        self.assertEqual(self.records(), [rec("project", 2, 2)])
+        self.assert_cost_in_status("✅ 全解析同期完了", "1件")             # Stage1 1 (決勝戦0。A7e: Stage2 なし)
+        self.assertEqual(self.records(), [rec("project_s1", 1, 1)])
 
     def test_summary_with_zero_output_counts_four_failures(self):
         """(fix1 Minor1) 決勝戦の段の出力の増分が0なら、決勝戦の4回とも失敗として数える (記録もしない)。"""
@@ -814,8 +822,8 @@ class TestSyncSmallCost(CockpitCase):
         self.summary_burn = 0
         self.summary_result = {}
         self.run_flow(gui._sync_and_refresh_cockpit)
-        self.assert_cost_in_status("⚠ 完了（AI失敗4件。もう一度実行すると再試行）", "成功2/6件")
-        self.assertEqual(self.records(), [rec("project", 2, 2)])
+        self.assert_cost_in_status("⚠ 完了（AI失敗4件。もう一度実行すると再試行）", "成功1/5件")     # (A7e) Stage1 1 + 決勝戦4
+        self.assertEqual(self.records(), [rec("project_s1", 1, 1)])
 
 
 class TestSyncBigCost(CockpitCase):
@@ -869,7 +877,7 @@ class TestSyncBigCost(CockpitCase):
         self.assertTrue(os.path.exists(oto().COCKPIT_LAST_RESULT_FILE))
         self.assertTrue(self.status().startswith("✅ 全解析同期完了（今回のAI費用 約"), self.status())
         self.assertEqual(self.totals_at_cost_ask, [PREV_TOTALS], "(fix1 M2) 確認の時点では、まだ集計を0にしない")
-        self.assertEqual(self.totals(), tok(151 + 2 + 4), "AIの直前に0へ戻し、今回の分だけになる")
+        self.assertEqual(self.totals(), tok(151 + 4), "AIの直前に0へ戻し、今回の分だけになる (A7e: Stage1 151 + 決勝戦4)")
 
 
 class TestSyncException(CockpitCase):

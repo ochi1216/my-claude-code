@@ -258,10 +258,12 @@ class TestConstantsAndHelpers(InTempCwd):
         self.assertFalse(hasattr(oto(), "STAFF_STAGE1_MODEL"))
 
     def test_signatures(self):
-        """estimate_overview_cost(kind, per_target_threads, knowledge, model=None) / count_failed_overview_threads(kind, per_target_threads)。"""
+        """estimate_overview_cost(kind, per_target_threads, knowledge, model=None, include_stage2=True) (A7e で include_stage2 を追加) /
+        count_failed_overview_threads(kind, per_target_threads)。"""
         p = list(inspect.signature(oto().estimate_overview_cost).parameters.values())
-        self.assertEqual([x.name for x in p], ["kind", "per_target_threads", "knowledge", "model"])
+        self.assertEqual([x.name for x in p], ["kind", "per_target_threads", "knowledge", "model", "include_stage2"])
         self.assertIsNone(p[3].default)
+        self.assertIs(p[4].default, True)
         p2 = list(inspect.signature(oto().count_failed_overview_threads).parameters)
         self.assertEqual(p2, ["kind", "per_target_threads"])
         p3 = list(inspect.signature(oto().count_overview_stage2_calls).parameters)
