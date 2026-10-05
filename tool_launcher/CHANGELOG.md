@@ -37,7 +37,9 @@ OneNote側で整備済みのバッチだが、**この時点で私（Launcher To
 実機で動作するかを確認せずにtools.jsonの向き先をこのバッチへ切り替えてしまった。**
 その結果、実機でバッチ自体の不具合（日本語＋`chcp 65001`によるcmd.exeの構文崩れ、
 `wmic`廃止によるログファイル名の不正）が表面化した。バッチ側の修正内容は
-`onenote_report_generator/CHANGELOG.md`（追記7）を参照。今回新規に作成した
+`onenote_report_generator/CHANGELOG.md`（追記7）を参照。さらに実機確認で、OneNote要約ツール本体
+（Python）の起動前ポート解放の不具合も見つかり、`onenote_report_generator_20261005_01.py`
+で修正した（同CHANGELOG参照）。今回新規に作成した
 ファイルは無い（バッチは既存ファイルの修正）。
 
 ### 追加変更：journalのタイトルを「Journal Daily」に変更
