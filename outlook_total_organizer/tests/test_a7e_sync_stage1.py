@@ -87,6 +87,15 @@ def old_mod(test):
     return mod
 
 
+def new_mod(test):
+    """_14 を名前で読み込む。_13 との出力の突き合わせは、最新のリビジョンではなく _14 で行う
+    (後のリビジョンが共通のJSなどを変えても、この比較が崩れないように)。"""
+    mod = load_rev(NEW_REV)
+    if mod is None:
+        test.skipTest(f"{NEW_REV} が無い")
+    return mod
+
+
 @contextlib.contextmanager
 def chdir(sub):
     """一時cwd の下の別のフォルダで動かす (_13 と _14 を同じ入力で別々に動かすため)。"""
@@ -858,7 +867,7 @@ class TestSyncStage1Only(SyncCase):
         違うのは費用 (トークン) だけで、_14 は Stage2 の4回分 (4×6000 / 4×3300) 少ない。"""
         old = old_mod(self)
         r13 = self.run_in("r13", old)
-        r14 = self.run_in("r14", oto())
+        r14 = self.run_in("r14", new_mod(self))
         self.assertEqual((r13["ai"].n("s2"), r14["ai"].n("s2")), (4, 0), "前提: _13 は Stage2 を4回呼んでいた")
         self.assertEqual(r13["ai"].prompts("s1"), r14["ai"].prompts("s1"))
         self.assertEqual(summary_ids(r13["ai"]), summary_ids(r14["ai"]), "決勝戦への入力 (候補のスレッド) が違う")
@@ -884,7 +893,7 @@ class TestSyncStage1Only(SyncCase):
         old = old_mod(self)
         fail = ("p1a", "s1")
         r13 = self.run_in("r13", old, fail)
-        r14 = self.run_in("r14", oto(), fail)
+        r14 = self.run_in("r14", new_mod(self), fail)
         self.assertEqual((r14["ai"].n("s1"), r14["ai"].n("s2"), r14["ai"].n("summary")), (5, 0, 4))
         self.assert_status(r14["status"], "⚠ 完了（AI失敗2件。もう一度実行すると再試行）", "成功7/9件", 9)
         self.assertEqual(log_rows(r14["log"]), [row("project_s1", 1, 2), row("staff_s1", 2, 3), row("cockpit_summary", 4, 4)])
