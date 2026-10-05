@@ -36,6 +36,14 @@ kindをbatに変更する」）のとおり更新した。
 既に整備・単体テスト済み（OneNote側CHANGELOG参照）であり、今回新規に作成した
 ファイルは無い。
 
+### 追加変更：journalのタイトルを「Journal Daily」に変更
+
+越智さんが会社PCで✏ボタン（`20260928_02`）を使って`journal`のタイトルを
+「学びジャーナル（LKPT）」から「Journal Daily」に変更した結果、`tools.json`が
+ローカルで未コミットの状態になり、`git pull`が「local changes would be
+overwritten」で止まった。越智さんのご指示により、この変更を正式なタイトルとして
+リポジトリに反映した（`label`のみ。`id`・`path`等は変更なし）。
+
 ### 動作確認
 
 - `tools.json`のJSON構文検証：合格（27件のまま）

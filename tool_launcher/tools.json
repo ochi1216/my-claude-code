@@ -271,7 +271,7 @@
     },
     {
       "id": "journal",
-      "label": "学びジャーナル（LKPT）",
+      "label": "Journal Daily",
       "category": "strategy",
       "root": "absolute",
       "kind": "bat",
