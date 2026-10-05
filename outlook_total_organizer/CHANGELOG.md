@@ -1,5 +1,38 @@
 # CHANGELOG — outlook_total_organizer
 
+## VERSION 20261004_10
+
+### 追加・修正
+	**Gemini 2.5 系の提供終了への備え: スタッフ俯瞰のStage1の軽量モデルを、設定で切り替えられるようにした**(既定の動作は変えていない)。本ツールのAIは、ほぼ全部が設定の`gemini_model`を使うので設定の書き換えで切り替えられるが、スタッフ俯瞰(と統括コックピットの全自動同期のスタッフ分)のStage1だけは`gemini-2.5-flash-lite`をコードに直書きしていた。設定`json/mail_manager_config.json`に`"gemini_lite_model"`があれば、そのモデルを使う(無い・空なら従来どおり`gemini-2.5-flash-lite`。文字列でない値(数値など)なら既定に戻し、コンソールに警告を1行出す)。
+
+### 変更関数
+	`MailSummarizer.__init__`(1行) / `MailSummarizer.summarize_staff_threads`(Stage1のモデル名の1か所) / `MailManagerGUI.__init__`(設定を読む1行)
+	`_20261004_09`との差分: +12行/−2行。
+
+### 新規追加：
+	定数: `STAFF_STAGE1_DEFAULT_MODEL`
+	`tests/test_a9_lite_model.py`
+
+### 削除：
+	なし
+
+変更ファイル：
+	`outlook_total_organizer_20261004_10.py`（`_20261004_09`からのコピー＋上記。`_09`はそのまま残置）
+	`CHANGELOG.md` / `tests/test_a9_lite_model.py`（新規）
+
+変更しないこと（宣誓）：
+	プロンプト・スキーマ・キャッシュ・費用の計算と見積り・他のAI呼び出し・単価表。
+
+注意・見送り：
+	・Gemini API の`gemini-2.5-flash`と`gemini-2.5-flash-lite`は、2026-10-16に提供終了の予定とされる(後継は`gemini-3.5-flash`・`gemini-3.1-flash-lite`とされる)。どちらも二次情報で、公式ページは開発環境から閲覧できず未確認。
+	・**提供終了の前に、越智さんの作業が必要**(設定は起動時にだけ読む): ①ツールを閉じる ②`json/mail_manager_config.json`の`"gemini_model"`と`"gemini_lite_model"`を後継のモデル名に書き換え、単価を`"gemini_prices"`(USD/100万トークン)で足す(モデル名と単価は公式ページで確認)。例: `"gemini_model": "gemini-3.5-flash", "gemini_lite_model": "gemini-3.1-flash-lite", "gemini_prices": {"gemini-3.5-flash": [入力, 出力], "gemini-3.1-flash-lite": [入力, 出力]}` ③起動して、スタッフ俯瞰を1回実行し、完了のステータスに「AI失敗」が出ないことを確かめる。単価を足さないと、費用は単価表の最大の単価で計算され、多めに出る(レポートに「単価未登録」の注記)。
+	・モデル名の誤記・設定漏れがあると、AIの呼び出しが失敗し、「AI失敗N件」やレポートの「有効な活動記録が見つかりませんでした」になる(原因がモデル名だとは表示されない)。後継モデルで温度・JSONの出力・思考トークンが従来どおり動くかも未確認。
+	・社内の共通クライアント(gemini_client.py)が、モデル名をそのまま渡すかは未確認。
+
+動作確認時の注意：
+	Linux環境で、設定の有無・空・空白のときのモデル名と、スタッフ俯瞰のStage1に渡るモデル名を確認している。実際のAI呼び出しは未確認。
+	実機で確認してほしいこと: 設定を変えずに起動し、スタッフ俯瞰が従来どおり動くこと(既定は従来のモデル)。
+
 ## VERSION 20261004_09
 
 ### 追加・修正
