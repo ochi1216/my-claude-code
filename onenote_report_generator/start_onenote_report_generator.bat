@@ -88,7 +88,7 @@ echo Log File: %LOG_FILE%
 echo =========================================
 
 if !EXIT_CODE! neq 0 (
-    echo An error occurred during execution (code: !EXIT_CODE!). Check the log file.
+    echo An error occurred during execution - exit code: !EXIT_CODE!. Check the log file.
     pause
 )
 
