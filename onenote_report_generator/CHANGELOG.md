@@ -1,3 +1,48 @@
+## VERSION 20261005_01
+
+### 追加（S02）: レポート編集・次週ページ作成・Outlook下書き
+
+越智さんのご依頼（OneNote オーガナイザー開発 S02）。仕様は越智さんとの確認
+（Phase 1〜2）で確定。ファイルは `app/onenote_report_generator_20261005_01.py`
+（旧版は残置）。
+
+- **レポートの配信方法を変更**：`/reports/open/<名>` は `file://` ではなく
+  `http://localhost:5000/reports/view/<名>`（Flask経由）で開く。`file://` のページは
+  localhostのAPIをCORSで呼べず、以下の機能が使えないため。ファイル名は
+  `reports/`直下の`.html`のみ許可（`..`・パス区切りは拒否）。
+- **機能1 Executive Summaryの手動編集**：各ページブロックに「✏要約を編集／💾保存／
+  ↩元に戻す」。`summary-box`をその場で編集し `POST /api/report/save_summary` で
+  レポートHTMLへ保存（ホワイトリストでサニタイズ）。生成時の内容は初回編集時に
+  `<レポート名>.html.orig.json` へ退避し、元に戻せる（7日超削除時に一緒に削除）。
+  OneNote元ページは変更しない。
+- **機能2 次週ページ作成**：`POST /api/page/copy_next_week`。元ページHTMLを複製し、
+  ①青文字（既存`blue_detection`と同じ閾値・`color`のみ、`background-color`は対象外）
+  をすべて黒（#000000）へ、②タイトルの最初の`YYYY/MM/DD`を**元の日付より後の最初の
+  月曜**へ（元が月曜なら+7日・0埋めの有無は維持）、③同一セクションへ新規ページ作成。
+  タイトルに日付が無い場合は**作成を中止**してエラー表示。元ページの作成日メタ
+  （`meta name=created`）とGET専用の`id`/`data-id`は外す。
+  - 画像は既定で転送しない（枚数を警告表示）。ブロック内の「画像も転送」ON時のみ
+    取得してmultipartで同梱（取得失敗は件数を警告）。添付ファイル・埋め込み
+    （object/iframe）は未対応で、件数を警告。
+  - **既定で無効**：OneNote書込権限が未申請のため、`config.json` の
+    `enable_onenote_write`（既定false）がtrueのときだけ有効。falseの間は認証スコープを
+    現行（`Notes.Read`ほか）のまま変えず、ボタンは無効表示。trueにすると
+    `onenote_write_scope`（既定`Notes.ReadWrite`）を追加して再認証になる。
+- **機能3 Outlook下書き**：`POST /api/outlook/draft`。クラシックOutlookをCOM
+  （pywin32）で操作し、編集後のサマリー＋OneNoteリンクを本文にした下書きを保存・表示
+  する（宛先・件名は空欄、送信はしない）。リンクは元ページ、次週ページ作成済みなら両方。
+  `requirements.txt` に `pywin32`（Windowsのみ）を追加。
+- `_generate_worker` に `section_id` 引数（既定""）を追加。ページID等は
+  `_page_meta` としてレポートHTMLの`data-*`属性へ埋め込む（Geminiへ渡す前回データ
+  からは除外）。**旧VERSIONで作ったレポートは再生成が必要。**
+- `templates/index.html`：VERSION表記、`/generate`へ`section_id`送信のみ変更。
+
+#### 検証状況
+- リモート（Linux）で単体テスト13件・ブラウザ（Chromium）での編集→保存→再読込→
+  元に戻す・`file://`でツールバー非表示を確認済み。Graph API・Outlook COMはモック。
+- **実機未確認**：Outlook COM（クラシック版）、OneNoteへの実書込（権限付与後）、
+  画像転送、実ページの青文字変換漏れ。
+
 ## VERSION 20260928_01
 
 ### 変更（追記6）: フォルダ構成の整理（コードを`app/`フォルダへ移動）

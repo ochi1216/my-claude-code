@@ -3,6 +3,8 @@
   "TENANT_ID": "<YOUR_ENTRA_ID_TENANT_ID>",
   "GEMINI_API_KEY": "<YOUR_GEMINI_API_KEY>",
   "GEMINI_MODEL": "gemini-2.5-flash",
+  "enable_onenote_write": false,
+  "onenote_write_scope": "Notes.ReadWrite",
   "sites": [
     {
       "displayName": "Japan Design Center",

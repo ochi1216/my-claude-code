@@ -1,0 +1,2053 @@
+# VERSION: 20261005_01
+import os
+import json
+import re
+import subprocess
+import sys
+import time
+import threading
+import traceback
+import webbrowser
+import html as html_lib
+from datetime import datetime, date, timedelta
+from urllib.parse import quote
+from flask import Flask, request, jsonify, render_template, send_from_directory
+from bs4 import BeautifulSoup, NavigableString
+import msal
+import requests as http_requests
+# 変更点(20260812_01): 会社PCからGemini APIへの直接アクセスが遮断されたため、
+# `from google import genai` を廃止し、共通モジュール gemini_client.py 経由
+# （直接呼び出し→失敗時は自宅PCプロキシへ自動フォールバック）に移行した。
+# types は types.GenerateContentConfig(...) の構築に引き続き使うため残す。
+from google.genai import types
+
+# ==========================================
+# 変更点(20260928_04): onenote_report_generator/ 直下にコードファイルが平置き
+# されていたのを、app/ フォルダへ移動して整理した（バッチファイルのみに近い
+# 状態にしたいというご要望）。これに伴い、config.json / token_cache.bin /
+# bookmarks.json / reports/ といった実行時データ（認証情報・業務データを含み
+# git管理外）は、コードの移動先（app/）ではなく「onenote_report_generator/
+# 直下」（app/の1つ上）に置き続ける方針とした。TOOL_ROOTはその基準パスで、
+# CWD（起動時のカレントディレクトリ）にもスクリプト自身の配置階層にも依存せず、
+# 常にonenote_report_generator/直下を指す。
+# ==========================================
+TOOL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# ==========================================
+# 設定読み込み
+# ==========================================
+def load_config(path=None):
+    if path is None:
+        path = os.path.join(TOOL_ROOT, "config.json")
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+CONFIG = load_config()
+
+# ==========================================
+# 変更点(20261005_01): S02 機能追加で使う設定。
+# - enable_onenote_write: OneNoteへのページ作成（次週ページ作成）を有効にするか。
+#   既定はFalse。OneNote書込権限（Notes.ReadWrite等）をAzureアプリに追加できて
+#   いない間にTrueにすると認証自体が通らなくなるため、権限が付くまでは
+#   Falseのまま運用する（認証スコープも現行のNotes.Readのまま変わらない）。
+# - onenote_write_scope: 書込に使うスコープ名。サイトのノートブックで
+#   Notes.ReadWriteが拒否される場合のみ Notes.ReadWrite.All に変更する。
+# ==========================================
+ONENOTE_WRITE_ENABLED = bool(CONFIG.get("enable_onenote_write", False))
+ONENOTE_WRITE_SCOPE   = CONFIG.get("onenote_write_scope", "Notes.ReadWrite")
+SERVER_PORT           = 5000
+
+# ==========================================
+# Gemini 共通モジュール（gemini_client.py）互換シム
+# VERSION 20260812_01 で新規追加
+#
+# genai.Client と同じインターフェースだけを持つ薄い互換シム。
+# これにより以下の既存処理は一切変更不要:
+#   - response.text を読む処理
+#   - response.usage_metadata.prompt_token_count / candidates_token_count
+#   - types.GenerateContentConfig(...) による config 構築
+# ==========================================
+# 変更点(20260812_02): 本ツールは他ツールより1階層深い
+#   PythonScripts\Onenote\onenote_report_generator\
+# にあるため、既定の "../common" では PythonScripts\Onenote\common\ を探してしまい、
+# 実際の配置先 PythonScripts\common\ に届かなかった。
+# 変更点(20260928_04): app/フォルダへの再配置でスクリプト自身がさらに1階層
+# 深くなった（PythonScripts\Onenote\onenote_report_generator\app\）ため、
+# "../../../common" を候補に追加した。環境変数 GEMINI_COMMON_DIR が最優先。
+# 未設定なら "../common" → "../../common" → "../../../common" の順に
+# gemini_client.py が実在するフォルダを自動探索する。
+def _resolve_common_dirs():
+    """gemini_client.py の探索先候補を優先順に返す。"""
+    env_dir = os.environ.get("GEMINI_COMMON_DIR")
+    if env_dir:
+        return [env_dir]
+    here = os.path.dirname(os.path.abspath(__file__))
+    return [
+        os.path.normpath(os.path.join(here, "..", "common")),              # 他ツールと同じ階層の場合
+        os.path.normpath(os.path.join(here, "..", "..", "common")),        # 旧レイアウト（1階層深い）の場合
+        os.path.normpath(os.path.join(here, "..", "..", "..", "common")),  # app/配下（もう1階層深い）の場合
+    ]
+
+
+_COMMON_DIR_CANDIDATES = _resolve_common_dirs()
+
+# 実際に gemini_client.py が存在する候補を優先して sys.path へ入れる。
+# 見つからなければ全候補を入れておく（エラーメッセージで全候補を提示するため）。
+_COMMON_DIR = next(
+    (d for d in _COMMON_DIR_CANDIDATES if os.path.isfile(os.path.join(d, "gemini_client.py"))),
+    _COMMON_DIR_CANDIDATES[0],
+)
+for _d in _COMMON_DIR_CANDIDATES:
+    if _d not in sys.path:
+        sys.path.insert(0, _d)
+
+# import を try/except にする理由: 共通モジュールが未配置・パス誤りのときに
+# ツール自体が起動できなくなると、AIを使わない機能（OneNote閲覧・ブックマーク・
+# 過去レポート閲覧）まで巻き添えで停止するため。起動は継続させ、実際にAI呼び出しが
+# 行われた時点で原因の分かる RuntimeError を出す。
+try:
+    from gemini_client import generate_advanced as _generate_advanced
+    _GEMINI_CLIENT_IMPORT_ERROR = None
+except Exception as _e:
+    _generate_advanced = None
+    _GEMINI_CLIENT_IMPORT_ERROR = _e
+
+
+def gemini_credentials_available() -> bool:
+    """Gemini の認証情報が利用可能かを判定する。
+
+    直接呼び出しが遮断されていてもプロキシ経由なら成功しうるため、
+    GEMINI_API_KEY / GEMINI_PROXY_URL の**どちらか一方でも**あれば通す
+    （プロキシ専用構成を誤って弾かないため）。
+    旧来の config.json の GEMINI_API_KEY しか無い環境も止めない。
+    """
+    if os.environ.get("GEMINI_API_KEY") or os.environ.get("GEMINI_PROXY_URL"):
+        return True
+    try:
+        return bool(CONFIG.get("GEMINI_API_KEY", ""))
+    except Exception:
+        return False
+
+
+def _schema_to_jsonable(schema):
+    """response_schema が SDK バージョンによって pydantic モデルへ自動変換された
+    場合でも REST payload へ載せられるよう dict 化する保険。素のdictならそのまま返す。
+    現状このツールは response_schema を使っていないが、将来使った場合に備えて残す。"""
+    if schema is None or isinstance(schema, (dict, list, str, int, float, bool)):
+        return schema
+    for attr, kwargs in (("model_dump", {"mode": "json", "exclude_none": True, "by_alias": True}),
+                         ("dict", {"exclude_none": True, "by_alias": True})):
+        fn = getattr(schema, attr, None)
+        if callable(fn):
+            try:
+                return fn(**kwargs)
+            except Exception:
+                try:
+                    return fn()
+                except Exception:
+                    pass
+    return schema
+
+
+def _contents_to_payload_contents(contents):
+    """SDK の contents 引数を Gemini REST の contents 形式へ変換する。
+
+    本ツールは `contents=[prompt]`（文字列1個のリスト）で呼び出しているため、
+    文字列・リストの両方に対応させている。
+    （outlook_total_organizer は全て文字列だったが、本ツールはリスト形式）
+    """
+    if contents is None:
+        parts = []
+    elif isinstance(contents, str):
+        parts = [{"text": contents}]
+    elif isinstance(contents, (list, tuple)):
+        parts = []
+        for c in contents:
+            if isinstance(c, str):
+                parts.append({"text": c})
+            elif isinstance(c, dict):
+                parts.append(c)
+            else:
+                parts.append({"text": str(c)})
+    else:
+        parts = [{"text": str(contents)}]
+    return [{"parts": parts}]
+
+
+class _CommonUsageMetadata:
+    def __init__(self, usage: dict):
+        usage = usage if isinstance(usage, dict) else {}
+        self.prompt_token_count     = usage.get("promptTokenCount", 0)
+        self.candidates_token_count = usage.get("candidatesTokenCount", 0)
+
+
+class _CommonGeminiResponse:
+    def __init__(self, raw: dict):
+        try:
+            self.text = raw["candidates"][0]["content"]["parts"][0]["text"]
+        except (KeyError, IndexError, TypeError):
+            self.text = ""
+        self.usage_metadata = _CommonUsageMetadata(
+            raw.get("usageMetadata", {}) if isinstance(raw, dict) else {}
+        )
+
+
+class _CommonGeminiModels:
+    def generate_content(self, model=None, contents=None, config=None):
+        if _generate_advanced is None:
+            raise RuntimeError(
+                "Gemini共通モジュール(gemini_client.py)を読み込めませんでした。\n"
+                f"探索したパス: {' / '.join(_COMMON_DIR_CANDIDATES)}\n"
+                f"元のエラー: {_GEMINI_CLIENT_IMPORT_ERROR}\n"
+                "gemini-common-tools を配置し、必要なら環境変数 GEMINI_COMMON_DIR で"
+                "gemini_client.py のあるフォルダを指定してください。"
+            )
+        payload = {"contents": _contents_to_payload_contents(contents)}
+        if config is not None:
+            gen_cfg = {}
+            mime = getattr(config, "response_mime_type", None)
+            if mime:
+                gen_cfg["responseMimeType"] = mime
+            schema = getattr(config, "response_schema", None)
+            if schema is not None:
+                gen_cfg["responseSchema"] = _schema_to_jsonable(schema)
+            temp = getattr(config, "temperature", None)
+            if temp is not None:
+                gen_cfg["temperature"] = temp
+            if gen_cfg:
+                payload["generationConfig"] = gen_cfg
+        # model は必ず明示的に渡す。省略すると共通モジュール側の既定モデルに落ち、
+        # 「UI上は別モデルを表示しているのに実際は flash が動く」silent failure になる。
+        raw = _generate_advanced(payload, model=model)
+        return _CommonGeminiResponse(raw)
+
+
+class _CommonGeminiClient:
+    """genai.Client(api_key=...) の代替。api_key は gemini_client.py 側が
+    環境変数から読むため、互換性のために受け取るだけで使用しない。"""
+    def __init__(self, api_key=None):
+        self.models = _CommonGeminiModels()
+
+# ==========================================
+# OneNoteGraphExtractor
+# 変更点: 4メソッドのsite_idをconfig固定値から引数に変更
+# 変更点(20260727_01): Graph APIの401をTokenExpiredErrorとして区別できるように変更
+# ==========================================
+class TokenExpiredError(Exception):
+    """Graph APIがHTTP 401を返した場合に送出する（アクセストークン期限切れ検知用）。"""
+    pass
+
+
+class OneNoteGraphExtractor:
+    # 変更点(20261005_01): enable_onenote_write=true のときだけ書込スコープを足す。
+    SCOPES     = ["Notes.Read", "Sites.Read.All", "Group.Read.All"] + (
+        [ONENOTE_WRITE_SCOPE] if ONENOTE_WRITE_ENABLED else [])
+    GRAPH_BASE = "https://graph.microsoft.com/v1.0"
+
+    # 変更点(20260928_01): 青文字判定・HTML→テキスト抽出を刷新するための定数。
+    # extract_with_color() 内の走査ロジックが参照する。
+    _SKIP_TAGS      = {"head", "title", "style", "script", "meta", "link"}
+    _LIST_TAGS      = {"ul", "ol"}
+    _BLOCK_LINE_TAGS = {"p", "li", "h1", "h2", "h3", "h4", "h5", "h6"}
+
+    def __init__(self):
+        # 変更点(20260928_04): CWD相対からTOOL_ROOT基準に変更（app/フォルダ
+        # 再配置に伴い、CWDに依存せず常にonenote_report_generator/直下を指す）。
+        self.token_cache_path = os.path.join(TOOL_ROOT, "token_cache.bin")
+        self.cache = msal.SerializableTokenCache()
+        if os.path.exists(self.token_cache_path):
+            with open(self.token_cache_path, "r") as f:
+                self.cache.deserialize(f.read())
+        self.msal_app = msal.PublicClientApplication(
+            CONFIG["CLIENT_ID"],
+            authority=f"https://login.microsoftonline.com/{CONFIG['TENANT_ID']}",
+            token_cache=self.cache
+        )
+
+    def _save_cache(self):
+        if self.cache.has_state_changed:
+            with open(self.token_cache_path, "w") as f:
+                f.write(self.cache.serialize())
+
+    def get_token_from_cache(self):
+        accounts = self.msal_app.get_accounts()
+        if accounts:
+            result = self.msal_app.acquire_token_silent(self.SCOPES, account=accounts[0])
+            if result and "access_token" in result:
+                self._save_cache()
+                return result["access_token"]
+        return None
+
+    def initiate_device_flow(self):
+        flow = self.msal_app.initiate_device_flow(scopes=self.SCOPES)
+        if "user_code" not in flow:
+            raise Exception("Device Code Flowの開始に失敗しました")
+        return flow
+
+    def acquire_token_by_flow(self, flow):
+        result = self.msal_app.acquire_token_by_device_flow(flow)
+        if "access_token" in result:
+            self._save_cache()
+            return result["access_token"]
+        raise Exception(f"認証失敗: {result.get('error_description', '不明なエラー')}")
+
+    def _headers(self, token):
+        return {"Authorization": f"Bearer {token}"}
+
+    def _get(self, token, url):
+        resp = http_requests.get(url, headers=self._headers(token), timeout=60)
+        if resp.status_code == 200:
+            return resp.json()
+        if resp.status_code == 401:
+            raise TokenExpiredError(f"Graph API Error 401: {resp.text[:300]}")
+        raise Exception(f"Graph API Error {resp.status_code}: {resp.text[:300]}")
+
+    def get_notebooks(self, token, site_id):
+        if site_id:
+            url = f"{self.GRAPH_BASE}/sites/{site_id}/onenote/notebooks?$select=id,displayName"
+        else:
+            url = f"{self.GRAPH_BASE}/me/onenote/notebooks?$select=id,displayName"
+        return self._get(token, url).get("value", [])
+
+    def get_sections(self, token, notebook_id, site_id):
+        if site_id:
+            url = f"{self.GRAPH_BASE}/sites/{site_id}/onenote/notebooks/{notebook_id}/sections?$select=id,displayName"
+        else:
+            url = f"{self.GRAPH_BASE}/me/onenote/notebooks/{notebook_id}/sections?$select=id,displayName"
+        return self._get(token, url).get("value", [])
+
+
+    def get_pages(self, token, section_id, site_id):
+        """ページ一覧を取得。
+        createdDateTimeが全て同一（移行済み）→ API順（OneNote表示順）を維持
+        createdDateTimeが異なる → 昇順ソート（古い→新しい）
+        """
+        if site_id:
+            url = f"{self.GRAPH_BASE}/sites/{site_id}/onenote/sections/{section_id}/pages?$select=id,title,createdDateTime,links&$top=100"
+        else:
+            url = f"{self.GRAPH_BASE}/me/onenote/sections/{section_id}/pages?$select=id,title,createdDateTime,links&$top=100"
+        pages = []
+        while url:
+            data = self._get(token, url)
+            pages.extend(data.get("value", []))
+            url  = data.get("@odata.nextLink")
+
+        # createdDateTimeの日付部分（YYYY-MM-DD）が全て同一か確認
+        dates = set(p.get("createdDateTime", "")[:10] for p in pages)
+        if len(dates) <= 1:
+            # 全て同一日付（移行済みセクション）→ API返却順を維持
+            return pages
+        else:
+            # 日付が異なる → createdDateTime昇順ソート（古い→新しい）
+            return sorted(pages, key=lambda p: p.get("createdDateTime", ""))
+
+    def get_page_html(self, token, page_id, site_id):
+        """ページのHTML本文を取得（リダイレクト対応）"""
+        if site_id:
+            url = f"{self.GRAPH_BASE}/sites/{site_id}/onenote/pages/{page_id}/content"
+        else:
+            url = f"{self.GRAPH_BASE}/me/onenote/pages/{page_id}/content"
+        headers = self._headers(token)
+        resp = http_requests.get(url, headers=headers, timeout=60, allow_redirects=False)
+        if resp.status_code in (301, 302, 303, 307, 308):
+            redirect_url = resp.headers.get("Location")
+            resp = http_requests.get(redirect_url, headers=headers, timeout=60)
+        if resp.status_code == 200:
+            return resp.text
+        raise Exception(f"ページHTML取得失敗 {resp.status_code}: {resp.text[:300]}")
+
+    # 変更点(20261005_01): 画像転送オプション用。ページHTML内の画像URLから
+    # バイナリを取得する（Graphのresourcesエンドポイントは認証が必要）。
+    def get_image_bytes(self, token, url):
+        resp = http_requests.get(url, headers=self._headers(token), timeout=60)
+        if resp.status_code == 200:
+            return resp.content, resp.headers.get("Content-Type", "image/png")
+        raise Exception(f"画像取得失敗 {resp.status_code}")
+
+    # 変更点(20261005_01): 次週ページ作成用。セクション直下に新規ページを作る。
+    # images が空ならHTML単体（text/html）、あればmultipartで画像を同梱する。
+    # images = [(名前, バイト列, Content-Type), ...]。HTML側は src="name:名前"。
+    def create_page(self, token, section_id, site_id, html, images=None):
+        if site_id:
+            url = f"{self.GRAPH_BASE}/sites/{site_id}/onenote/sections/{section_id}/pages"
+        else:
+            url = f"{self.GRAPH_BASE}/me/onenote/sections/{section_id}/pages"
+        headers = self._headers(token)
+        if images:
+            files = {"Presentation": (None, html.encode("utf-8"), "text/html")}
+            for name, data, ctype in images:
+                files[name] = (None, data, ctype)
+            resp = http_requests.post(url, headers=headers, files=files, timeout=120)
+        else:
+            headers = dict(headers, **{"Content-Type": "text/html; charset=utf-8"})
+            resp = http_requests.post(url, headers=headers, data=html.encode("utf-8"), timeout=120)
+        if resp.status_code in (200, 201):
+            return resp.json()
+        if resp.status_code == 401:
+            raise TokenExpiredError(f"Graph API Error 401: {resp.text[:300]}")
+        if resp.status_code == 403:
+            raise PermissionError(
+                "OneNoteへの書込権限がありません（403）。Azureアプリに "
+                f"{ONENOTE_WRITE_SCOPE} を追加し、再認証してください。")
+        raise Exception(f"ページ作成失敗 {resp.status_code}: {resp.text[:300]}")
+
+    # ==========================================
+    # 変更点(20260928_01): 青文字＝今週の更新の検出を全面刷新。
+    #
+    # 旧実装（20260812_02以前）の問題点（実測で確認済み）:
+    #   ① 行まるごと青（<p><span style="color:rgb(...)">…</span></p>）が
+    #      find_all の文書順走査で親<p>のテキストが先に黒として出力され、
+    #      同一文言の子<span>が seen 重複除去で捨てられ、マーカーが付かない。
+    #      これがOneNoteで最も一般的な書き方であり、最大の原因だった。
+    #   ② is_blue() が color:rgb(...) 記法しか見ておらず、16進数
+    #      （color:#0070c0）を検出できない。
+    #   ③ 表のセル内の青は判定されず、table.decompose() で判定機会自体が
+    #      失われる。
+    #   ④ 行の一部だけ青の場合、同一テキストが複数回出力される。
+    #
+    # 新実装は soup.body を文書順に1回だけたどる「線形化」方式に置き換え、
+    # テキストノード単位で色を解決してから行として組み立てる。
+    # ==========================================
+
+    def _parse_css_color(self, value: str):
+        """CSSのcolor値（#rgb / #rrggbb / rgb() / rgba()）を(r,g,b)に変換する。
+        解釈できない値（inherit, windowtext, 色名など）はNoneを返す。"""
+        if not value:
+            return None
+        value = value.strip()
+        m = re.match(r'^#([0-9a-fA-F]{3})$', value)
+        if m:
+            h = m.group(1)
+            return tuple(int(c * 2, 16) for c in h)
+        m = re.match(r'^#([0-9a-fA-F]{6})$', value)
+        if m:
+            h = m.group(1)
+            return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+        m = re.match(r'^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*[\d.]+\s*)?\)$', value, re.I)
+        if m:
+            return tuple(int(m.group(i)) for i in (1, 2, 3))
+        return None
+
+    def _extract_color_rgb(self, style: str):
+        """style属性文字列から color:（background-colorは除外）の値を取り出す。
+        同一style内に複数回colorが指定されている場合はCSSの慣例どおり後勝ち。"""
+        if not style:
+            return None
+        rgb = None
+        for m in re.finditer(r'(?<![\w-])color\s*:\s*([^;]+)', style, re.I):
+            parsed = self._parse_css_color(m.group(1))
+            if parsed is not None:
+                rgb = parsed
+        return rgb
+
+    def _rgb_is_blue(self, rgb) -> bool:
+        bd = CONFIG.get("blue_detection", {"max_r": 100, "min_b": 100, "min_b_minus_r": 50})
+        r, g, b = rgb
+        return r < bd["max_r"] and b > bd["min_b"] and b > r + bd["min_b_minus_r"]
+
+    def is_blue(self, style: str) -> bool:
+        rgb = self._extract_color_rgb(style)
+        if rgb is None:
+            return False
+        return self._rgb_is_blue(rgb)
+
+    def _resolve_is_blue(self, el, inherited: bool) -> bool:
+        """要素自身にcolor指定があればそれで判定し、無ければ親から継承した
+        is_blueをそのまま使う（＝黒を明示したspanが青い親の中にあれば
+        そのspanだけ黒になる）。"""
+        style = el.get("style", "") if hasattr(el, "get") else ""
+        rgb = self._extract_color_rgb(style)
+        if rgb is None:
+            return inherited
+        return self._rgb_is_blue(rgb)
+
+    def _is_negligible(self, text: str) -> bool:
+        """空白・記号のみのテキストか（行全体が青かどうかの判定から除外する）。"""
+        return re.sub(r'[\s\W]+', '', text, flags=re.UNICODE) == ""
+
+    def _render_line(self, segments, prefix: str = "") -> str:
+        """(text, is_blue) の列を1行の文字列に組み立てる。
+        隣接する同色の断片は連結し、全体が青なら【更新ポイント】、
+        一部だけ青なら該当部分を⟦⟧で囲む。"""
+        merged = []
+        for text, blue in segments:
+            norm = re.sub(r'[ \t\r\n ]+', ' ', text)
+            if norm == "":
+                continue
+            if merged and merged[-1][1] == blue:
+                merged[-1] = (merged[-1][0] + norm, blue)
+            else:
+                merged.append((norm, blue))
+        if not merged:
+            return ""
+        first_t, first_b = merged[0]
+        merged[0] = (first_t.lstrip(), first_b)
+        last_t, last_b = merged[-1]
+        merged[-1] = (last_t.rstrip(), last_b)
+
+        if not any(not self._is_negligible(t) for t, _ in merged):
+            return ""
+
+        has_any_blue     = any(b and not self._is_negligible(t) for t, b in merged)
+        is_line_all_blue = all(self._is_negligible(t) or b for t, b in merged)
+
+        if not has_any_blue:
+            return prefix + "".join(t for t, _ in merged)
+        if is_line_all_blue:
+            return prefix + "【更新ポイント】" + "".join(t for t, _ in merged)
+        parts = []
+        for t, b in merged:
+            if self._is_negligible(t):
+                parts.append(t)
+            elif b:
+                parts.append(f"⟦{t}⟧")
+            else:
+                parts.append(t)
+        return prefix + "【更新ポイント】" + "".join(parts)
+
+    def _flush(self, buf, lines, prefix: str = ""):
+        line = self._render_line(buf, prefix=prefix)
+        if line:
+            lines.append(line)
+        buf.clear()
+
+    def _has_block_descendant(self, el) -> bool:
+        return el.find(["p", "div", "li", "h1", "h2", "h3", "h4", "h5", "h6", "table", "ul", "ol"]) is not None
+
+    def _block_prefix(self, name: str, list_depth: int) -> str:
+        if name == "li":
+            return "  " * max(list_depth - 1, 0) + "- "
+        if name in ("h1", "h2", "h3", "h4", "h5", "h6"):
+            return "# "
+        return ""
+
+    def _emit_block_line(self, el, inherited_blue, list_depth, lines, prefix: str = ""):
+        own = []
+        self._collect_into(el, inherited_blue, own, lines, list_depth, prefix=prefix)
+        self._flush(own, lines, prefix=prefix)
+
+    def _collect_into(self, el, inherited_blue, buf, lines, list_depth, prefix: str = ""):
+        """1行分（p/li/h/leaf-div等）の内容を集める。span/a/b/strong/em/font等の
+        インライン要素はここでbufへマージされ、同じ行として扱われる。
+        prefixは呼び出し元（この行の所有者=p/li/h）の見出し・字下げ記号で、
+        途中でbr/table/nested listにより行が分割された場合も同じprefixを
+        引き継ぐ（例: <li>親<ul>...</ul>後続</li> の「親」と「後続」がどちらも
+        「- 」付きの行になる）。"""
+        for child in el.children:
+            if isinstance(child, NavigableString):
+                text = str(child)
+                if text:
+                    buf.append((text, inherited_blue))
+                continue
+            name = (child.name or "").lower()
+            if name in self._SKIP_TAGS:
+                continue
+            if name == "br":
+                self._flush(buf, lines, prefix=prefix)
+                continue
+            if name == "table":
+                self._flush(buf, lines, prefix=prefix)
+                self._extract_table(child, lines)
+                continue
+            child_blue = self._resolve_is_blue(child, inherited_blue)
+            if name in self._LIST_TAGS:
+                self._flush(buf, lines, prefix=prefix)
+                self._process_children(child, child_blue, list_depth + 1, lines)
+                continue
+            if name in self._BLOCK_LINE_TAGS:
+                self._flush(buf, lines, prefix=prefix)
+                self._emit_block_line(child, child_blue, list_depth, lines, self._block_prefix(name, list_depth))
+                continue
+            if name == "div" and self._has_block_descendant(child):
+                self._flush(buf, lines, prefix=prefix)
+                self._process_children(child, child_blue, list_depth, lines)
+                continue
+            # span / a / b / strong / em / font / u / sup / sub / 葉div 等はマージ
+            self._collect_into(child, child_blue, buf, lines, list_depth, prefix=prefix)
+
+    def _process_children(self, container, inherited_blue, list_depth, lines):
+        """body/div（グループ）/ul/ol/liの子を文書順に処理し、ブロック要素
+        （p/li/h/table/leafなdiv）が現れるたびに1行を確定してlinesへ追加する。"""
+        buf = []
+        for child in container.children:
+            if isinstance(child, NavigableString):
+                text = str(child)
+                if text:
+                    buf.append((text, inherited_blue))
+                continue
+            name = (child.name or "").lower()
+            if name in self._SKIP_TAGS:
+                continue
+            if name == "br":
+                self._flush(buf, lines)
+                continue
+            if name == "table":
+                self._flush(buf, lines)
+                self._extract_table(child, lines)
+                continue
+            child_blue = self._resolve_is_blue(child, inherited_blue)
+            if name in self._LIST_TAGS:
+                self._flush(buf, lines)
+                self._process_children(child, child_blue, list_depth + 1, lines)
+                continue
+            if name in self._BLOCK_LINE_TAGS:
+                self._flush(buf, lines)
+                self._emit_block_line(child, child_blue, list_depth, lines, self._block_prefix(name, list_depth))
+                continue
+            if self._has_block_descendant(child):
+                self._flush(buf, lines)
+                self._process_children(child, child_blue, list_depth, lines)
+                continue
+            # 葉div、または稀に直置きされたinline要素：単独の1行として確定
+            self._flush(buf, lines)
+            self._emit_block_line(child, child_blue, list_depth, lines, prefix="")
+        self._flush(buf, lines)
+
+    def _extract_table(self, table, lines):
+        """表はtr直下のtd/thのみを対象にする。セル内に複数段落あれば" / "で
+        連結し、入れ子の表はセル内の文字列として平坦化する（decomposeはしない
+        ため、以前のように判定機会自体を失うことはない）。"""
+        def _iter_rows(node):
+            for child in node.find_all(["tbody", "thead", "tfoot", "tr"], recursive=False):
+                if child.name == "tr":
+                    yield child
+                else:
+                    yield from _iter_rows(child)
+        rows = list(_iter_rows(table)) or table.find_all("tr")
+        for row in rows:
+            cells = row.find_all(["td", "th"], recursive=False) or row.find_all(["td", "th"])
+            if not cells:
+                continue
+            cell_texts = []
+            cell_has_blue = []
+            for cell in cells:
+                cell_blue = self._resolve_is_blue(cell, False)
+                sub_lines = []
+                self._process_children(cell, cell_blue, 0, sub_lines)
+                any_blue = any(("【更新ポイント】" in l) or ("⟦" in l) for l in sub_lines)
+                plain = [l.replace("【更新ポイント】", "").replace("⟦", "").replace("⟧", "") for l in sub_lines]
+                cell_text = " / ".join(p for p in plain if p.strip())
+                if not cell_text:
+                    cell_text = cell.get_text(strip=True)
+                cell_texts.append(cell_text)
+                cell_has_blue.append(any_blue)
+            if not any(c.strip() for c in cell_texts):
+                continue
+            line = "| " + " | ".join(cell_texts) + " |"
+            if any(cell_has_blue):
+                line = "【更新ポイント】" + line
+            lines.append(line)
+
+    def extract_with_color(self, html: str) -> str:
+        soup = BeautifulSoup(html, "html.parser")
+        root = soup.body if soup.body else soup
+        lines = []
+        self._process_children(root, False, 0, lines)
+        return "\n".join(lines)
+
+
+# ==========================================
+# GeminiProcessor
+# 変更点(20260729_02): 出力言語モード（日本語に翻訳 / 原文の言語を維持）を
+# 選択できるように、プロンプト内の言語依存文字列を _LANG_VARIANTS に集約した。
+# language_mode="translate_ja"（既定）の文言は変更前と完全一致させている。
+#
+# 変更点(20260928_01):
+#   ① 青文字（【更新ポイント】/⟦⟧）を最優先として抽出するルールを全モード
+#      共通のプロンプト固定部（analyze_html内）に追加した。従来ルール3は
+#      「差分抽出を優先」としか書かれておらず、そもそも抽出処理側で
+#      マーカーがほとんど付与されていなかった（extract_with_color刷新で対応）
+#      ことに加え、サマリー欄の指示にも青文字優先の言及が無かったため
+#      summary_hintにも追記した。
+#   ② updates上限は3のまま維持（青文字の内容は統合して収め、削除しない）。
+#   ③ 3つ目のモード "bilingual_ja_en"（日本語＋英語併記）を追加。
+#      英語(en)を先に生成してから日本語(ja)を生成させる（表示は日本語が先）。
+#      ja は英語からの再翻訳ではなく原文から直接執筆させる。
+#      details / pending_actions は日本語のみ（越智さんの確認：英語の
+#      読み手は自分と上司の確認用のため、summary/updatesのみ併記で足りる）。
+# ==========================================
+UPDATES_MAX = 3
+
+_LANG_VARIANTS = {
+    "translate_ja": {
+        "directive_tail": "日本のビジネスシーンに最適な「自然な日本語」でJSONを出力してください。",
+        "rule2": "2. 【完全日本語化】: 入力ソースが英語であっても全項目を日本語に翻訳・執筆すること。",
+        "thinking_hint": "思考プロセス。英語入力時は翻訳方針をここで整理すること",
+        "summary_hint": ("全体の進捗を300文字以内の自然な日本語で総括。冒頭で今週の進捗"
+                         "（【更新ポイント】の内容）を述べ、黒文字は文脈の補足にのみ使うこと。"
+                         "【更新ポイント】が無い場合はその旨が分かるように書くこと。箇条書き不可"),
+        "category_label": "日本語カテゴリ名",
+        "item_label": "日本語項目名",
+        "task_hint": "日本語のタスク名",
+        "exec_line": "ルールとスキーマ、および「完全翻訳」の指示を理解しました。解析を開始します。",
+        "bilingual": False,
+    },
+    "keep_original": {
+        "directive_tail": "入力ソースの言語（英語・日本語など）を翻訳せずそのまま維持してJSONを出力してください。",
+        "rule2": ("2. 【原文言語の維持】: 入力ソースの言語を翻訳せずそのまま維持して執筆すること。"
+                  "カテゴリ名・項目名（JSONのキーやラベル文字列）、タスク名も含め、"
+                  "日本語ラベルへの置き換えは行わないこと。"),
+        "thinking_hint": "思考プロセス。入力ソースの言語を判定し、その言語を維持する方針をここで整理すること",
+        "summary_hint": ("全体の進捗を300文字以内で、原文の言語のまま自然に総括。冒頭で今週の進捗"
+                         "（【更新ポイント】の内容）を述べ、黒文字は文脈の補足にのみ使うこと。"
+                         "【更新ポイント】が無い場合はその旨が分かるように書くこと。箇条書き不可"),
+        "category_label": "カテゴリ名（原文の言語のまま）",
+        "item_label": "項目名（原文の言語のまま）",
+        "task_hint": "タスク名（原文の言語のまま）",
+        "exec_line": "ルールとスキーマ、および「原文言語維持」の指示を理解しました。解析を開始します。",
+        "bilingual": False,
+    },
+    "bilingual_ja_en": {
+        "directive_tail": ("日本語と英語（自分と上司が内容確認に使う英語）の両方でJSONを出力してください。"
+                           "summary/updatesの各項目は英語(en)を先に執筆してから日本語(ja)を執筆すること。"),
+        "rule2": ("2. 【日英併記】: en（英語）を先に書いてからja（日本語）を書くこと。ただしjaは"
+                  "英語からの再翻訳にせず原文から直接執筆し、固有名詞・社内用語・型番・数値は"
+                  "原文の表記を保つこと。en/jaは同じ事実を述べ、どちらか一方にだけ情報を足したり"
+                  "削ったりしないこと。details・pending_actionsは日本語のみでよい。"),
+        "thinking_hint": "思考プロセス。英語→日本語の順で執筆する方針をここで整理すること",
+        "summary_hint_en": ("Summarize overall progress in English within 300 characters. Lead with "
+                            "this week's progress (the 【更新ポイント】content); use black text only "
+                            "as supporting context. If there is no 【更新ポイント】, make that clear."),
+        "summary_hint": ("全体の進捗を300文字以内の自然な日本語で総括（英語からの再翻訳ではなく原文から"
+                         "執筆すること）。冒頭で今週の進捗（【更新ポイント】の内容）を述べ、黒文字は"
+                         "文脈の補足にのみ使うこと。【更新ポイント】が無い場合はその旨が分かるように書くこと。"
+                         "箇条書き不可"),
+        "category_label": "日本語カテゴリ名 / English category name",
+        "item_label": "日本語項目名",
+        "task_hint": "日本語のタスク名",
+        "exec_line": "ルールとスキーマ、および「日英併記（英語を先に執筆）」の指示を理解しました。解析を開始します。",
+        "bilingual": True,
+    },
+}
+
+_INPUT_FORMAT_NOTE = """<input_format>
+本文には抽出時に付与した以下の目印が含まれる場合がある（OneNote上の実際の文字ではない）。
+- 【更新ポイント】: その行（または⟦⟧で囲まれた部分）が青文字＝今週の更新であることを示す
+- ⟦...⟧: 青文字の部分（行の一部だけが青い場合）
+- 行頭の「- 」「  - 」等: 箇条書きの階層（インデント2つ分で1階層深い）
+- 行頭の「# 」: OneNote上の見出し
+- 「| a | b |」: 表の1行
+</input_format>"""
+
+_COMMON_RULE3 = ("3. 【差分抽出（青文字優先）】: 【更新ポイント】と記載された行（⟦⟧内が青文字部分）が"
+                 "今週の進捗である。updatesは原則としてこの内容から作成すること。黒文字は、青文字が"
+                 "示す内容の対象・主語・前提を補うためにのみ使ってよく、黒文字単独の話題をupdatesに"
+                 "含めてはならない。凡例や「青字＝更新」といった説明文自体は更新として扱わないこと。"
+                 "ページ内に【更新ポイント】が1行も無い場合に限り、前回データとの比較で差分を抽出する"
+                 "こと。マーカー（【更新ポイント】）や囲み記号（⟦⟧）はJSON出力にそのまま含めないこと。")
+
+
+def _strip_markers(value):
+    """抽出時に付与したマーカーをGeminiが出力へ写してしまった場合の保険。"""
+    if isinstance(value, str):
+        return value.replace("【更新ポイント】", "").replace("⟦", "").replace("⟧", "")
+    return value
+
+
+def _clean_updates_value(value):
+    if isinstance(value, dict):
+        return {k: _strip_markers(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_clean_updates_value(v) for v in value]
+    return _strip_markers(value)
+
+
+class GeminiProcessor:
+    def __init__(self):
+        # 変更点(20260812_01): 移行後は config.json の GEMINI_API_KEY が空でも
+        # プロキシ経由で成功しうるため、APIキー必須のガードを廃止し、
+        # GEMINI_API_KEY / GEMINI_PROXY_URL のどちらか一方でも通す判定に置き換えた。
+        # （旧ガードのままだと移行後に全AI機能が例外で止まる）
+        if not gemini_credentials_available():
+            raise ValueError(
+                "Geminiの認証情報が見つかりません。環境変数 GEMINI_API_KEY"
+                "（直接呼び出し用）または GEMINI_PROXY_URL（自宅PCプロキシ用）の"
+                "いずれかを設定してください。"
+            )
+        api_key = CONFIG.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
+        self.client = _CommonGeminiClient(api_key=api_key)
+        self.model  = CONFIG.get("GEMINI_MODEL", "gemini-2.5-flash")
+
+    def analyze_html(self, html_content: str, prev_data=None, language_mode="translate_ja"):
+        prev_info_str = json.dumps(prev_data, ensure_ascii=False) if prev_data else "なし"
+        v = _LANG_VARIANTS.get(language_mode, _LANG_VARIANTS["translate_ja"])
+        bilingual = v.get("bilingual", False)
+
+        if bilingual:
+            summary_schema = f'"summary_en": "string ({v["summary_hint_en"]})",\n  "summary": "string ({v["summary_hint"]})",'
+            updates_item_schema = (
+                '[{"en": "string (更新内容1・英語)", "ja": "string (更新内容1・日本語)"}, '
+                '{"en": "string (更新内容2・英語)", "ja": "string (更新内容2・日本語)"}]'
+            )
+            # bilingual_ja_enではdetails/pending_actionsは日本語のみとする
+            # （越智さんの確認：英語の読み手は自分と上司の確認用のため、
+            # 併記が必要なのはsummary/updatesのみで足りる）。他の2モードは
+            # 既存どおり「詳細内容」のまま（keep_originalで日本語化を強制
+            # しないよう、この注記はbilingual限定にする）。
+            detail_item_hint = "詳細内容・日本語"
+        else:
+            summary_schema = f'"summary": "string ({v["summary_hint"]})",'
+            updates_item_schema = '["string (更新内容1)", "string (更新内容2)"]'
+            detail_item_hint = "詳細内容"
+
+        prompt = f"""<system_directive>
+あなたは世界最高峰のITプロジェクトマネージャー兼データアナリストです。
+入力されるOneNoteページのテキスト（英語または日本語）を解析し、提供された「前回データ」と比較した上で、{v["directive_tail"]}
+</system_directive>
+
+{_INPUT_FORMAT_NOTE}
+
+<critical_rules>
+1. 【出力形式の絶対固定】: markdownタグや説明テキストは一切出力せず、純粋なJSONのみを返却すること。
+{v["rule2"]}
+{_COMMON_RULE3}
+4. 【情報の厳選】: updatesは各カテゴリ「絶対最大{UPDATES_MAX}項目」まで。青文字の内容が{UPDATES_MAX}項目を超える場合は、内容が近いものを統合して{UPDATES_MAX}項目以内に収めること。青文字の内容を理由なく削除・省略しないこと。
+5. 【空データの処理】: 該当情報がない場合は必ず空文字("")、空リスト([])、空オブジェクト({{}})を返すこと。
+</critical_rules>
+
+<json_schema>
+{{
+  "_thinking": "string ({v["thinking_hint"]})",
+  {summary_schema}
+  "updates": {{
+    "[{v["category_label"]}]": {updates_item_schema}
+  }},
+  "details": {{
+    "[{v["category_label"]}]": {{
+      "[{v["item_label"]}]": "string ({detail_item_hint})"
+    }}
+  }},
+  "pending_actions": [
+    {{
+      "task_name": "string ({v["task_hint"]})",
+      "assignee": "string (担当者)",
+      "deadline": "string (期限)",
+      "status": "string (ステータス)"
+    }}
+  ]
+}}
+</json_schema>
+
+<context_data>
+【前回データ（差分比較用）】
+{prev_info_str}
+</context_data>
+
+<page_content>
+{html_content}
+</page_content>
+
+<execution>
+{v["exec_line"]}
+</execution>"""
+
+        response = self.client.models.generate_content(
+            model=self.model,
+            contents=[prompt],
+            config=types.GenerateContentConfig(response_mime_type="application/json")
+        )
+        try:
+            result = json.loads(response.text)
+            usage  = response.usage_metadata
+            result["_token_usage"] = {
+                "input_tokens":  getattr(usage, "prompt_token_count",     0) if usage else 0,
+                "output_tokens": getattr(usage, "candidates_token_count", 0) if usage else 0
+            }
+            # 変更点(20260928_01): マーカー（【更新ポイント】/⟦⟧）をGeminiが
+            # 出力へ写してしまった場合の保険としてsummary/updatesから除去する。
+            if isinstance(result.get("summary"), str):
+                result["summary"] = _strip_markers(result["summary"])
+            if isinstance(result.get("summary_en"), str):
+                result["summary_en"] = _strip_markers(result["summary_en"])
+            if isinstance(result.get("updates"), dict):
+                result["updates"] = {k: _clean_updates_value(v2) for k, v2 in result["updates"].items()}
+            elif isinstance(result.get("updates"), list):
+                result["updates"] = _clean_updates_value(result["updates"])
+            return result
+        except Exception as e:
+            print(f"[ERROR] JSON Parse Failed: {e}")
+            return {"summary": "解析エラー", "updates": {}, "details": response.text,
+                    "pending_actions": [], "_token_usage": {"input_tokens": 0, "output_tokens": 0}}
+
+
+# ==========================================
+# ReportGenerator
+# 変更点(20260727_01): 詳細情報(details)が3階層以上ネストした場合に
+# 生のPython辞書表記(例: {'宮崎': {...}})がそのまま出力される不具合を修正
+# ==========================================
+# ==========================================
+# 変更点(20261005_01): レポートHTMLに埋め込む編集ツールバー（機能1〜3）。
+# f-stringの外で定義した通常の文字列（JS/CSSの波括弧と絵文字を素のまま書ける）。
+# ツールバーはFlask経由（http）で開いたときだけ表示される。
+# ==========================================
+REPORT_TOOLBAR_HTML = """
+<div class="edit-toolbar" style="display:none">
+  <button class="tb-edit" onclick="pgEdit(this)">✏ 要約を編集</button>
+  <button class="tb-save" onclick="pgSave(this)" style="display:none">💾 保存</button>
+  <button class="tb-restore" onclick="pgRestore(this)">↩ 元に戻す</button>
+  <button class="tb-mail" onclick="pgMail(this)">✉ Outlook下書き</button>
+  <button class="tb-next" onclick="pgNext(this)">📄 次週ページを作成</button>
+  <label class="tb-img"><input type="checkbox" class="tb-img-chk"> 画像も転送</label>
+  <span class="tb-msg"></span>
+</div>
+"""
+
+REPORT_EDIT_CSS = """
+.edit-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0 10px 0; }
+.edit-toolbar button { padding: 5px 12px; border: none; border-radius: 3px; background: #2c3e50; color: white; cursor: pointer; font-size: 0.85em; }
+.edit-toolbar button:disabled { background: #bdc3c7; cursor: not-allowed; }
+.edit-toolbar .tb-save { background: #27ae60; }
+.edit-toolbar .tb-img { font-size: 0.85em; color: #555; }
+.edit-toolbar .tb-msg { font-size: 0.85em; color: #555; }
+.edit-toolbar .tb-msg.err { color: #c0392b; }
+.summary-box.editing { outline: 2px dashed #e67e22; background-color: #fffdf5; }
+"""
+
+REPORT_EDIT_SCRIPT = """
+<script>
+(function () {
+  if (location.protocol.indexOf('http') !== 0 || location.pathname.indexOf('/reports/view/') !== 0) return;
+  var FILE = decodeURIComponent(location.pathname.split('/').pop());
+  function blockOf(el) { return el.closest('.page-block'); }
+  function msg(b, text, isErr) {
+    var m = b.querySelector('.tb-msg'); m.textContent = text; m.className = 'tb-msg' + (isErr ? ' err' : '');
+  }
+  function boxes(b) { return Array.prototype.slice.call(b.querySelectorAll('.summary-box')); }
+  function post(url, body) {
+    return fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)})
+      .then(function (r) { return r.json().then(function (j) { return {ok: r.ok, data: j}; }); });
+  }
+  function setEditing(b, on) {
+    boxes(b).forEach(function (x) { x.contentEditable = on ? 'true' : 'false'; x.classList.toggle('editing', on); });
+    b.querySelector('.tb-save').style.display = on ? '' : 'none';
+    b.querySelector('.tb-edit').textContent = on ? '✖ 編集をやめる' : '✏ 要約を編集';
+  }
+  window.pgEdit = function (btn) {
+    var b = blockOf(btn); setEditing(b, !b.querySelector('.summary-box').isContentEditable);
+  };
+  window.pgSave = function (btn) {
+    var b = blockOf(btn);
+    var payload = boxes(b).map(function (x) { return {bidx: parseInt(x.dataset.bidx, 10), html: x.innerHTML}; });
+    post('/api/report/save_summary', {filename: FILE, pidx: b.dataset.pidx, boxes: payload}).then(function (r) {
+      if (r.ok) { setEditing(b, false); msg(b, '💾 保存しました', false); } else { msg(b, '⚠ ' + r.data.error, true); }
+    }).catch(function (e) { msg(b, '⚠ ' + e, true); });
+  };
+  window.pgRestore = function (btn) {
+    var b = blockOf(btn);
+    if (!confirm('このページのサマリーを生成時の内容に戻しますか？')) return;
+    post('/api/report/restore_summary', {filename: FILE, pidx: b.dataset.pidx}).then(function (r) {
+      if (!r.ok) { msg(b, '⚠ ' + r.data.error, true); return; }
+      r.data.boxes.forEach(function (x) {
+        var el = b.querySelector('.summary-box[data-bidx="' + x.bidx + '"]'); if (el) el.innerHTML = x.html;
+      });
+      setEditing(b, false); msg(b, '↩ 元に戻しました', false);
+    }).catch(function (e) { msg(b, '⚠ ' + e, true); });
+  };
+  window.pgMail = function (btn) {
+    var b = blockOf(btn);
+    var html = boxes(b).map(function (x) { return x.innerHTML; }).join('<br>');
+    var links = [];
+    if (b.dataset.onenoteLink && b.dataset.onenoteLink !== '#') links.push({label: b.dataset.title, url: b.dataset.onenoteLink});
+    if (b.dataset.nextLink) links.push({label: b.dataset.nextTitle || '次週ページ', url: b.dataset.nextLink});
+    post('/api/outlook/draft', {summary_html: html, links: links}).then(function (r) {
+      msg(b, r.ok ? '✉ Outlookの下書きを開きました' : '⚠ ' + r.data.error, !r.ok);
+    }).catch(function (e) { msg(b, '⚠ ' + e, true); });
+  };
+  window.pgNext = function (btn) {
+    var b = blockOf(btn);
+    if (!b.dataset.pageId || !b.dataset.sectionId) { msg(b, '⚠ 旧形式のレポートです。再生成してください', true); return; }
+    if (!confirm('このページを複製して、次週ページを同じセクションに作成します。よろしいですか？')) return;
+    btn.disabled = true; msg(b, '📄 作成中...', false);
+    post('/api/page/copy_next_week', {
+      page_id: b.dataset.pageId, section_id: b.dataset.sectionId, site_id: b.dataset.siteId,
+      include_images: b.querySelector('.tb-img-chk').checked
+    }).then(function (r) {
+      btn.disabled = false;
+      if (!r.ok) { msg(b, '⚠ ' + r.data.error, true); return; }
+      var d = r.data, warn = [];
+      if (d.images_dropped) warn.push('画像' + d.images_dropped + '枚を未転送');
+      if (d.images_failed) warn.push('画像' + d.images_failed + '枚の取得失敗');
+      if (d.objects_dropped) warn.push('添付・埋込' + d.objects_dropped + '件を未転送');
+      b.dataset.nextLink = d.link || ''; b.dataset.nextTitle = d.title;
+      msg(b, '✅ 作成しました: ' + d.title + '（青→黒 ' + d.blue_converted + '箇所）' + (warn.length ? ' ⚠ ' + warn.join('／') : ''), false);
+    }).catch(function (e) { btn.disabled = false; msg(b, '⚠ ' + e, true); });
+  };
+  fetch('/api/features').then(function (r) { return r.json(); }).catch(function () { return {}; }).then(function (f) {
+    document.querySelectorAll('.edit-toolbar').forEach(function (tb) {
+      tb.style.display = 'flex';
+      if (!f.onenote_write) {
+        var n = tb.querySelector('.tb-next'); n.disabled = true;
+        n.title = 'OneNote書込権限が未申請のため無効（config.jsonのenable_onenote_writeで有効化）';
+        tb.querySelector('.tb-img').style.display = 'none';
+      }
+    });
+  });
+})();
+</script>
+"""
+
+class ReportGenerator:
+    @staticmethod
+    def _render_detail_value(key, val, level):
+        """detailsの値を再帰的にレンダリングする。
+        valが辞書の場合は見出し(h5, h6, ...)を掘り下げ、文字列の場合は箇条書きにする。
+        """
+        if isinstance(val, dict):
+            heading_level = min(level, 6)
+            html = f"<h{heading_level}>■ {key}</h{heading_level}>"
+            for sub_key, sub_val in val.items():
+                html += ReportGenerator._render_detail_value(sub_key, sub_val, level + 1)
+            return html
+        else:
+            return f"・<strong>{key}</strong>: {val}<br>"
+
+    # 変更点(20260928_01): 日英併記モード(bilingual_ja_en)のupdates項目
+    # {"en":..., "ja":...} を表示するためのレンダラ。文字列や、en/jaの
+    # どちらかが欠けた場合、未知の形にも対応する（黙って消さない）。
+    # 変更点(20260928_02): 越智さんの依頼により、JP/ENを行単位で混在させる
+    # のをやめ、ブロック単位（日本語ブロック→英語ブロック）で分けて表示する
+    # 構成に変更した。lang引数でこの1件をどちらの言語として出すかを指定する
+    # （lang=Noneのときは、非併記モードとの後方互換のため従来どおり
+    # 「日本語＋英語を1行に併記」の挙動を維持する）。
+    @staticmethod
+    def _render_update_item_fallback(item):
+        fallback = " / ".join(str(v) for v in item.values() if v)
+        return f"<li>{fallback}</li>"
+
+    @staticmethod
+    def _render_update_item(item, lang=None):
+        if not isinstance(item, dict):
+            return f"<li>{item}</li>"
+        ja = item.get("ja", "")
+        en = item.get("en", "")
+        if lang == "ja":
+            if ja:
+                return f"<li>{ja}</li>"
+            if en:
+                return f"<li lang='en'>{en}</li>"
+            return ReportGenerator._render_update_item_fallback(item)
+        if lang == "en":
+            if en:
+                return f"<li lang='en'>{en}</li>"
+            if ja:
+                return f"<li>{ja}</li>"
+            return ReportGenerator._render_update_item_fallback(item)
+        # lang未指定（非併記モード向けの後方互換）: 従来どおり1行に併記する。
+        if ja and en:
+            return f"<li>{ja}<br><span class='en-sub' lang='en'>{en}</span></li>"
+        if ja:
+            return f"<li>{ja}</li>"
+        if en:
+            return f"<li lang='en'>{en}</li>"
+        return ReportGenerator._render_update_item_fallback(item)
+
+    @staticmethod
+    def _render_updates_block(updates, lang):
+        """updates（カテゴリ→箇条書きの辞書、またはリスト）を1言語分だけ
+        レンダリングする。lang="ja"/"en"はbilingual_ja_enモード専用。
+        lang=Noneは非併記モード（item自体が既にその言語の文字列）で使う。
+        """
+        # 変更点(20260928_03): オーバーフロー注記（上限超過時の「他n件」）が
+        # lang（"en"）に関わらず常に日本語文言だったのを修正。英語ブロック
+        # （Key Updates）にも日本語の「…他 N 件」が混入していた。
+        def _more_note(hidden_count: int) -> str:
+            if hidden_count <= 0:
+                return ""
+            if lang == "en":
+                return f"<li class='more-note'>…{hidden_count} more</li>"
+            return f"<li class='more-note'>…他 {hidden_count} 件</li>"
+
+        html = ""
+        if isinstance(updates, dict):
+            for category, items in updates.items():
+                html += f"<h4>■ {category}</h4><ul>"
+                item_list = items if isinstance(items, list) else [items]
+                for item in item_list[:UPDATES_MAX]:
+                    html += ReportGenerator._render_update_item(item, lang)
+                html += _more_note(len(item_list) - UPDATES_MAX)
+                html += "</ul>"
+        elif isinstance(updates, list):
+            html += "<ul>"
+            for u in updates[:UPDATES_MAX]:
+                html += ReportGenerator._render_update_item(u, lang)
+            html += _more_note(len(updates) - UPDATES_MAX)
+            html += "</ul>"
+        return html
+
+    @staticmethod
+    def generate_html(results, out_path, section_name="General", cost_info=None, language_mode="translate_ja"):
+        bilingual_heading = (language_mode == "bilingual_ja_en")
+        # 変更点(20260928_02): 併記モードはJP/ENをブロック単位で分けて表示する
+        # ようになったため、見出しも各ブロック側でその言語のものだけを使う
+        # （下のbilingual_heading分岐を参照）。ここでの値は非併記モード専用。
+        exec_summary_label = "【エグゼクティブ・サマリー】"
+        updates_heading    = "主な更新内容 (差分)"
+        html_content = f"""<!DOCTYPE html>
+        <html lang="ja">
+        <head>
+            <meta charset="UTF-8">
+            <title>Weekly Report - {section_name}</title>
+            <style>
+                body {{ font-family: 'Segoe UI', Meiryo, sans-serif; margin: 20px; color: #333; }}
+                h1 {{ border-bottom: 2px solid #2c3e50; padding-bottom: 5px; color: #2c3e50; }}
+                h2 {{ background-color: #ecf0f1; padding: 10px; border-left: 5px solid #3498db; margin-top: 30px; }}
+                h3 {{ color: #2980b9; margin-bottom: 10px; border-bottom: 1px solid #bdc3c7; padding-bottom: 3px; }}
+                h4 {{ color: #2c3e50; margin-bottom: 5px; margin-top: 15px; }}
+                h5 {{ color: #34495e; margin: 10px 0 4px 12px; font-size: 0.95em; }}
+                h6 {{ color: #7f8c8d; margin: 6px 0 3px 24px; font-size: 0.9em; font-weight: 600; }}
+                .summary-box {{ background-color: #e8f8f5; padding: 15px; border-radius: 5px; border-left: 5px solid #1abc9c; margin-bottom: 20px; }}
+                table {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
+                th, td {{ border: 1px solid #bdc3c7; padding: 8px; text-align: left; }}
+                th {{ background-color: #34495e; color: white; }}
+                .action-item {{ background-color: #fff3e0; border-left-color: #e67e22; }}
+                .link-btn {{ display: inline-block; margin-top: 15px; padding: 8px 15px; background-color: #8e44ad; color: white; text-decoration: none; border-radius: 3px; font-size: 0.9em; }}
+                details {{ margin-bottom: 15px; background-color: #fdfdfd; }}
+                summary {{ cursor: pointer; font-weight: bold; background-color: #f7f9f9; padding: 10px; border-left: 4px solid #3498db; list-style-type: none; }}
+                summary::-webkit-details-marker {{ display: none; }}
+                details[open] summary {{ border-bottom: 1px solid #ecf0f1; }}
+                .details-content {{ padding: 10px 15px; border: 1px solid #ecf0f1; border-top: none; line-height: 1.6; }}
+                .cost-footer {{ margin-top: 40px; padding: 15px; background: #f8f9fa; border-top: 2px solid #dee2e6; font-size: 12px; color: #666; }}
+                .blue-stat {{ font-size: 12px; color: #7f8c8d; margin: -10px 0 10px 2px; }}
+                .en-sub {{ font-size: 0.85em; color: #666; }}
+                .more-note {{ color: #999; list-style-type: none; }}
+                {REPORT_EDIT_CSS}
+            </style>
+        </head>
+        <body>
+            <h1>Weekly Report [{section_name}]</h1>
+            <p>Generated: {time.strftime("%Y/%m/%d %H:%M")}</p>
+        """
+        for pidx, data in enumerate(results):
+            week_title   = data.get('week_title', 'Unknown Week')
+            onenote_link = data.get('onenote_link', '#')
+            summary      = data.get('summary', '要約なし')
+            summary_en   = data.get('summary_en', '')
+            updates      = data.get('updates', {})
+            details      = data.get('details', {})
+
+            # 変更点(20260928_01): 青文字の検出状況を各ページの見出し下に
+            # 表示する（除外はせず警告のみ。運用ミス＝前週コピー残りの
+            # 検出も含む）。
+            blue_stats   = data.get('_blue_stats') or {}
+            blue_lines   = blue_stats.get('blue_lines', 0)
+            same_as_prev = blue_stats.get('same_as_prev', 0)
+            stat_parts = []
+            if blue_lines > 0:
+                stat_parts.append(f"青文字 {blue_lines}行を検出")
+            else:
+                stat_parts.append("⚠ 青文字なし：前回データとの比較で推定")
+            if same_as_prev > 0:
+                stat_parts.append(f"⚠ 前週と同文の青 {same_as_prev}行（コピー残りの可能性）")
+            blue_stat_html = f'<div class="blue-stat">{" ／ ".join(stat_parts)}</div>'
+
+            meta = data.get('_page_meta') or {}
+            html_content += f"""
+            <div class="page-block" data-pidx="{pidx}"
+                 data-page-id="{html_lib.escape(str(meta.get('page_id', '')), quote=True)}"
+                 data-section-id="{html_lib.escape(str(meta.get('section_id', '')), quote=True)}"
+                 data-site-id="{html_lib.escape(str(meta.get('site_id', '')), quote=True)}"
+                 data-title="{html_lib.escape(str(week_title), quote=True)}"
+                 data-onenote-link="{html_lib.escape(str(onenote_link), quote=True)}">
+            <h2>{week_title}</h2>
+            {blue_stat_html}
+            """ + REPORT_TOOLBAR_HTML
+            if bilingual_heading:
+                # 変更点(20260928_02): 越智さんの依頼により、JP/ENを段落・箇条書き
+                # 単位で混在させるのをやめ、「日本語ブロック（サマリー＋主な更新
+                # 内容）→英語ブロック（Executive Summary＋Key Updates）」の順に
+                # まとめて表示する構成に変更した。詳細情報・残アクションの形式は
+                # 変更しない（従来どおり日本語のみ）。
+                ja_summary_html = f"<strong>【エグゼクティブ・サマリー】</strong><br>{summary}"
+                html_content += f'<div class="summary-box" data-bidx="0">{ja_summary_html}</div>'
+                if updates:
+                    html_content += "<h3>主な更新内容 (差分)</h3>"
+                    html_content += ReportGenerator._render_updates_block(updates, "ja")
+
+                if summary_en:
+                    en_summary_html = f"<strong>Executive Summary</strong><br>{summary_en}"
+                    html_content += f'<div class="summary-box" data-bidx="1">{en_summary_html}</div>'
+                    if updates:
+                        html_content += "<h3>Key Updates</h3>"
+                        html_content += ReportGenerator._render_updates_block(updates, "en")
+            else:
+                summary_html = f"<strong>{exec_summary_label}</strong><br>{summary}"
+                html_content += f'<div class="summary-box" data-bidx="0">{summary_html}</div>'
+                if updates:
+                    html_content += f"<h3>{updates_heading}</h3>"
+                    html_content += ReportGenerator._render_updates_block(updates, None)
+            if details:
+                html_content += '<details><summary>■ 詳細情報 (クリックして展開)</summary><div class="details-content">'
+                if isinstance(details, dict):
+                    for category, content in details.items():
+                        html_content += f"<h4>■ {category}</h4>"
+                        if isinstance(content, dict):
+                            for key, val in content.items():
+                                html_content += ReportGenerator._render_detail_value(key, val, 5)
+                            html_content += "<br>"
+                        else:
+                            formatted = re.sub(r'(?<!^)\s+(?=\d+\.\s)', '<br><br>', str(content).strip())
+                            html_content += f"<p>{formatted}</p>"
+                else:
+                    html_content += f"<p>{details}</p>"
+                html_content += '</div></details>'
+            actions_html = ""
+            for a in data.get('pending_actions', []):
+                if isinstance(a, dict):
+                    actions_html += f"<tr><td>{a.get('task_name','')}</td><td>{a.get('assignee','')}</td><td>{a.get('deadline','')}</td><td>{a.get('status','')}</td></tr>"
+                else:
+                    actions_html += f"<tr><td colspan='4'>{str(a)}</td></tr>"
+            if actions_html:
+                html_content += f"""<details><summary class="action-item">■ 残アクション (クリックして展開)</summary>
+                <div class="details-content"><table>
+                <tr><th>タスク名</th><th>担当者</th><th>期限</th><th>ステータス</th></tr>
+                {actions_html}</table></div></details>"""
+            if onenote_link != '#':
+                html_content += f'<a href="{onenote_link}" class="link-btn">📌 OneNoteで元のページを開く</a>'
+            html_content += "</div>"
+            html_content += "<hr style='margin-top: 40px; border: 1px dashed #ccc;'>"
+
+        if cost_info:
+            html_content += f"""
+        <div class="cost-footer">
+            <strong>【Gemini API 概算使用料金】</strong><br>
+            モデル: {cost_info.get('model', 'gemini-2.5-flash')} &nbsp;|&nbsp;
+            入力トークン: {cost_info.get('input_tokens', 0):,} &nbsp;|&nbsp;
+            出力トークン: {cost_info.get('output_tokens', 0):,}<br>
+            概算費用: 約 {cost_info.get('cost_usd', 0):.4f} USD
+            （約 {cost_info.get('cost_jpy', 0):.1f} 円）<br>
+            ※ Gemini 2.5 Flash料金基準（$0.30/$2.50 per 1Mトークン）・
+            1USD={cost_info.get('usd_to_jpy', 157)}円換算（2026年5月時点）
+        </div>"""
+
+        html_content += REPORT_EDIT_SCRIPT
+        html_content += "</body></html>"
+        with open(out_path, 'w', encoding='utf-8') as f:
+            f.write(html_content)
+
+
+# ==========================================
+# グローバル状態管理（無修正）
+# ==========================================
+_token       = None
+_auth_flow   = None
+_auth_state  = {"ready": False, "error": None}
+_status      = {"state": "idle", "message": "待機中", "progress": 0, "total": 0, "report_path": ""}
+_status_lock = threading.Lock()
+_extractor   = OneNoteGraphExtractor()
+# --- ブックマーク機能: 新規追加 ---
+_bookmark_lock = threading.Lock()
+# 変更点(20260928_04): CWD相対からTOOL_ROOT基準に変更（app/フォルダ再配置）。
+BOOKMARKS_PATH = os.path.join(TOOL_ROOT, "bookmarks.json")
+
+def update_status(state, message, progress=0, total=0, report_path=""):
+    with _status_lock:
+        _status.update({"state": state, "message": message,
+                        "progress": progress, "total": total, "report_path": report_path})
+
+def _load_bookmarks() -> dict:
+    """bookmarks.jsonを読み込む。破損時は.bakにリネームして空データで再生成。"""
+    if not os.path.exists(BOOKMARKS_PATH):
+        return {"bookmarks": []}
+    try:
+        with open(BOOKMARKS_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        bak = BOOKMARKS_PATH + ".bak"
+        try:
+            os.rename(BOOKMARKS_PATH, bak)
+            print(f"[WARN] bookmarks.json が破損していたため {bak} にリネームしました。空データで再起動します。")
+        except OSError:
+            pass
+        return {"bookmarks": []}
+
+
+def _save_bookmarks(data: dict) -> None:
+    """bookmarks.jsonにアトミック書き込み（tmp→rename）。プロセスKillによる破損を防止。"""
+    tmp = BOOKMARKS_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, BOOKMARKS_PATH)
+
+# ==========================================
+# Flask アプリケーション
+# ==========================================
+app = Flask(__name__)
+
+# ==========================================
+# ブックマーク エンドポイント（新規追加）
+# ==========================================
+@app.route("/api/bookmarks", methods=["GET"])
+def api_bookmarks_get():
+    """全ブックマーク一覧を返す。"""
+    with _bookmark_lock:
+        data = _load_bookmarks()
+    return jsonify(data.get("bookmarks", []))
+
+
+@app.route("/api/bookmarks", methods=["POST"])
+def api_bookmarks_post():
+    """現在の選択状態をブックマークとして保存する。"""
+    body = request.json or {}
+    label         = body.get("label", "").strip()
+    site_id       = body.get("site_id", "")
+    site_name     = body.get("site_name", "")
+    notebook_id   = body.get("notebook_id", "")
+    notebook_name = body.get("notebook_name", "")
+    section_id    = body.get("section_id", "")
+    section_name  = body.get("section_name", "")
+    page_ids      = body.get("page_ids", [])
+    range_type    = body.get("range_type", "latest1")
+    page_count    = body.get("page_count", 4)
+
+    # ラベル自動補完
+    if not label:
+        latest_title = page_ids[-1].get("title", "") if page_ids else ""
+        label = f"{section_name} / {latest_title}" if latest_title else section_name
+
+    with _bookmark_lock:
+        data = _load_bookmarks()
+        bookmarks = data.get("bookmarks", [])
+
+        # 重複ラベルにサフィックス付与
+        existing_labels = {bm["label"] for bm in bookmarks}
+        original_label  = label
+        suffix = 2
+        while label in existing_labels:
+            label = f"{original_label} ({suffix})"
+            suffix += 1
+
+        bm_id = f"bm_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+        bookmarks.append({
+            "id":            bm_id,
+            "label":         label,
+            "site_id":       site_id,
+            "site_name":     site_name,
+            "notebook_id":   notebook_id,
+            "notebook_name": notebook_name,
+            "section_id":    section_id,
+            "section_name":  section_name,
+            "page_ids":      page_ids,
+            "range_type":    range_type,
+            "page_count":    page_count,
+            "created_at":    datetime.now().isoformat()
+        })
+        data["bookmarks"] = bookmarks
+        _save_bookmarks(data)
+    return jsonify({"status": "saved", "id": bm_id, "label": label}), 201
+
+
+@app.route("/api/bookmarks/<bm_id>", methods=["DELETE"])
+def api_bookmarks_delete(bm_id):
+    """指定IDのブックマークを削除する。"""
+    with _bookmark_lock:
+        data = _load_bookmarks()
+        bookmarks = data.get("bookmarks", [])
+        new_list  = [bm for bm in bookmarks if bm["id"] != bm_id]
+        if len(new_list) == len(bookmarks):
+            return jsonify({"error": "指定されたブックマークが見つかりません"}), 404
+        data["bookmarks"] = new_list
+        _save_bookmarks(data)
+    return jsonify({"status": "deleted"})
+
+# ==========================================
+# 変更点(20261005_01): S02 機能追加
+#   機能1: レポートHTML上でExecutive Summaryを手動編集して保存
+#   機能2: 元ページの複製を「次週ページ」として同一セクションに新規作成
+#          （青文字は黒に変換、タイトルの日付は次の月曜に置換）
+#   機能3: 編集後のサマリー＋OneNoteリンクをOutlook下書きとして作成（COM）
+# 以下は副作用のない（Flask/Graphに依存しない）ヘルパー群。単体検証しやすいよう
+# 関数として切り出している。
+# ==========================================
+REPORTS_DIR  = os.path.join(TOOL_ROOT, "reports")
+_report_lock = threading.Lock()
+
+_COLOR_DECL_RE = re.compile(r'(?<![\w-])(color\s*:\s*)([^;]+)', re.I)
+_TITLE_DATE_RE = re.compile(r'(?<!\d)(\d{4})/(\d{1,2})/(\d{1,2})(?!\d)')
+
+
+def next_monday_title(title):
+    """タイトル中の最初の YYYY/MM/DD を「その日付より後の最初の月曜」に置換する。
+    元の日付が月曜なら+7日。月・日の0埋めの有無は元の書式を保つ。
+    日付が見つからない／不正な日付のときは None（呼び出し側で作成を中止する）。"""
+    m = _TITLE_DATE_RE.search(title or "")
+    if not m:
+        return None
+    try:
+        d = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    except ValueError:
+        return None
+    nxt = d + timedelta(days=(7 - d.weekday()) % 7 or 7)
+    mo = f"{nxt.month:02d}" if len(m.group(2)) == 2 else str(nxt.month)
+    dd = f"{nxt.day:02d}" if len(m.group(3)) == 2 else str(nxt.day)
+    return title[:m.start()] + f"{nxt.year}/{mo}/{dd}" + title[m.end():]
+
+
+def convert_blue_to_black(html):
+    """ページHTML内の青文字（既存のis_blue判定と同じ閾値）をすべて黒に変換する。
+    戻り値: (変換後HTML, 変換した指定箇所の数)。
+    要素自身のstyleにcolor指定がある箇所だけを書き換える。子要素はcolorを
+    継承するため、親が黒になれば子も黒になる。"""
+    soup  = BeautifulSoup(html, "html.parser")
+    count = 0
+
+    def _sub(m):
+        nonlocal count
+        rgb = _extractor._parse_css_color(m.group(2))
+        if rgb is not None and _extractor._rgb_is_blue(rgb):
+            count += 1
+            return m.group(1) + "#000000"
+        return m.group(0)
+
+    for el in soup.find_all(True):
+        style = el.get("style")
+        if style:
+            el["style"] = _COLOR_DECL_RE.sub(_sub, style)
+        if el.name == "font" and el.get("color"):
+            rgb = _extractor._parse_css_color(el["color"])
+            if rgb is not None and _extractor._rgb_is_blue(rgb):
+                el["color"] = "#000000"
+                count += 1
+    return str(soup), count
+
+
+def prepare_page_html_for_copy(html, new_title, include_images=False, fetch_image=None):
+    """GETで得たページHTMLを、POST（新規ページ作成）に使える形へ整える。
+    - <title>を new_title に差し替え、元ページ作成日(meta created)は外す
+    - GET専用のid / data-id属性を外す
+    - 画像: include_images=False なら外して枚数を数える。True なら fetch_image(url)
+      で取得し name:imageN 参照に書き換える（取得失敗は外して失敗数に計上）
+    - 添付ファイル・埋め込み（object/iframe）は転送できないため外して数える
+    戻り値: (HTML文字列, [(name, bytes, content_type), ...], stats辞書)"""
+    soup   = BeautifulSoup(html, "html.parser")
+    images = []
+    stats  = {"images_dropped": 0, "images_failed": 0, "objects_dropped": 0}
+
+    if soup.title is not None:
+        soup.title.string = new_title
+    for meta in soup.find_all("meta", attrs={"name": "created"}):
+        meta.decompose()
+    for el in soup.find_all(True):
+        el.attrs.pop("id", None)
+        el.attrs.pop("data-id", None)
+
+    for img in soup.find_all("img"):
+        src = img.get("src", "")
+        if not include_images or fetch_image is None or not src.startswith("http"):
+            img.decompose()
+            stats["images_dropped"] += 1
+            continue
+        try:
+            data, ctype = fetch_image(src)
+        except Exception:
+            img.decompose()
+            stats["images_failed"] += 1
+            continue
+        name = f"image{len(images) + 1}"
+        images.append((name, data, (ctype or "image/png").split(";")[0].strip()))
+        img["src"] = f"name:{name}"
+        for attr in ("data-fullres-src", "data-fullres-src-type", "data-src-type", "data-render-src"):
+            img.attrs.pop(attr, None)
+
+    for obj in soup.find_all(["object", "iframe"]):
+        obj.decompose()
+        stats["objects_dropped"] += 1
+    return str(soup), images, stats
+
+
+_SAFE_TAGS = {"b", "strong", "i", "em", "u", "br", "p", "div", "span", "ul", "ol", "li",
+              "h1", "h2", "h3", "h4", "h5", "h6", "a", "table", "thead", "tbody", "tr",
+              "th", "td", "sub", "sup", "hr"}
+_DROP_TAGS = {"script", "style", "iframe", "object", "embed", "link", "meta", "form",
+              "input", "button", "textarea", "select", "svg", "math", "base"}
+_SAFE_ATTRS = {"href", "lang", "colspan", "rowspan"}
+
+
+def sanitize_summary_html(html):
+    """ブラウザから送られた編集後サマリーHTMLを無害化する（ホワイトリスト方式）。
+    script等は中身ごと削除、未知のタグは中身だけ残す。属性はhref(http/https/mailto/
+    onenote)・lang・colspan・rowspanのみ許可する。"""
+    soup = BeautifulSoup(html or "", "html.parser")
+    for el in soup.find_all(list(_DROP_TAGS)):
+        el.decompose()
+    for el in soup.find_all(True):
+        if el.name not in _SAFE_TAGS:
+            el.unwrap()
+            continue
+        for attr in list(el.attrs):
+            if attr not in _SAFE_ATTRS:
+                del el.attrs[attr]
+        href = el.attrs.get("href")
+        if href is not None and not re.match(r'^(https?:|mailto:|onenote:)', href.strip(), re.I):
+            del el.attrs["href"]
+    return str(soup)
+
+
+def _report_path(filename):
+    """reports/直下の .html だけを許可する（パス区切り・..を含む名前は拒否）。"""
+    if (not filename or filename != os.path.basename(filename)
+            or not filename.endswith(".html")):
+        return None
+    path = os.path.join(REPORTS_DIR, filename)
+    return path if os.path.isfile(path) else None
+
+
+def _write_atomic(path, text):
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(tmp, path)
+
+
+def _find_boxes(soup, pidx):
+    block = soup.find("div", attrs={"class": "page-block", "data-pidx": str(pidx)})
+    if block is None:
+        return None
+    return {b.get("data-bidx"): b for b in block.find_all("div", class_="summary-box")}
+
+
+def _set_box_html(box, html):
+    box.clear()
+    box.append(BeautifulSoup(html, "html.parser"))
+
+
+def save_summary_edit(path, pidx, boxes):
+    """レポートHTMLの指定ページブロックのsummary-boxを差し替えて保存する。
+    初回の編集時のみ、元の内容を <レポート名>.orig.json に退避する（元に戻す用）。
+    戻り値: 保存したbox数（ページ/boxが見つからなければ-1）。"""
+    with _report_lock:
+        with open(path, encoding="utf-8") as f:
+            soup = BeautifulSoup(f.read(), "html.parser")
+        found = _find_boxes(soup, pidx)
+        if found is None:
+            return -1
+        orig_path = path + ".orig.json"
+        orig = {}
+        if os.path.exists(orig_path):
+            with open(orig_path, encoding="utf-8") as f:
+                orig = json.load(f)
+        saved = 0
+        for item in boxes:
+            key = str(item.get("bidx"))
+            box = found.get(key)
+            if box is None:
+                continue
+            orig.setdefault(f"{pidx}:{key}", box.decode_contents())
+            _set_box_html(box, sanitize_summary_html(item.get("html", "")))
+            saved += 1
+        if saved:
+            _write_atomic(orig_path, json.dumps(orig, ensure_ascii=False))
+            _write_atomic(path, str(soup))
+        return saved
+
+
+def restore_summary_edit(path, pidx):
+    """退避してある元のサマリーに戻す。戻り値: [{bidx, html}]（履歴なしなら空）。"""
+    with _report_lock:
+        orig_path = path + ".orig.json"
+        if not os.path.exists(orig_path):
+            return []
+        with open(orig_path, encoding="utf-8") as f:
+            orig = json.load(f)
+        with open(path, encoding="utf-8") as f:
+            soup = BeautifulSoup(f.read(), "html.parser")
+        found = _find_boxes(soup, pidx)
+        restored = []
+        for k in [k for k in orig if k.startswith(f"{pidx}:")]:
+            box = found.get(k.split(":", 1)[1]) if found else None
+            if box is None:
+                continue
+            _set_box_html(box, orig.pop(k))
+            restored.append({"bidx": int(k.split(":", 1)[1]), "html": box.decode_contents()})
+        if restored:
+            _write_atomic(orig_path, json.dumps(orig, ensure_ascii=False))
+            _write_atomic(path, str(soup))
+        return restored
+
+
+class OutlookUnavailable(Exception):
+    pass
+
+
+def build_outlook_html(summary_html, links):
+    """Outlook下書き本文（HTML）を組み立てる。links=[{"label","url"}]。
+    http/https以外のURLは無視する。"""
+    parts = ['<div style="font-family:Meiryo,\'Segoe UI\',sans-serif; font-size:10.5pt;">',
+             sanitize_summary_html(summary_html)]
+    items = []
+    for lk in links or []:
+        url = str(lk.get("url", "")).strip()
+        if not re.match(r'^https?://', url, re.I):
+            continue
+        label = html_lib.escape(str(lk.get("label") or url))
+        items.append(f'<li>{label}: <a href="{html_lib.escape(url, quote=True)}">{html_lib.escape(url)}</a></li>')
+    if items:
+        parts.append("<p>📌 OneNote</p><ul>" + "".join(items) + "</ul>")
+    parts.append("</div>")
+    return "".join(parts)
+
+
+def create_outlook_draft(subject, html_body):
+    """クラシックOutlook（COM）で下書きを作成して表示する。送信はしない。
+    FlaskのリクエストスレッドからCOMを使うため、都度CoInitializeする。"""
+    try:
+        import pythoncom
+        import win32com.client
+    except ImportError:
+        raise OutlookUnavailable(
+            "pywin32が見つかりません。Windows環境で `pip install pywin32` を実行してください。")
+    pythoncom.CoInitialize()
+    try:
+        try:
+            outlook = win32com.client.Dispatch("Outlook.Application")
+            mail = outlook.CreateItem(0)
+        except Exception as e:
+            raise OutlookUnavailable(
+                f"Outlookに接続できません（クラシック版Outlookが必要です）: {e}")
+        mail.Subject  = subject
+        mail.HTMLBody = html_body
+        mail.Save()
+        mail.Display()
+    finally:
+        pythoncom.CoUninitialize()
+
+
+@app.route("/")
+def index():
+    return render_template("index.html")
+
+@app.route("/api/auth/status")
+def auth_status():
+    global _token, _auth_flow, _auth_state
+    if _token:
+        return jsonify({"authenticated": True})
+    cached = _extractor.get_token_from_cache()
+    if cached:
+        _token = cached
+        return jsonify({"authenticated": True})
+    flow = _extractor.initiate_device_flow()
+    _auth_flow  = flow
+    _auth_state = {"ready": False, "error": None}
+    def _auth_worker():
+        global _token
+        try:
+            token  = _extractor.acquire_token_by_flow(flow)
+            _token = token
+            _auth_state["error"] = None
+        except Exception as e:
+            _auth_state["error"] = str(e)
+        finally:
+            _auth_state["ready"] = True
+    threading.Thread(target=_auth_worker, daemon=True).start()
+    return jsonify({"authenticated": False, "message": flow.get("message", "")})
+
+@app.route("/api/auth/poll")
+def auth_poll():
+    if _token:
+        return jsonify({"authenticated": True})
+    if _auth_state.get("ready"):
+        if _auth_state.get("error"):
+            return jsonify({"authenticated": False, "error": _auth_state["error"]})
+        return jsonify({"authenticated": True})
+    return jsonify({"authenticated": False, "pending": True})
+
+@app.route("/api/sites")
+def api_sites():
+    sites = CONFIG.get("sites", [])
+    return jsonify(sites)
+
+@app.route("/api/notebooks")
+def api_notebooks():
+    global _token
+    if not _token:
+        return jsonify({"error": "未認証"}), 401
+    site_id = request.args.get("site_id", "")
+    try:
+        return jsonify(_extractor.get_notebooks(_token, site_id))
+    except TokenExpiredError:
+        _token = None
+        return jsonify({"error": "認証の有効期限が切れました。再認証してください。", "auth_expired": True}), 401
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/sections/<notebook_id>")
+def api_sections(notebook_id):
+    global _token
+    if not _token:
+        return jsonify({"error": "未認証"}), 401
+    site_id = request.args.get("site_id", "")
+    try:
+        return jsonify(_extractor.get_sections(_token, notebook_id, site_id))
+    except TokenExpiredError:
+        _token = None
+        return jsonify({"error": "認証の有効期限が切れました。再認証してください。", "auth_expired": True}), 401
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/pages/<section_id>")
+def api_pages(section_id):
+    global _token
+    if not _token:
+        return jsonify({"error": "未認証"}), 401
+    site_id = request.args.get("site_id", "")
+    try:
+        return jsonify(_extractor.get_pages(_token, section_id, site_id))
+    except TokenExpiredError:
+        _token = None
+        return jsonify({"error": "認証の有効期限が切れました。再認証してください。", "auth_expired": True}), 401
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/generate", methods=["POST"])
+def generate():
+    data          = request.json
+    page_ids      = data.get("page_ids", [])
+    section_name  = data.get("section_name", "General")
+    notebook_name = data.get("notebook_name", "Notebook")
+    site_id       = data.get("site_id", "")
+    reverse_order = data.get("reverse_order", True)
+    language_mode = data.get("language_mode", "translate_ja")
+    section_id    = data.get("section_id", "")
+    if not page_ids:
+        return jsonify({"error": "ページが指定されていません"}), 400
+    threading.Thread(
+        target=_generate_worker,
+        args=(page_ids, section_name, notebook_name, site_id, reverse_order, language_mode, section_id),
+        daemon=True
+    ).start()
+    return jsonify({"status": "started"})
+
+def _blue_lines_from_content(content: str):
+    """extract_with_color()の出力から青文字行を抽出する。
+    比較用に、マーカー・⟦⟧・前後空白を除いた文字列の集合も返す
+    （前週コピー残りの検出に使う）。"""
+    lines = [l for l in content.split("\n") if "【更新ポイント】" in l]
+    normalized = {re.sub(r'[⟦⟧]', '', l.replace("【更新ポイント】", "")).strip() for l in lines}
+    return lines, normalized
+
+
+def _ja_only(value):
+    """dict({"en","ja"}) / list / str のいずれでも日本語側だけを取り出す
+    （bilingual_ja_enモードで次ページへ渡す前回データを日本語のみに絞る）。"""
+    if isinstance(value, list):
+        return [_ja_only(v) for v in value]
+    if isinstance(value, dict):
+        return value.get("ja") or value.get("en") or ""
+    return value
+
+
+def _build_prev_context(analyzed: dict, language_mode: str) -> dict:
+    """次ページのGemini呼び出しに渡す「前回データ」を組み立てる。
+    _blue_statsはGeminiへの入力を変えないよう常に除外する。
+    bilingual_ja_enモードでは、前週の英文がそのまま次の出力に写り込むのを
+    防ぎ、入力トークンも抑えるため、summary_enを除き、updatesは日本語側
+    だけに絞る。"""
+    ctx = {k: v for k, v in analyzed.items() if k not in ("_blue_stats", "_page_meta")}
+    if language_mode == "bilingual_ja_en":
+        ctx.pop("summary_en", None)
+        updates = ctx.get("updates")
+        if isinstance(updates, dict):
+            ctx["updates"] = {k: _ja_only(v) for k, v in updates.items()}
+        elif isinstance(updates, list):
+            ctx["updates"] = _ja_only(updates)
+    return ctx
+
+
+def _generate_worker(page_ids, section_name, notebook_name, site_id, reverse_order=True, language_mode="translate_ja", section_id=""):
+    try:
+        update_status("running", "処理を開始します...", 0, len(page_ids))
+        gen                  = GeminiProcessor()
+        results              = []
+        prev_context         = None
+        prev_blue_normalized = set()
+        total_input_tokens   = 0
+        total_output_tokens  = 0
+
+        for i, page in enumerate(page_ids):
+            update_status("running", f"ページ取得中 ({i+1}/{len(page_ids)})", i, len(page_ids))
+            html    = _extractor.get_page_html(_token, page["id"], site_id)
+            content = _extractor.extract_with_color(html)
+            print("[DEBUG extract]\n", content[:2000])
+            # 変更点(20260928_01): 青文字（【更新ポイント】）の検出行数を
+            # コンソールに出す。0件ならextract_with_color側の検出漏れの
+            # 可能性が高く、レポート側の警告表示とあわせて実機診断に使う。
+            blue_lines, blue_normalized = _blue_lines_from_content(content)
+            same_as_prev = len(blue_normalized & prev_blue_normalized) if blue_normalized else 0
+            print(f"[DEBUG blue] {len(blue_lines)}行検出" +
+                  (f" / 先頭: {blue_lines[:3]}" if blue_lines else "") +
+                  (f" / 前週と同文 {same_as_prev}行" if same_as_prev else ""))
+            update_status("running", f"Gemini解析中 ({i+1}/{len(page_ids)})", i, len(page_ids))
+            analyzed = gen.analyze_html(content, prev_data=prev_context, language_mode=language_mode)
+            if isinstance(analyzed, list):
+                analyzed = analyzed[0] if analyzed else {}
+
+            token_usage          = analyzed.pop("_token_usage", {"input_tokens": 0, "output_tokens": 0})
+            total_input_tokens  += token_usage.get("input_tokens",  0)
+            total_output_tokens += token_usage.get("output_tokens", 0)
+
+            onenote_link = page.get("links", {}).get("oneNoteWebUrl", {}).get("href", "#")
+            analyzed.update({
+                "week_title":   page.get("title", f"Page {i+1}"),
+                "onenote_link": onenote_link,
+                "_blue_stats":  {"blue_lines": len(blue_lines), "same_as_prev": same_as_prev},
+                # 変更点(20261005_01): レポート上の次週ページ作成ボタン用。Geminiへ
+                # 渡す前回データには含めない（_build_prev_contextで除外）。
+                "_page_meta":   {"page_id": page["id"], "section_id": section_id, "site_id": site_id},
+            })
+            results.append(analyzed)
+            prev_context         = _build_prev_context(analyzed, language_mode)
+            prev_blue_normalized = blue_normalized
+
+        pricing  = CONFIG.get("gemini_pricing", {
+            "input_per_million":  0.30,
+            "output_per_million": 2.50,
+            "usd_to_jpy":         157
+        })
+        cost_usd  = (total_input_tokens  / 1_000_000 * pricing["input_per_million"] +
+                     total_output_tokens / 1_000_000 * pricing["output_per_million"])
+        cost_jpy  = cost_usd * pricing["usd_to_jpy"]
+        cost_info = {
+            "model":         CONFIG.get("GEMINI_MODEL", "gemini-2.5-flash"),
+            "input_tokens":  total_input_tokens,
+            "output_tokens": total_output_tokens,
+            "cost_usd":      cost_usd,
+            "cost_jpy":      cost_jpy,
+            "usd_to_jpy":    pricing["usd_to_jpy"]
+        }
+
+        update_status("running", "HTMLレポート生成中...", len(page_ids), len(page_ids))
+        rep_dir = os.path.join(TOOL_ROOT, "reports")
+        os.makedirs(rep_dir, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        def _safe(s):
+            return re.sub(r'[\\/:*?"<>|\s]', '_', str(s))
+
+        latest_title = page_ids[-1].get("title", "unknown") if page_ids else "unknown"
+        fname    = f"ON_summary_{_safe(notebook_name)}_{_safe(section_name)}_{_safe(latest_title)}_{ts}.html"
+        out_path = os.path.join(rep_dir, fname)
+
+        # 変更点(20260729_01): Gemini解析の処理順（差分抽出の基準）には一切手を
+        # 加えず、HTMLへ書き出す直前の表示順のみをチェックボックスの指定に従って
+        # 反転する。reverse_order=True（既定）で新→古に並べ替える。
+        html_results = list(reversed(results)) if reverse_order else results
+
+        ReportGenerator.generate_html(html_results, out_path, section_name, cost_info=cost_info, language_mode=language_mode)
+        update_status("done", "レポート生成完了！", len(page_ids), len(page_ids), out_path)
+    except Exception as e:
+        print(f"[ERROR] {traceback.format_exc()}")
+        update_status("error", f"エラー: {str(e)}")
+
+@app.route("/status")
+def status():
+    with _status_lock:
+        return jsonify(dict(_status))
+
+@app.route("/reports")
+def reports_list():
+    rep_dir = os.path.join(TOOL_ROOT, "reports")
+    os.makedirs(rep_dir, exist_ok=True)
+    files = sorted([f for f in os.listdir(rep_dir) if f.endswith(".html")], reverse=True)
+    return jsonify(files)
+
+@app.route("/reports/open/<filename>")
+def open_report(filename):
+    # 変更点(20261005_01): レポートをfile://ではなくFlask経由（http）で開く。
+    # file://のページからlocalhostのAPIを呼ぶとCORSで弾かれ、編集の保存・
+    # 次週ページ作成・Outlook下書きが使えないため。
+    if _report_path(filename):
+        webbrowser.open(f"http://localhost:{SERVER_PORT}/reports/view/{quote(filename)}")
+        return jsonify({"status": "opened"})
+    return jsonify({"error": "ファイルが見つかりません"}), 404
+
+@app.route("/reports/view/<filename>")
+def view_report(filename):
+    if not _report_path(filename):
+        return jsonify({"error": "ファイルが見つかりません"}), 404
+    return send_from_directory(REPORTS_DIR, filename)
+
+@app.route("/api/features")
+def api_features():
+    return jsonify({"onenote_write": ONENOTE_WRITE_ENABLED, "outlook": os.name == "nt"})
+
+@app.route("/api/report/save_summary", methods=["POST"])
+def api_save_summary():
+    d    = request.json or {}
+    path = _report_path(d.get("filename", ""))
+    if not path:
+        return jsonify({"error": "レポートファイルが見つかりません"}), 404
+    try:
+        saved = save_summary_edit(path, d.get("pidx"), d.get("boxes", []))
+    except Exception as e:
+        return jsonify({"error": f"保存に失敗しました: {e}"}), 500
+    if saved < 0:
+        return jsonify({"error": "対象ページがレポート内に見つかりません（旧形式のレポートは再生成してください）"}), 400
+    if saved == 0:
+        return jsonify({"error": "保存対象のサマリーがありません"}), 400
+    return jsonify({"status": "saved", "saved": saved})
+
+@app.route("/api/report/restore_summary", methods=["POST"])
+def api_restore_summary():
+    d    = request.json or {}
+    path = _report_path(d.get("filename", ""))
+    if not path:
+        return jsonify({"error": "レポートファイルが見つかりません"}), 404
+    try:
+        restored = restore_summary_edit(path, d.get("pidx"))
+    except Exception as e:
+        return jsonify({"error": f"元に戻せませんでした: {e}"}), 500
+    if not restored:
+        return jsonify({"error": "元に戻す編集履歴がありません"}), 404
+    return jsonify({"status": "restored", "boxes": restored})
+
+@app.route("/api/page/copy_next_week", methods=["POST"])
+def api_copy_next_week():
+    global _token
+    if not ONENOTE_WRITE_ENABLED:
+        return jsonify({"error": "OneNote書込権限が未申請のため無効です（config.jsonのenable_onenote_writeで有効化）",
+                        "disabled": True}), 403
+    if not _token:
+        return jsonify({"error": "未認証"}), 401
+    d          = request.json or {}
+    page_id    = d.get("page_id", "")
+    section_id = d.get("section_id", "")
+    site_id    = d.get("site_id", "")
+    if not page_id or not section_id:
+        return jsonify({"error": "ページIDまたはセクションIDがありません（旧形式のレポートは再生成してください）"}), 400
+    include_images = bool(d.get("include_images", False))
+    try:
+        html        = _extractor.get_page_html(_token, page_id, site_id)
+        title_tag   = BeautifulSoup(html, "html.parser").title
+        title       = title_tag.get_text().strip() if title_tag else ""
+        new_title   = next_monday_title(title)
+        if not new_title:
+            return jsonify({"error": f"タイトルに日付(YYYY/MM/DD)が見つからないため、作成を中止しました: {title}"}), 400
+        html, blue_count = convert_blue_to_black(html)
+        out_html, images, stats = prepare_page_html_for_copy(
+            html, new_title, include_images,
+            fetch_image=lambda u: _extractor.get_image_bytes(_token, u))
+        created = _extractor.create_page(_token, section_id, site_id, out_html, images)
+        link    = created.get("links", {}).get("oneNoteWebUrl", {}).get("href", "")
+        return jsonify({"status": "created", "title": new_title, "link": link,
+                        "blue_converted": blue_count, "images_sent": len(images), **stats})
+    except TokenExpiredError:
+        _token = None
+        return jsonify({"error": "認証の有効期限が切れました。再認証してください。", "auth_expired": True}), 401
+    except PermissionError as e:
+        return jsonify({"error": str(e)}), 403
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/outlook/draft", methods=["POST"])
+def api_outlook_draft():
+    d = request.json or {}
+    if not str(d.get("summary_html", "")).strip():
+        return jsonify({"error": "サマリーが空です"}), 400
+    try:
+        create_outlook_draft("", build_outlook_html(d.get("summary_html", ""), d.get("links", [])))
+    except OutlookUnavailable as e:
+        return jsonify({"error": str(e)}), 500
+    except Exception as e:
+        return jsonify({"error": f"Outlook下書きの作成に失敗しました: {e}"}), 500
+    return jsonify({"status": "created"})
+
+@app.route("/reports/cleanup", methods=["POST"])
+def cleanup_reports():
+    rep_dir = os.path.join(TOOL_ROOT, "reports")
+    cutoff  = time.time() - (7 * 24 * 60 * 60)
+    deleted = 0
+    for f in os.listdir(rep_dir):
+        path = os.path.join(rep_dir, f)
+        if f.endswith(".html") and os.path.getmtime(path) < cutoff:
+            os.remove(path)
+            if os.path.exists(path + ".orig.json"):
+                os.remove(path + ".orig.json")
+            deleted += 1
+    return jsonify({"deleted": deleted})
+
+# ==========================================
+# 起動前のポート解放（越智さんの依頼、v20260928_01追記）
+#
+# 越智さんは本ツールを頻繁に更新し、そのたびにランチャーから起動し直す運用の
+# ため、直前に起動したFlaskプロセスが終了しないまま残っていると、新しい
+# プロセスが同じポートを使えず、ブラウザが古いプロセスの画面につながった
+# まま（＝最新のコードを更新したつもりが反映されない）になる不具合が実機で
+# 発生した。tool_launcher自身の「応答なしプロセスの自動終了」と同じ考え方
+# （①対象がpython.exe/pythonw.exeであることを確認 → ②終了する。判定に迷えば
+# 終了しない）を、このツール自身の起動処理にも適用する。
+# 追加ライブラリ（psutil等）は使わず、Windows標準コマンド（netstat/tasklist/
+# taskkill）のみで行う。Windows以外では何もしない。
+# ==========================================
+def _find_pids_listening_on(port: int):
+    """netstatの出力から、指定ポートでLISTENING状態のPID一覧を返す。"""
+    try:
+        result = subprocess.run(
+            ["netstat", "-ano"],
+            capture_output=True, text=True, timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+    except Exception as e:
+        print(f"⚠️  ポート{port}の使用状況を確認できませんでした（無視して起動を続けます）: {e}")
+        return []
+
+    pids = []
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) < 5 or parts[0].upper() != "TCP":
+            continue
+        local_addr, state, pid_str = parts[1], parts[3], parts[-1]
+        if not local_addr.endswith(f":{port}") or state.upper() != "LISTENING":
+            continue
+        if pid_str.isdigit():
+            pids.append(int(pid_str))
+    return pids
+
+
+def _process_image_name(pid: int) -> str:
+    """指定PIDの実行ファイル名（例: python.exe）を返す。取得できなければ空文字。"""
+    try:
+        result = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+    except Exception:
+        return ""
+    line = result.stdout.strip().splitlines()[0] if result.stdout.strip() else ""
+    if not line or "," not in line:
+        return ""
+    return line.split(",")[0].strip('"')
+
+
+def _free_port_if_stale(port: int) -> None:
+    """指定ポートを使っている既存プロセスがあれば、安全確認のうえ終了する。"""
+    if sys.platform != "win32":
+        return
+    my_pid = os.getpid()
+    for pid in _find_pids_listening_on(port):
+        if pid == my_pid:
+            continue
+        image_name = _process_image_name(pid)
+        if image_name.lower() not in ("python.exe", "pythonw.exe"):
+            print(f"⚠️  ポート{port}を使用中のプロセス（PID {pid}, "
+                  f"{image_name or '不明'}）はpython.exe/pythonw.exeではないため、"
+                  "終了せずに起動を試みます。")
+            continue
+        print(f"⚠️  既存のプロセス（PID {pid}, {image_name}）がポート{port}を"
+              "使用中のため、終了して起動し直します。")
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/PID", str(pid)],
+                capture_output=True, text=True, timeout=10,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            time.sleep(1)
+        except Exception as e:
+            print(f"⚠️  PID {pid} の終了に失敗しました（無視して起動を続けます）: {e}")
+
+
+if __name__ == "__main__":
+    print("OneNote Report Generator 20261005_01 を起動します...")
+    _free_port_if_stale(5000)
+    print("ブラウザで http://localhost:5000 を開いてください")
+    webbrowser.open("http://localhost:5000")
+    app.run(debug=False, threaded=True, port=5000)

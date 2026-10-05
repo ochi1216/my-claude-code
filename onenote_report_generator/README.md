@@ -7,7 +7,19 @@ Graph API 直接取得方式へ完全移行済み（`CHANGELOG.md` 参照）。
 
 ## 現在のVERSION
 
-`20260928_01`（Python本体／templates/index.html 共通）
+`20261005_01`（Python本体／templates/index.html 共通）
+
+- **S02 追加**：生成したレポート（Flask経由の `http://localhost:5000/reports/view/…` で
+  開く）の各ページに、①Executive Summaryの手動編集・保存・元に戻す、
+  ②「次週ページを作成」（同一セクションへ複製・青文字→黒・タイトル日付を次の月曜に）、
+  ③「Outlook下書き」（クラシックOutlook／COM。サマリー＋OneNoteリンク。送信はしない）を追加
+- ②はOneNote書込権限が必要なため **既定で無効**。権限が付いたら `config.json` に
+  `"enable_onenote_write": true`（必要なら `"onenote_write_scope": "Notes.ReadWrite.All"`）
+  を追加する（`app/config.example.json` 参照）
+- ③は `pip install pywin32`（`requirements.txt` に追加済み）が必要
+- 旧VERSIONで作ったレポートは編集ボタンが出ない／ページIDが無いため、再生成が必要
+
+以下は直前のVERSION `20260928_01` の内容：
 
 - 青文字（今週の更新）の抽出処理を全面刷新し、OneNoteで最も一般的な書き方
   （行まるごと青）・16進数の色指定・表セル内の青でもマーカーが付くようにした
@@ -122,7 +134,7 @@ AI要約を実行した時点で、探索したパスと元のエラーを含む
 3. スクリプトを実行する。
 
    ```
-   python app\onenote_report_generator_20260928_01.py
+   python app\onenote_report_generator_20261005_01.py
    ```
 
    Windowsでは、代わりに `start_onenote_report_generator.bat`（`onenote_report_generator/`

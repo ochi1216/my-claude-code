@@ -49,7 +49,7 @@
 <body>
 <div class="container">
     <h1>📓 OneNote Report Generator</h1>
-    <small>VERSION 20260928_01</small>
+    <small>VERSION 20261005_01</small>
 
     <div class="auth-box" id="authBox">
         <strong>🔐 認証状態：</strong><span id="authStatus">確認中...</span>
@@ -330,6 +330,7 @@ async function startGenerate() {
             section_name:  secName,
             notebook_name: nbName,
             site_id:       currentSiteId,
+            section_id:    secSel.value,  // 20261005_01: 次週ページ作成ボタン用
             reverse_order: document.getElementById('reverseOrderCheckbox').checked,
             language_mode: document.getElementById('languageMode').value
         })
