@@ -33,8 +33,12 @@ kindをbatに変更する」）のとおり更新した。
 - `note`は役目を終えたため削除
 
 `start_onenote_report_generator.bat`は`app/`配下の最新版探索・ログ出力までを含めて
-既に整備・単体テスト済み（OneNote側CHANGELOG参照）であり、今回新規に作成した
-ファイルは無い。
+OneNote側で整備済みのバッチだが、**この時点で私（Launcher Tool S01）は、会社PCの
+実機で動作するかを確認せずにtools.jsonの向き先をこのバッチへ切り替えてしまった。**
+その結果、実機でバッチ自体の不具合（日本語＋`chcp 65001`によるcmd.exeの構文崩れ、
+`wmic`廃止によるログファイル名の不正）が表面化した。バッチ側の修正内容は
+`onenote_report_generator/CHANGELOG.md`（追記7）を参照。今回新規に作成した
+ファイルは無い（バッチは既存ファイルの修正）。
 
 ### 追加変更：journalのタイトルを「Journal Daily」に変更
 

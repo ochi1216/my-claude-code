@@ -1,5 +1,41 @@
 ## VERSION 20260928_01
 
+### 変更（追記7）: 起動バッチ`start_onenote_report_generator.bat`の不具合修正（2026-10-05）
+
+ツールランチャーのOneNote要約ツールを、起動バッチ経由（`tool_launcher/tools.json`を
+`kind: "bat"`に切替）で起動したところ、会社PCで次のエラーが出て起動できなかった
+（越智さんの実機報告）。
+
+- `'son' is not recognized...` / `'werShell' is not recognized...` /
+  `'��に変更した。' is not recognized...`（バッチ内の日本語コメントの断片が
+  コマンドとして実行されている）
+- `'wmic' is not recognized...`、続いてログファイル名が
+  `auto_onenote_log_~0,8datetime:~8,6.log`という不正な名前になり、
+  Pythonの出力リダイレクトに失敗して終了コード1で終了
+
+原因は独立した2つ：
+
+1. **日本語を含むUTF-8のバッチ＋`chcp 65001`**：cmd.exeはバッチファイル自身を
+   `chcp`ではなくシステムのコードページ（日本語環境ではCP932）の流儀で読むため、
+   UTF-8の日本語バイトを含む行が崩れ、`rem`の途中が別コマンドとして実行された
+   （`PowerShell`が`werShell`に化ける等）。リポジトリの`tool_launcher/run_tool_launcher.bat`
+   が「純ASCIIのみ」としているのと同じ理由。
+2. **`wmic`の廃止**：最近のWindows 11では`wmic`が標準で入っておらず、日時取得が
+   空になり、ログファイル名が不正になった（これが実際の失敗の直接原因）。
+
+修正（`start_onenote_report_generator.bat`のみ。実行ロジックは変更なし）：
+
+- ファイル全体を**純ASCII**にした（日本語の`rem`/`echo`は英語に置換。改行は元の
+  CRLFのまま）。あわせて不要になった`chcp 65001`を削除した（出力はログファイルへ
+  UTF-8でリダイレクトされ、`PYTHONIOENCODING=utf-8`は維持）。
+- 日時取得を`wmic`から`powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"`
+  に変更（ロケール非依存）。取得できない場合でもログパスが不正にならないよう、
+  `unknown`にフォールバックする。
+- 実行系の行の差分は上記2点（`chcp`削除・日時取得）のみ。
+
+動作確認：純ASCII・CRLF維持・実行系の行の差分を機械的に確認。**cmd.exeでの実行は
+開発環境では不可のため、会社PCでの実機確認が必要。**
+
 ### 変更（追記6）: フォルダ構成の整理（コードを`app/`フォルダへ移動）
 
 越智さんより「バージョンアップしたコードが`onenote_report_generator/`直下に
