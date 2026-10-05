@@ -3,6 +3,47 @@
 このフォルダ内の変更履歴。バージョンアップ時は旧ファイルを残したまま新ファイルを追加し、
 ここに変更点を追記する。
 
+## [20261005_01] - 2026-10-05
+
+**更新ファイル:** `tools.json`, `CHANGELOG.md`
+
+越智さんから「OneNote要約ツールをクリックすると『対象の.pyファイルが1件も見つかりません』
+というエラーが出る」との報告を受けて調査・修正した。
+
+### 原因
+
+`tools.json`の`onenote_report_generator`エントリが、2026-09-28の別セッション
+（OneNoteオーガナイザー開発、commit 19d19c1）によるフォルダ構成変更に追従していな
+かった。同コミットで `onenote_report_generator/` 直下に平置きされていた全バージョンの
+`.py`は `onenote_report_generator/app/` 配下へ移動され、起動用バッチ
+`start_onenote_report_generator.bat`（`app/`配下の最新版を正しく検索・実行する）が
+新設されていたが、`tool_launcher/tools.json`側は更新されないまま、`kind: "py"`・
+`path: "onenote_report_generator/onenote_report_generator_"`という旧パスを参照し
+続けていた。ツールランチャーはこの`path`から直接 `<path>*.py` を検索するため、
+移動後の`app/`配下を探せず「1件も見つかりません」というエラーになっていた。
+
+### 修正内容
+
+`tools.json`の`onenote_report_generator`エントリを、既存の`note`（「整備できたら
+kindをbatに変更する」）のとおり更新した。
+
+- `kind`: `"py"` → `"bat"`
+- `path`: `"onenote_report_generator/onenote_report_generator_"` →
+  `"onenote_report_generator/start_onenote_report_generator.bat"`
+- `note`は役目を終えたため削除
+
+`start_onenote_report_generator.bat`は`app/`配下の最新版探索・ログ出力までを含めて
+既に整備・単体テスト済み（OneNote側CHANGELOG参照）であり、今回新規に作成した
+ファイルは無い。
+
+### 動作確認
+
+- `tools.json`のJSON構文検証：合格（27件のまま）
+- パス解決ロジック（`tool_target_path`相当）をLinux環境で再現し、
+  `onenote_report_generator/start_onenote_report_generator.bat`に正しく解決され、
+  実ファイルが存在することを確認。
+- GUI上での実際の起動確認は、越智さんに実機でお願いする。
+
 ## [20260928_02] - 2026-09-28
 
 **追加ファイル:** `tool_launcher_20260928_02.py`

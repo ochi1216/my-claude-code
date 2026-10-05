@@ -74,11 +74,10 @@
       "label": "OneNote要約ツール",
       "category": "mail_doc",
       "root": "repo",
-      "kind": "py",
-      "path": "onenote_report_generator/onenote_report_generator_",
+      "kind": "bat",
+      "path": "onenote_report_generator/start_onenote_report_generator.bat",
       "gemini": "proxy",
-      "status": "active",
-      "note": "S03でrun_onenote_report_generator.batを整備したらkindをbatに変更する"
+      "status": "active"
     },
     {
       "id": "meeting_transcript_summarizer",
