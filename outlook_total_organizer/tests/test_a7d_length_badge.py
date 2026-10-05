@@ -19,6 +19,8 @@
 変異テスト: 実装のコピーに誤りを1つ入れ、OTO_TARGET でその版を指してこのファイルだけを走らせる。
     OTO_TARGET=/path/to/壊した版.py xvfb-run -a /usr/bin/python3.12 tests/run_tests.py a7d_length_badge
 (範囲ガードの章は常に tool フォルダの _10 / _11 を比べるので、変異版では変わらない)
+(A10 = _12 で俯瞰2画面の text は HTML エスケープされるようになった。「A7d は text の埋め込み方を変えていない」ことは、
+ _10 / _11 をファイル名で指定して確かめる。対象のリビジョンでは、エスケープ前の文で数えることだけを確かめる)
 """
 import ast
 import contextlib
@@ -425,15 +427,42 @@ def one_with(test, segments, tag):
     return found[0]
 
 
+@functools.lru_cache(maxsize=None)
+def load_revision(filename):
+    """tool フォルダのリビジョンをファイル名で指定して、別名のモジュールとして読み込む (無ければ None)。"""
+    path = os.path.join(_loader.TOOL_DIR, filename)
+    if not os.path.isfile(path):
+        return None
+    oto()                                                  # 先に最小スタブを入れておく
+    name = "oto_rev_" + os.path.splitext(filename)[0].replace("outlook_total_organizer_", "")
+    if name in sys.modules:
+        return sys.modules[name]
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    try:
+        with tempdir_cwd(), contextlib.redirect_stdout(io.StringIO()):
+            spec.loader.exec_module(mod)
+    except BaseException:
+        sys.modules.pop(name, None)
+        raise
+    return mod
+
+
+BADGE_HTML_RE = re.compile(r' <span class="len-over-badge"[^>]*>' + BADGE_LABEL + '</span>')
+
+
 class TestOverviewReports(ReportCase):
     """プロジェクト俯瞰・スタッフ俯瞰: Stage2 の text が101字以上ならその li にバッジ (根拠リンクの前)。100字までは無し。"""
 
     KINDS = ("project", "staff")
 
-    def render(self, kind, data, name="Caracal", knowledge=None, orig=None, reformat=False):
+    def render(self, kind, data, name="Caracal", knowledge=None, orig=None, reformat=False, mod=None):
         sec = "projects" if kind == "project" else "staffs"
         knowledge = knowledge if knowledge is not None else {sec: {name: {}}}
-        fn = self.gen.generate_project_report if kind == "project" else self.gen.generate_staff_report
+        gen = self.gen if mod is None else mod.HTMLReportGenerator(os.path.join(self.tmp, "out"), 8765)
+        fn = gen.generate_project_report if kind == "project" else gen.generate_staff_report
         path = fn(name, {name: data}, orig or {}, knowledge, "2026/09/27 - 2026/10/04", "重要度順", 1000, 500,
                   "adopted", reformat)
         return self.read(path, kind)
@@ -459,15 +488,31 @@ class TestOverviewReports(ReportCase):
                     self.assertEqual(html.count(BADGE_OPEN), 3, "バッジの数が超過した項目の数 (3) と違う")
 
     def test_text_is_still_embedded_without_escaping_and_counted_raw(self):
-        """既存の挙動 (Stage2 の text は HTML エスケープせずに埋め込む) は変えない。数えるのも元の文字列。"""
+        """A7d (_10 → _11) は Stage2 の text の埋め込み方を変えていない: _11 (ファイル名で指定) は HTML エスケープせずに埋め込み、
+        その直後にバッジ。_10 の li は、_11 の li からバッジを除いたものと同じ。数えるのも元の文字列。
+        (A10 = _12 から text は HTML エスケープして埋め込む。対象のリビジョンでは、埋め込まれた形 (そのまま/エスケープ後) を
+        問わず、& や < を含む100字には付かず、101字には文の直後にバッジが付くことを確かめる)"""
         t100 = text_of(100, "〔R&D <b>x</b>〕")
         t101 = text_of(101, "〔Q&A <i>y</i>〕")
         data = overview_summary(manager=[s2_item(t100, ["T1"]), s2_item(t101, ["T1"])])
         for kind in self.KINDS:
-            with self.subTest(kind=kind):
-                lis = summary_lis(self.render(kind, data))
-                self.assert_no_badge_after(one_with(self, lis, "〔R&D <b>x</b>〕"), t100)
-                self.assert_badge_follows(one_with(self, lis, "〔Q&A <i>y</i>〕"), t101, 101, ONE_LINE, True)
+            with self.subTest(kind=kind, rev="対象"):
+                lis = summary_lis(self.render(kind, copy.deepcopy(data)))
+                f100, f101 = [html_mod.escape(t) if any(html_mod.escape(t) in s for s in lis) else t for t in (t100, t101)]
+                self.assert_no_badge_after(one_with(self, lis, f100), f100)
+                self.assert_badge_follows(one_with(self, lis, f101), f101, 101, ONE_LINE, True)
+        old_mod, new_mod = load_revision(OLD_REV), load_revision(NEW_REV)
+        if old_mod is None or new_mod is None:
+            self.skipTest(f"A7d のリビジョン対 ({OLD_REV} / {NEW_REV}) が無い (対象のリビジョンでの数え方は確認済み)")
+        for kind in self.KINDS:
+            with self.subTest(kind=kind, rev=NEW_REV):
+                lis = summary_lis(self.render(kind, copy.deepcopy(data), mod=new_mod))
+                seg100, seg101 = one_with(self, lis, "〔R&D <b>x</b>〕"), one_with(self, lis, "〔Q&A <i>y</i>〕")
+                self.assert_no_badge_after(seg100, t100)
+                self.assert_badge_follows(seg101, t101, 101, ONE_LINE, True)
+            with self.subTest(kind=kind, rev=OLD_REV):
+                old_lis = summary_lis(self.render(kind, copy.deepcopy(data), mod=old_mod))
+                self.assertEqual(old_lis, [seg100, BADGE_HTML_RE.sub("", seg101)], "_10 と _11 で text の埋め込み方が違う")
 
     def test_other_long_texts_get_no_badge(self):
         """題名 (topic)・Stage1 の要約・アクション・経緯・回答メモ・AI質問は対象外 (長くてもバッジなし)。"""
