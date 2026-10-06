@@ -1,0 +1,176 @@
+{
+  "_comment": "このファイルをコピーして deploy_config.json を作り、実値を入れる。deploy_config.json は .gitignore で除外されるためコミットされない(社内のサイトURL・リストGUID・メールアドレスを含むため)。<未実測:候補 ...> は、docs/MEASUREMENT_GUIDE.md の手順で実測し、候補どおりならその値を、違えば実測値を書く。<...> が1つでも残っていると、生成は止まる(推測値で作ると、インポートは通っても実行時に初めて失敗するため)。",
+
+  "dryRun": true,
+  "_dryRun_comment": "true: 添付ファイルを差し替えず、作業ライブラリ上のコピーにだけ押印して通知する(既定)。false: 押印済みファイルで添付を差し替える。false にするのは、輸出管理規程上の確認が済み、dryRun で位置とサイズを目視確認できてから。切替は、この値を変えて生成し直すだけ。",
+
+  "sharePointSiteUrl": "https://<tenant>.sharepoint.com/sites/<SiteName>",
+  "notifyRecipient": "<通知を受け取るメールアドレス(越智さん)>",
+
+  "mail": {
+    "senderAddress": "flow-noreply@microsoft.com",
+    "subjectPrefix": "[Approval request] 該非判定",
+    "folderPath": "Inbox"
+  },
+
+  "requestList": {
+    "listId": "<Parameter_sheet_request のリストGUID>",
+    "urlPath": "/Lists/Parameter_sheet_request",
+    "linkMarker": "<未実測:候補 /Lists/Parameter_sheet_request/DispForm.aspx?ID=>",
+    "_linkMarker_comment": "メール本文のリンクのうち、項目IDの直前までの部分。メール本文のHTMLで確認する(E3)。URLエンコードされている場合は、その形で書く。"
+  },
+
+  "attachment": {
+    "certificateSuffix": "_該非判定証明書.xlsx"
+  },
+
+  "libraries": {
+    "workFolderPath": "<作業用ライブラリのフォルダパス(例: /sites/JapanDesign/ECS_Work)>"
+  },
+
+  "stampImagePath": "<印影画像のサーバー相対パス(例: /sites/JapanDesign/ECS_Stamp/Ochi_stamp_印鑑_70.png)>",
+
+  "script": {
+    "sheetName": "該非判定証明書",
+    "anchorCell": "H15",
+    "approverName": "越智泰造",
+    "shapeName": "ECS_ApproverStamp",
+    "targetWidthPt": 0,
+    "targetHeightPt": 0,
+    "offsetXPt": 0,
+    "offsetYPt": 0,
+    "_comment": "targetWidthPt / targetHeightPt が 0 なら画像の自然サイズ(手作業の「セルの上に配置」と同じ)。手作業の結果とサイズが違う場合は、E4 で測った値を入れる。"
+  },
+
+  "logList": {
+    "_comment": "処理の記録(二重処理の防止・失敗の記録)に使うリスト。既存の EQ_Received_Items(実測済みの列)を流用する場合の値を例に入れている。専用リストを作る場合は、その実測値へ差し替える。Title は 'ECS-<リクエストID>' の形で書き込む。",
+    "listId": "<記録用リストのGUID>",
+    "columns": {
+      "Title": "Title",
+      "ProcessingStatus": "field_4",
+      "ErrorCode": "field_5",
+      "ErrorDetail": "field_6"
+    }
+  },
+
+  "connectionReferences": {
+    "outlook": "<njp_sharedoffice365_xxxxx>",
+    "sharepoint": "<njp_sharedsharepointonline_xxxxx>",
+    "excel": "<njp_sharedexcelonlinebusiness_xxxxx>",
+    "teams": "<njp_sharedteams_xxxxx>"
+  },
+
+  "workflowIds": {
+    "ECS01_Stamp_On_Approval_Mail_DEV": "33333333-4444-5555-6666-777777777777"
+  },
+
+  "solution": {
+    "uniqueName": "ExportControlStamperSolution",
+    "publisherUniqueName": "NexperiaJP",
+    "publisherPrefix": "njp"
+  },
+
+  "measured": {
+    "_comment": "コネクタの operationId・パラメータ名・戻り値の形。公開情報からは確定できないため、使い捨てフローを1つ作ってエクスポートし、実測する(docs/MEASUREMENT_GUIDE.md)。",
+
+    "authentication": "<未実測:候補 @parameters('$authentication')>",
+
+    "mailTrigger": {
+      "operationId": "<未実測:候補 OnNewEmailV3>",
+      "type": "<未実測:候補 OpenApiConnectionNotification>",
+      "params": {
+        "folderPath": "<未実測:候補 folderPath>",
+        "from": "<未実測:候補 from>",
+        "subjectFilter": "<未実測:候補 subjectFilter>"
+      }
+    },
+    "expressions": {
+      "triggerSubject": "<未実測:候補 @triggerOutputs()?['body/subject']>",
+      "triggerFrom": "<未実測:候補 @triggerOutputs()?['body/from']>",
+      "triggerBody": "<未実測:候補 @triggerOutputs()?['body/body']>",
+      "attachmentList": "<未実測:候補 @body('GET_Attachments')>",
+      "attachmentContent": "<未実測:候補 @body('GET_Attachment_Content')>",
+      "createdFileId": "<未実測:候補 @body('CREATE_Work_File')?['Id']>",
+      "stampBase64": "<未実測:候補 @body('GET_Stamp_Image')?['$content']>",
+      "scriptResult": "<未実測:候補 @body('RUN_Script')?['result']>",
+      "stampedContent": "<未実測:候補 @body('GET_Stamped_Content')>"
+    },
+    "attachmentFields": {
+      "id": "<未実測:候補 Id>",
+      "name": "<未実測:候補 DisplayName>"
+    },
+
+    "getAttachments": {
+      "operationId": "<未実測:候補 GetAttachments>",
+      "params": { "dataset": "<未実測:候補 dataset>", "table": "<未実測:候補 table>", "itemId": "<未実測:候補 itemId>" }
+    },
+    "getAttachmentContent": {
+      "operationId": "<未実測:候補 GetAttachmentContent>",
+      "params": {
+        "dataset": "<未実測:候補 dataset>",
+        "table": "<未実測:候補 table>",
+        "itemId": "<未実測:候補 itemId>",
+        "attachmentId": "<未実測:候補 attachmentId>"
+      }
+    },
+    "createFile": {
+      "operationId": "<未実測:候補 CreateFile>",
+      "params": {
+        "dataset": "<未実測:候補 dataset>",
+        "folderPath": "<未実測:候補 folderPath>",
+        "name": "<未実測:候補 name>",
+        "body": "<未実測:候補 body>"
+      }
+    },
+    "getFileContentByPath": {
+      "operationId": "<未実測:候補 GetFileContentByPath>",
+      "params": { "dataset": "<未実測:候補 dataset>", "path": "<未実測:候補 path>" }
+    },
+    "runScript": {
+      "operationId": "<未実測:候補 RunScriptProd>",
+      "source": "<未実測:Excel Online コネクタの「場所」に入れる値>",
+      "drive": "<未実測:Excel Online コネクタの「ドキュメントライブラリ」に入れる値>",
+      "scriptReference": "<未実測:実行するスクリプトを指す値>",
+      "params": {
+        "source": "<未実測:候補 source>",
+        "drive": "<未実測:候補 drive>",
+        "file": "<未実測:候補 file>",
+        "script": "<未実測:候補 script>",
+        "stampBase64": "<未実測:候補 scriptParameters/stampBase64>",
+        "sheetName": "<未実測:候補 scriptParameters/sheetName>",
+        "anchorCell": "<未実測:候補 scriptParameters/anchorCell>",
+        "approverName": "<未実測:候補 scriptParameters/approverName>",
+        "shapeName": "<未実測:候補 scriptParameters/shapeName>",
+        "targetWidthPt": "<未実測:候補 scriptParameters/targetWidthPt>",
+        "targetHeightPt": "<未実測:候補 scriptParameters/targetHeightPt>",
+        "offsetXPt": "<未実測:候補 scriptParameters/offsetXPt>",
+        "offsetYPt": "<未実測:候補 scriptParameters/offsetYPt>"
+      }
+    },
+
+    "_replaceOnly_comment": "以下の3つは dryRun=false のときだけ使う。dryRun=true の間は未実測のままでよい(null か、この <...> のまま)。",
+    "getFileContent": {
+      "operationId": "<未実測:候補 GetFileContent>",
+      "params": { "dataset": "<未実測:候補 dataset>", "id": "<未実測:候補 id>" }
+    },
+    "deleteAttachment": {
+      "operationId": "<未実測:候補 DeleteAttachment>",
+      "params": {
+        "dataset": "<未実測:候補 dataset>",
+        "table": "<未実測:候補 table>",
+        "itemId": "<未実測:候補 itemId>",
+        "attachmentId": "<未実測:候補 attachmentId>"
+      }
+    },
+    "addAttachment": {
+      "operationId": "<未実測:候補 AddAttachment>",
+      "params": {
+        "dataset": "<未実測:候補 dataset>",
+        "table": "<未実測:候補 table>",
+        "itemId": "<未実測:候補 itemId>",
+        "name": "<未実測:候補 name>",
+        "body": "<未実測:候補 body>"
+      }
+    }
+  }
+}
