@@ -29,6 +29,8 @@
   "max_download_files": 50,
   "download_timeout_sec": 120,
   "hard_max_results": 500,
+  "_comment_site_only": "「サイト名のみを検索する」で一度に取るサイトの上限。画面の件数と小さいほうを使う。実機で確かめた件数は10〜15件まで（2026-09-25）。それより大きい値は未確認。",
+  "site_only_max_results": 50,
   "request_timeout_sec": 30,
   "provider_timeout_sec": 180,
 

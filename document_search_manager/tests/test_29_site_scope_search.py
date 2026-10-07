@@ -315,13 +315,17 @@ try:
           ".sitechip { display: inline-flex;" in html and ".sitechip[hidden] { display: none; }" in html)
     check("候補の一覧も [hidden] を対で書いている",
           ".sitecands { display: flex;" in html and ".sitecands[hidden] { display: none; }" in html)
+    # v20261007_01の仕様変更：「サイト名のみ」をキーに足したため、引数が1つ増えた
+    # （対象サイトをキーに含める、という検査の趣旨は変わらない）。
     check("キャッシュの条件に対象サイトを含める（論点B2）",
-          "function cacheKey(keyword, target, maxResults, titleOnly, prefixSearch, typeScope, siteScope)"
-          in html and html.count("p.typeScope, p.siteScope") == 2)
+          "function cacheKey(keyword, target, maxResults, titleOnly, prefixSearch, typeScope, siteScope, siteOnly)"
+          in html and html.count("p.typeScope, p.siteScope, p.siteOnly") == 2)
     check("サイトを選んでいれば、キーワードが空でも検索できる",
           "if (!p.keyword && !p.siteScope)" in html)
+    # v20261007_01の仕様変更：「サイト名のみ」のときはサイトの指定を送らない条件を足した
+    # （SharePointタブのときだけ送る、という趣旨は変わらない）。
     check("対象サイトは SharePointタブのときだけ送る",
-          'siteScope: (currentTarget() === "sharepoint" && selectedSite) ? selectedSite.url : ""' in html)
+          'siteScope: (currentTarget() === "sharepoint" && selectedSite && !isSiteOnlyActive())' in html)
     check("チップには名前と一緒にURL上の場所を出す（同じ番号のサイトの取り違え防止）",
           'getElementById("siteChipPath").textContent = "（" + sitePathOf(selectedSite.url) + "）"' in html)
     check("検索結果のサイト列の🔍は SharePointの行だけに付ける",
