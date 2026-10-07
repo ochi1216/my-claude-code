@@ -204,7 +204,8 @@
       "kind": "py",
       "path": "rtocs_organizer/rtocs_organizer_",
       "gemini": "proxy",
-      "status": "planned_move"
+      "status": "planned_move",
+      "note": "デバッグ用Chromeプロファイル（ポート9222）に接続する。同時に2つ以上起動すると1つのChromeを共有するため、ランチャーの「実行中」タブで警告表示の対象（20260928_01）"
     },
     {
       "id": "rtocs_dashboard",
@@ -224,7 +225,8 @@
       "kind": "py",
       "path": "bbt_lecture_organizer/BBT_lecture_script_getter_",
       "gemini": "proxy",
-      "status": "planned_move"
+      "status": "planned_move",
+      "note": "デバッグ用Chromeプロファイル（ポート9222）に接続する。同時に2つ以上起動すると1つのChromeを共有するため、ランチャーの「実行中」タブで警告表示の対象（20260928_01）"
     },
 
     {
@@ -272,12 +274,12 @@
       "id": "journal",
       "label": "学びジャーナル（LKPT）",
       "category": "strategy",
-      "root": "repo",
+      "root": "absolute",
       "kind": "bat",
-      "path": "journal/RunConsole.bat",
+      "path": "%USERPROFILE%\\Documents\\JournalRuntime\\LaunchJournal.bat",
       "gemini": "proxy",
       "status": "active",
-      "note": "日々のL(教訓)/K(継続)/P(課題)/T(挑戦)と時間管理・アクションアイテム管理を1つで行うツール。RunConsole.batはrun_latest.pyを呼び、run_latest.pyが最新のdaily_journal_*.pyを選ぶ二段構え。SetupAutoStart.batはWindowsスタートアップ登録用のため割り当てない"
+      "note": "日々のL(教訓)/K(継続)/P(課題)/T(挑戦)と時間管理・アクションアイテム管理を1つで行うツール。JournalRuntime\\LaunchJournal.batが、共有クローンの状態に関係なく固定ブランチ(claude/chat-reflection-dashboard-ra1zkg)からjournalフォルダをgit archiveで取り出してからrun_latest.pyを呼ぶ（共有クローンが他セッションの作業で別ブランチになっていても影響されない）。SetupAutoStart.batはWindowsスタートアップ登録用のため割り当てない"
     },
 
     {

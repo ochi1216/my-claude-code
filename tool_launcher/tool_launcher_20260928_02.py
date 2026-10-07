@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-tool_launcher_20260915_04.py  --  my-claude-code ツールランチャー v2
+tool_launcher_20260928_02.py  --  my-claude-code ツールランチャー v2
 
-VERSION: 20260915_04
+VERSION: 20260928_02
 
 旧 tool_launcher_20260808_01.py（PythonScripts直下、Git管理外）の後継。
 設計の経緯は同フォルダの README.md / CHANGELOG.md を参照。
@@ -17,6 +17,14 @@ VERSION: 20260915_04
 
 Windows専用の処理（コンソール非表示・多重起動防止）はすべて sys.platform で分岐しており、
 他OSでも import / 起動自体は通る（GUIの見た目は保証しない）。
+
+20260928_01: 自宅PC版からの機能逆移植（機能1）。「実行中」タブを追加し、ランチャーから
+起動したツール（tools.json登録分・自動検出分の両方）を一覧・前面化・強制終了できるように
+した。
+
+20260928_02: 自宅PC版からの機能逆移植（機能2）。タイルに実際の起動対象ファイル名を
+表示し、✏ボタンでタイトル（tools.json の label）をその場で変更できるようにした。
+詳細は CHANGELOG.md を参照。
 """
 
 import atexit
@@ -34,8 +42,9 @@ import traceback
 import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import messagebox
+from tkinter import simpledialog
 
-VERSION = "20260915_04"
+VERSION = "20260928_02"
 
 IS_WINDOWS = sys.platform == "win32"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -74,6 +83,19 @@ STILL_ACTIVE = 259
 # ZOMBIE_CHECK_INTERVAL 秒（既定では 4×0.3=1.2秒）。
 ZOMBIE_CHECK_ATTEMPTS = 4
 ZOMBIE_CHECK_INTERVAL = 0.3
+
+# 20260928_01: 「実行中」タブ用の定数。
+TH32CS_SNAPPROCESS = 0x00000002
+WM_CLOSE = 0x0010
+PROCESS_TERMINATE = 0x0001
+RUNNING_POLL_INTERVAL_MS = 2000
+KILL_GRACE_SECONDS_DEFAULT = 3
+KILL_GRACE_SECONDS_IRREPLACEABLE_DATA = 8
+# .bat 内で `start ""` 等によりコンソールを切り離して即終了するツール。
+# root_pid（起動時にPopenが返すcmd.exeのPID）がほぼ即座に消え、実体は別プロセスとして
+# 動き続ける。journal/LaunchJournal.bat の実物（リポジトリ外）を越智さんに確認して
+# いただいた結果、該当することを確認済み（`start "" pythonw.exe run_latest.py` の形）。
+DETACHED_LAUNCH_TOOL_IDS = {"journal"}
 
 # ---------------------------------------------------------------------------
 # 配色（CLAUDE.md のUI規約: bg #1a1a2e / accent #e94560 に準拠した単一ダークテーマ）
@@ -277,6 +299,24 @@ def _pid_has_visible_window(pid):
     return bool(found)
 
 
+def _window_title(hwnd):
+    """指定ウィンドウハンドルのタイトル文字列を返す。取得できなければ空文字。
+
+    20260928_01: 「実行中」タブの前面化で、子孫プロセスのうちどれがツール本体の
+    ウィンドウかを見分けるための補助（タイトルが空でないものだけを候補にする）。
+    """
+    if not IS_WINDOWS:
+        return ""
+    try:
+        user32 = ctypes.windll.user32
+        length = user32.GetWindowTextLengthW(hwnd)
+        buf = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, buf, length + 1)
+        return buf.value
+    except Exception:
+        return ""
+
+
 def _bring_existing_to_front(pid):
     """指定PIDが持つ可視ウィンドウを最前面に表示する（最小化されていれば復元する）。
 
@@ -292,6 +332,10 @@ def _bring_existing_to_front(pid):
 
     成功した場合（＝呼び出し元がダイアログを重ねて出す必要がない場合）は
     True、見つからなかった・失敗した場合は False を返す。
+
+    20260928_01: 「実行中」タブの前面化からも呼ばれるようになった（自ランチャー
+    専用の「TOOL LAUNCHER」優先分岐は、任意ツールに対しては単に該当せず
+    windows[0] にフォールバックするだけで実害はないため、そのまま流用する）。
     """
     global _brought_existing_to_front
     try:
@@ -326,6 +370,116 @@ def _bring_existing_to_front(pid):
         return True
     except Exception:
         return False
+
+
+# 20260928_01: CreateToolhelp32Snapshot用のプロセス列挙構造体（ANSI版）。
+# 実行ファイル名(szExeFile)はここでは使わない（同一性確認は_process_image_basenameで
+# 別途行う）ため、Unicode版(W)ではなくシンプルなANSI版を使う。
+class _PROCESSENTRY32(ctypes.Structure):
+    _fields_ = [
+        ("dwSize", ctypes.c_uint32),
+        ("cntUsage", ctypes.c_uint32),
+        ("th32ProcessID", ctypes.c_uint32),
+        ("th32DefaultHeapID", ctypes.c_void_p),
+        ("th32ModuleID", ctypes.c_uint32),
+        ("cntThreads", ctypes.c_uint32),
+        ("th32ParentProcessID", ctypes.c_uint32),
+        ("pcPriClassBase", ctypes.c_long),
+        ("dwFlags", ctypes.c_uint32),
+        ("szExeFile", ctypes.c_char * 260),
+    ]
+
+
+def _snapshot_processes():
+    """稼働中の全プロセスから {pid: 親pid} 辞書を作る。取得できなければ None。
+
+    20260928_01: 「実行中」タブの前面化・終了で、root_pid（起動時にcmd.exeが
+    返るPID）の子孫プロセス（実際のツール本体）を辿るために使う。
+    """
+    if not IS_WINDOWS:
+        return None
+    kernel32 = ctypes.windll.kernel32
+    snapshot = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+    if not snapshot or snapshot == -1:
+        return None
+    try:
+        entry = _PROCESSENTRY32()
+        entry.dwSize = ctypes.sizeof(_PROCESSENTRY32)
+        result = {}
+        if not kernel32.Process32First(snapshot, ctypes.byref(entry)):
+            return None
+        while True:
+            result[entry.th32ProcessID] = entry.th32ParentProcessID
+            if not kernel32.Process32Next(snapshot, ctypes.byref(entry)):
+                break
+        return result
+    except Exception:
+        return None
+    finally:
+        kernel32.CloseHandle(snapshot)
+
+
+def _bfs_depths(root_pid, snapshot):
+    """snapshot({pid: 親pid})から、root_pid自身を含む子孫PIDと、rootからの
+    深さ（root自身は0）の対応辞書を返す。
+
+    辞書だけを受け取る純粋関数（Windows API を直接呼ばない）で、
+    Linuxコンテナでも単体テストできる。循環参照や巨大な辞書でも、各pidを
+    一度しか訪れないため無限ループしない。snapshotがNoneの場合はrootのみの
+    辞書を返す（Windows APIが使えない環境向けのフォールバック）。
+    """
+    if not snapshot:
+        return {root_pid: 0}
+    children_map = {}
+    for pid, parent in snapshot.items():
+        children_map.setdefault(parent, []).append(pid)
+    depths = {root_pid: 0}
+    queue = [root_pid]
+    while queue:
+        current = queue.pop(0)
+        for child in children_map.get(current, []):
+            if child not in depths:
+                depths[child] = depths[current] + 1
+                queue.append(child)
+    return depths
+
+
+def _descendant_pids(root_pid, snapshot):
+    """root_pid自身を含む子孫PIDの集合を返す（_bfs_depthsの薄いラッパー）。"""
+    return set(_bfs_depths(root_pid, snapshot).keys())
+
+
+def _pid_depth(root_pid, pid, snapshot):
+    """root_pidからpidまでの深さを返す（root自身は0）。子孫でなければNone。"""
+    return _bfs_depths(root_pid, snapshot).get(pid)
+
+
+def _bring_tool_to_front(root_pid):
+    """root_pidの子孫プロセスのうち、可視ウィンドウ（タイトルが空でないもの）を
+    持つ最も浅い（rootに近い）ものを選んで前面化する。
+
+    Returns:
+        "ok"          : 前面化に成功した
+        "no_candidate": 候補となるウィンドウが1つも見つからなかった
+        "failed"      : 候補は見つかったが前面化に失敗した
+    """
+    snapshot = _snapshot_processes()
+    depths = _bfs_depths(root_pid, snapshot)
+
+    candidates = []  # (depth, pid)
+    for pid, depth in depths.items():
+        windows = _find_visible_windows(pid)
+        if not windows:
+            continue
+        if any(_window_title(hwnd).strip() for hwnd in windows):
+            candidates.append((depth, pid))
+
+    if not candidates:
+        return "no_candidate"
+
+    candidates.sort(key=lambda item: item[0])
+    target_pid = candidates[0][1]
+    return "ok" if _bring_existing_to_front(target_pid) else "failed"
 
 
 def force_own_window_to_front(root):
@@ -428,7 +582,7 @@ def acquire_single_instance():
                 log_message(
                     "🧟 前回のランチャー（PID {}）が応答していないため終了します".format(stale_pid))
                 kernel32.TerminateProcess(
-                    kernel32.OpenProcess(0x0001, 0, stale_pid), 1)  # PROCESS_TERMINATE
+                    kernel32.OpenProcess(PROCESS_TERMINATE, 0, stale_pid), 1)
             else:
                 # python.exe以外が同じPIDを名乗っている＝PIDの使い回し等で
                 # 無関係のプロセスを指している可能性がある。終了させない。
@@ -556,6 +710,87 @@ def find_latest_py(prefix_path):
     return max(candidates, key=version_key), len(candidates)
 
 
+def resolve_target_display(tool, legacy_root):
+    """タイルに表示する「実際に起動されるファイル名」を返す。解決できなければNone。
+
+    20260928_02: 必ず launch_tool() と同じ tool_target_path() / find_latest_py() を
+    通す（表示用に別ロジックを作らない）。これにより root: "absolute"（journal等）
+    も自動的に正しく表示される。
+    """
+    target = tool_target_path(tool, legacy_root)
+    if target is None:
+        return None
+    kind = tool.get("kind")
+    if kind == "bat":
+        return os.path.basename(target)
+    if kind in ("py", "streamlit"):
+        latest, _ = find_latest_py(target)
+        return os.path.basename(latest) if latest else None
+    return None
+
+
+# ---------------------------------------------------------------------------
+# tools.json のタイトル（label）変更
+# ---------------------------------------------------------------------------
+def _replace_label_in_tools_json(tools_json_path, tool_id, new_label):
+    """tools.json の該当id直後の最初の label 値だけを、生テキストの正規表現置換で
+    書き換える。
+
+    json.load → 編集 → json.dump の往復はしない（カテゴリ間の空行など、手で
+    整えた見た目が崩れるため）。同じ id が0件・複数件の場合はいずれも安全側で
+    中断する（意図しないエントリを書き換えないため）。検索対象は、そのツールの
+    idから次のidが現れる直前までに限定し、別エントリのlabelを誤って書き換える
+    ことがないようにする。書き戻す前に json.loads で構文検証し、失敗すれば
+    何も書き込まない。書き込み前には tools.json.bak にバックアップを残す。
+
+    Returns:
+        True  : 置換・書き込みに成功した
+        False : 対象が見つからない・複数一致・JSON検証失敗などで中断した
+    """
+    try:
+        with open(tools_json_path, "r", encoding="utf-8", newline="") as f:
+            original = f.read()
+    except OSError:
+        return False
+
+    id_pattern = re.compile(r'"id"\s*:\s*"' + re.escape(tool_id) + r'"')
+    id_matches = list(id_pattern.finditer(original))
+    if len(id_matches) != 1:
+        return False
+    id_end = id_matches[0].end()
+
+    any_id_pattern = re.compile(r'"id"\s*:\s*"')
+    next_id_match = any_id_pattern.search(original, id_end)
+    boundary = next_id_match.start() if next_id_match else len(original)
+
+    label_pattern = re.compile(r'("label"\s*:\s*")((?:[^"\\]|\\.)*)(")')
+    label_match = label_pattern.search(original, id_end, boundary)
+    if label_match is None:
+        return False
+
+    escaped = new_label.replace("\\", "\\\\").replace('"', '\\"')
+    new_content = (original[:label_match.start(2)] + escaped
+                  + original[label_match.end(2):])
+
+    try:
+        json.loads(new_content)
+    except json.JSONDecodeError:
+        return False
+
+    try:
+        with open(tools_json_path + ".bak", "w", encoding="utf-8", newline="") as f:
+            f.write(original)
+    except OSError:
+        pass  # バックアップに失敗しても本処理は続行する（致命的ではない）
+
+    try:
+        with open(tools_json_path, "w", encoding="utf-8", newline="") as f:
+            f.write(new_content)
+    except OSError:
+        return False
+    return True
+
+
 # ---------------------------------------------------------------------------
 # ツールの起動
 # ---------------------------------------------------------------------------
@@ -579,8 +814,13 @@ def spawn(args, work_dir):
                             creationflags=flags)
 
 
-def launch_tool(tool, legacy_root):
-    """tools.json の 1エントリを起動する。失敗時はログとダイアログで理由を示す。"""
+def launch_tool(tool, legacy_root, on_spawned=None):
+    """tools.json の 1エントリを起動する。失敗時はログとダイアログで理由を示す。
+
+    20260928_01: on_spawned を追加（既定None）。渡された場合、spawn()成功直後・
+    成功ログ出力の前に on_spawned(proc) を呼ぶ（「実行中」タブへの登録用）。
+    既存の呼び出し元（引数を渡さない）とは完全互換。
+    """
     label = tool.get("label", tool.get("id", "(名称未設定)"))
     kind = tool.get("kind")
     target = tool_target_path(tool, legacy_root)
@@ -600,7 +840,7 @@ def launch_tool(tool, legacy_root):
         # Windows の CreateProcess は .bat を直接実行できないため cmd /c を介する。
         # shell=True は使わない（パスに空白や特殊文字が含まれる場合に危険なため）。
         args = ["cmd", "/c", target] if IS_WINDOWS else [target]
-        _spawn_and_report(label, args, work_dir, os.path.basename(target))
+        _spawn_and_report(label, args, work_dir, os.path.basename(target), on_spawned)
         return
 
     if kind in ("py", "streamlit"):
@@ -634,19 +874,26 @@ def launch_tool(tool, legacy_root):
         else:
             args = plain
 
-        _spawn_and_report(label, args, work_dir, os.path.basename(latest))
+        _spawn_and_report(label, args, work_dir, os.path.basename(latest), on_spawned)
         return
 
     _fail(label, "kind の指定が不正です（bat / py / streamlit のいずれか）: {}".format(kind))
 
 
-def _spawn_and_report(label, args, work_dir, shown_name):
+def _spawn_and_report(label, args, work_dir, shown_name, on_spawned=None):
     log_message("📂 {}".format(work_dir))
     try:
         proc = spawn(args, work_dir)
     except OSError as e:
         _fail(label, "起動に失敗しました。\n\n対象: {}\nエラー: {}".format(shown_name, e))
         return
+    if on_spawned is not None:
+        try:
+            on_spawned(proc)
+        except Exception:
+            # 「実行中」タブへの登録に失敗しても、起動自体は成功しているので
+            # ここで握りつぶす（起動処理そのものを失敗扱いにしない）。
+            pass
     log_message("✅ 起動完了: {}（PID: {}）".format(shown_name, proc.pid))
 
 
@@ -706,6 +953,13 @@ class LauncherApp(object):
         self.window_cfg = config.get("window", {})
         self.columns = int(self.window_cfg.get("columns", 4) or 4)
         self.pull_button = None
+        # 20260928_01: 「実行中」タブ用の状態。
+        self.running = []          # 起動中エントリのフラットなリスト
+        self._run_seq = 0          # PIDは再利用されるためのUI側識別用連番
+        self.view_name = "tools"   # "tools" or "running"
+        self.btn_tools = None
+        self.btn_running = None
+        self._poll_after_id = None
         self._setup_fonts()
         self._build()
 
@@ -752,6 +1006,9 @@ class LauncherApp(object):
         self._build_log()
         self._build_status()
 
+        if IS_WINDOWS:
+            self._poll_after_id = self.root.after(RUNNING_POLL_INTERVAL_MS, self._poll_running)
+
     def _build_header(self):
         bar = tk.Frame(self.root, bg=C_BAR)
         bar.pack(side="top", fill="x")
@@ -774,6 +1031,17 @@ class LauncherApp(object):
         right = tk.Frame(inner, bg=C_BAR)
         right.pack(side="right", anchor="e")
 
+        # 20260928_01: 「実行中」タブ切り替えボタン（既存の⚙/Pullと同じ並びに追加）。
+        self.btn_tools = tk.Button(right, text="🧩 ツール", command=lambda: self._switch_view("tools"),
+                                   font=self.f_btn_small, relief="solid", bd=1, padx=12, pady=4,
+                                   highlightthickness=0, cursor="hand2")
+        self.btn_tools.pack(side="left", padx=(0, 8))
+
+        self.btn_running = tk.Button(right, text="▶ 起動中 (0)", command=lambda: self._switch_view("running"),
+                                     font=self.f_btn_small, relief="solid", bd=1, padx=12, pady=4,
+                                     highlightthickness=0, cursor="hand2")
+        self.btn_running.pack(side="left", padx=(0, 8))
+
         tk.Button(right, text="⚙ tools.json", command=self.open_tools_json,
                   bg=C_BAR, fg=C_INK2, font=self.f_btn_small,
                   activebackground=C_TILE, activeforeground=C_INK,
@@ -788,9 +1056,35 @@ class LauncherApp(object):
                                      highlightthickness=0, cursor="hand2")
         self.pull_button.pack(side="left")
 
-    def _build_board(self):
-        wrap = tk.Frame(self.root, bg=C_BG)
-        wrap.pack(side="top", fill="both", expand=True)
+        self._update_view_buttons()
+
+    def _update_view_buttons(self):
+        """ヘッダのビュー切替ボタンのうち、選択中の方を見た目で分かるようにする。"""
+        for button, name in ((self.btn_tools, "tools"), (self.btn_running, "running")):
+            if button is None:
+                continue
+            if name == self.view_name:
+                button.configure(bg=C_ACCENT, fg="#ffffff", activebackground=C_ACCENT_DIM,
+                                 activeforeground="#ffffff")
+            else:
+                button.configure(bg=C_BAR, fg=C_INK2, activebackground=C_TILE,
+                                 activeforeground=C_INK)
+
+    def _update_running_badge(self):
+        if self.btn_running is not None:
+            self.btn_running.configure(text="▶ 起動中 ({})".format(len(self.running)))
+
+    # -- ボード（タイル一覧／実行中リストの2画面） --------------------------
+    def _make_scrollable(self, parent):
+        """canvas+scrollbarでスクロールする領域を1つ作る。
+
+        20260928_01: タイル一覧・実行中リストの両方で使うために切り出した。
+        `canvas.bind_all("<MouseWheel>", ...)` はここでは呼ばない（アプリ全体で
+        1回だけ登録し、現在の表示を見て分岐する _on_mouse_wheel 側で行う。
+        2つのスクロール領域それぞれで bind_all を呼ぶと、後から作った方だけが
+        常にホイールを受けてしまう）。
+        """
+        wrap = tk.Frame(parent, bg=C_BG)
 
         canvas = tk.Canvas(wrap, bg=C_BG, highlightthickness=0, bd=0)
         scrollbar = tk.Scrollbar(wrap, orient="vertical", command=canvas.yview,
@@ -808,12 +1102,44 @@ class LauncherApp(object):
         canvas.bind("<Configure>",
                     lambda e: canvas.itemconfigure(window_id, width=e.width))
 
-        def on_wheel(event):
-            canvas.yview_scroll(-1 * int(event.delta / 120), "units")
+        return wrap, canvas, board
 
-        canvas.bind_all("<MouseWheel>", on_wheel)
+    def _build_board(self):
+        self.board_wrap = tk.Frame(self.root, bg=C_BG)
+        self.board_wrap.pack(side="top", fill="both", expand=True)
 
-        self._render_categories(board)
+        self.tools_wrap, self.tools_canvas, self.tools_board = \
+            self._make_scrollable(self.board_wrap)
+        self.running_wrap, self.running_canvas, self.running_board = \
+            self._make_scrollable(self.board_wrap)
+
+        self.tools_wrap.pack(fill="both", expand=True)
+        # running_wrap はまだ pack しない（初期表示は「ツール」タブ）。
+
+        # 落とし穴（自宅版仕様書より）: bind_allを2箇所で呼ぶと後から作った方だけが
+        # 常にホイールを受ける。ここでアプリ全体に1回だけ登録し、ハンドラ内で
+        # 現在の表示（self.view_name）を見てどちらのcanvasをスクロールするか分岐する。
+        self.root.bind_all("<MouseWheel>", self._on_mouse_wheel)
+
+        self._render_categories(self.tools_board)
+        self._render_running_list()
+
+    def _on_mouse_wheel(self, event):
+        canvas = self.running_canvas if self.view_name == "running" else self.tools_canvas
+        canvas.yview_scroll(-1 * int(event.delta / 120), "units")
+
+    def _switch_view(self, name):
+        if name == self.view_name:
+            return
+        self.view_name = name
+        if name == "running":
+            self.tools_wrap.pack_forget()
+            self.running_wrap.pack(fill="both", expand=True)
+            self._render_running_list()
+        else:
+            self.running_wrap.pack_forget()
+            self.tools_wrap.pack(fill="both", expand=True)
+        self._update_view_buttons()
 
     def _render_categories(self, board):
         categories = self.config.get("categories", [])
@@ -900,10 +1226,19 @@ class LauncherApp(object):
                         wraplength=210, height=2)
         name.pack(fill="x")
 
+        # 20260928_02: 実際に起動されるファイル名を、タイトルとバッジ行の間に
+        # 別行で表示する（バッジと重ならないように）。
+        display_name = resolve_target_display(tool, self.legacy_root)
+        file_text = "→ {}".format(display_name) if display_name else "→ (ファイル未検出)"
+        file_label = tk.Label(body, text=file_text, bg=C_TILE, fg=C_INK3,
+                              font=self.f_meta, anchor="w", justify="left",
+                              wraplength=210)
+        file_label.pack(fill="x", anchor="w", pady=(3, 0))
+
         tags = tk.Frame(body, bg=C_TILE)
         tags.pack(fill="x", anchor="w", pady=(7, 0))
 
-        painted = [outer, body, name, tags]
+        painted = [outer, body, name, file_label, tags]
 
         kind_badge = KIND_BADGE.get(tool.get("kind"))
         if kind_badge:
@@ -916,29 +1251,75 @@ class LauncherApp(object):
         if tool.get("status") == "planned_move":
             painted.append(self._add_badge(tags, "移管予定", C_MOVE, "#4a3f8a"))
 
+        # 20260928_02: タイトル変更ボタン。painted には入れない（タイル全体の
+        # 「クリック＝起動」バインドとは別扱いにするため）。背景色だけはホバー時に
+        # 揃えるが、クリックイベントは on_click には束ねない。
+        def on_edit(_event=None):
+            self._edit_label(tool)
+            return "break"
+
+        edit_label = tk.Label(tags, text="✏", bg=C_TILE, fg=C_INK2, font=self.f_badge,
+                              padx=4, cursor="hand2")
+        edit_label.pack(side="right")
+        edit_label.bind("<Button-1>", on_edit)
+
         def on_enter(_event=None):
-            for widget in painted:
+            for widget in painted + [edit_label]:
                 widget.configure(bg=C_TILE_HI)
             outer.configure(highlightbackground=C_ACCENT, highlightcolor=C_ACCENT)
             stripe.configure(bg=C_ACCENT)
             name.configure(fg="#ffffff")
 
         def on_leave(_event=None):
-            for widget in painted:
+            for widget in painted + [edit_label]:
                 widget.configure(bg=C_TILE)
             outer.configure(highlightbackground=C_LINE_SOFT, highlightcolor=C_LINE_SOFT)
             stripe.configure(bg=stripe_color)
             name.configure(fg=C_INK)
 
         def on_click(_event=None):
-            launch_tool(tool, self.legacy_root)
+            # 20260928_01: 「実行中」タブへの登録は、tools.json登録ツール・
+            # 自動検出ツールの両方に等しく適用する（越智さんの判断: Q4「自動検出
+            # ツールも含める」）。
+            launch_tool(tool, self.legacy_root,
+                       on_spawned=lambda proc: self._register_running(tool, proc))
 
         for widget in painted + [stripe]:
             widget.bind("<Enter>", on_enter)
             widget.bind("<Leave>", on_leave)
             widget.bind("<Button-1>", on_click)
+        edit_label.bind("<Enter>", on_enter)
+        edit_label.bind("<Leave>", on_leave)
 
         return outer
+
+    def _edit_label(self, tool):
+        """✏ボタンから呼ばれる。タイトル(tools.jsonのlabel)をその場で変更する。"""
+        current = tool.get("label", "")
+        new_label = simpledialog.askstring(
+            "タイトルを変更", "新しいタイトルを入力してください:",
+            initialvalue=current, parent=self.root)
+        if new_label is None:
+            return  # キャンセル
+        new_label = new_label.strip()
+        if not new_label or new_label == current:
+            return  # 空欄・変更なし
+
+        if not _replace_label_in_tools_json(TOOLS_JSON, tool.get("id"), new_label):
+            _fail(current, "tools.json の該当エントリを更新できませんでした。\n\n"
+                           "同じidが見つからない、複数見つかった、またはJSONの検証に"
+                           "失敗した可能性があります。")
+            return
+
+        log_message("✏ タイトルを変更しました: {} → {}".format(current, new_label))
+        tool["label"] = new_label
+        self._refresh_tools_view()
+
+    def _refresh_tools_view(self):
+        """tools.json の label 変更などを、ランチャー再起動なしで画面に反映する。"""
+        for widget in self.tools_board.winfo_children():
+            widget.destroy()
+        self._render_categories(self.tools_board)
 
     def _add_badge(self, parent, text, fg, border):
         badge = tk.Label(parent, text=text, bg=C_TILE, fg=fg, font=self.f_badge,
@@ -946,6 +1327,247 @@ class LauncherApp(object):
                          highlightbackground=border, highlightcolor=border)
         badge.pack(side="left", padx=(0, 4))
         return badge
+
+    # -- 実行中タブ -----------------------------------------------------------
+    def _register_running(self, tool, proc):
+        """タイルクリックで起動したツールを「実行中」一覧に登録する。"""
+        self._run_seq += 1
+        entry = {
+            "seq": self._run_seq,
+            "tool_id": tool.get("id"),
+            "label": tool.get("label", tool.get("id", "")),
+            "gemini": tool.get("gemini"),
+            "note": tool.get("note", "") or "",
+            "root_pid": proc.pid,
+            "image_basename": _process_image_basename(proc.pid) if IS_WINDOWS else None,
+            "started_at": datetime.datetime.now(),
+            "_front_btn": None,
+            "_kill_btn": None,
+        }
+        self.running.append(entry)
+        self._update_running_badge()
+        if self.view_name == "running":
+            self._render_running_list()
+
+    def _poll_running(self):
+        """2秒ごとに各エントリの生存確認を行い、終了していれば一覧から除く。
+
+        20260928_01: root_pid（cmd.exe）ベースの判定であるため、kind:py/streamlit
+        系のツールがクラッシュしても `|| pause` によりcmd.exeが生存し続ける間は
+        「実行中」と表示され続ける（越智さんの判断: Q6「cmd.exeベースの判定のまま
+        で良い」。既知の制約としてCHANGELOG/READMEに明記する）。
+        """
+        changed = False
+        remaining = []
+        for entry in self.running:
+            if _process_is_alive(entry["root_pid"]):
+                remaining.append(entry)
+            else:
+                log_message("🔻 {} が終了しました".format(entry["label"]))
+                changed = True
+        self.running = remaining
+        if changed:
+            self._update_running_badge()
+            if self.view_name == "running":
+                self._render_running_list()
+        self._poll_after_id = self.root.after(RUNNING_POLL_INTERVAL_MS, self._poll_running)
+
+    def _render_running_list(self):
+        for widget in self.running_board.winfo_children():
+            widget.destroy()
+
+        if not self.running:
+            tk.Label(self.running_board,
+                    text="現在ランチャーから起動中のツールはありません。",
+                    bg=C_BG, fg=C_INK3, font=self.f_tile, anchor="w"
+                    ).pack(fill="x", padx=20, pady=20, anchor="w")
+            return
+
+        count_9222 = sum(1 for e in self.running if "9222" in (e.get("note") or ""))
+        show_9222_badge = count_9222 >= 2
+
+        block = tk.Frame(self.running_board, bg=C_BG)
+        block.pack(fill="both", expand=True, padx=20, pady=(14, 14))
+        for entry in self.running:
+            self._make_running_row(block, entry, show_9222_badge)
+
+    def _make_running_row(self, parent, entry, show_9222_badge):
+        stripe_color = GEMINI_STRIPE.get(entry.get("gemini"), C_LINE)
+
+        row = tk.Frame(parent, bg=C_TILE, highlightthickness=1,
+                       highlightbackground=C_LINE_SOFT, highlightcolor=C_LINE_SOFT)
+        row.pack(fill="x", pady=(0, 8))
+
+        stripe = tk.Frame(row, bg=stripe_color, width=3)
+        stripe.pack(side="left", fill="y")
+        stripe.pack_propagate(False)
+
+        body = tk.Frame(row, bg=C_TILE)
+        body.pack(side="left", fill="both", expand=True, padx=(9, 10), pady=(8, 8))
+
+        started_str = entry["started_at"].strftime("%H:%M:%S")
+        text = "{}    PID {}    {}起動".format(entry["label"], entry["root_pid"], started_str)
+        tk.Label(body, text=text, bg=C_TILE, fg=C_INK, font=self.f_tile,
+                anchor="w", justify="left").pack(fill="x", anchor="w")
+
+        tags = tk.Frame(body, bg=C_TILE)
+        tags.pack(fill="x", anchor="w", pady=(6, 0))
+
+        gemini_badge = GEMINI_BADGE.get(entry.get("gemini"))
+        if gemini_badge:
+            self._add_badge(tags, *gemini_badge)
+        if show_9222_badge and "9222" in (entry.get("note") or ""):
+            self._add_badge(tags, "⚠ Chrome 9222 共有中", C_WARN, "#6b4c10")
+        if entry.get("tool_id") in DETACHED_LAUNCH_TOOL_IDS:
+            self._add_badge(tags, "⚠ 追跡限定", C_INK3, C_LINE)
+
+        btns = tk.Frame(row, bg=C_TILE)
+        btns.pack(side="right", padx=(0, 10), pady=8)
+
+        front_btn = tk.Button(btns, text="⬆ 前面へ",
+                              command=lambda: self._front_running(entry),
+                              bg=C_BAR, fg=C_INK2, font=self.f_btn_small,
+                              activebackground=C_TILE_HI, activeforeground=C_INK,
+                              relief="solid", bd=1, padx=10, pady=3,
+                              highlightthickness=0, cursor="hand2")
+        front_btn.pack(side="left", padx=(0, 6))
+
+        kill_btn = tk.Button(btns, text="✖ 終了",
+                             command=lambda: self._kill_running(entry),
+                             bg=C_BAR, fg=C_ACCENT, font=self.f_btn_small,
+                             activebackground=C_ACCENT_DIM, activeforeground="#ffffff",
+                             relief="solid", bd=1, padx=10, pady=3,
+                             highlightthickness=0, cursor="hand2")
+        kill_btn.pack(side="left")
+
+        entry["_front_btn"] = front_btn
+        entry["_kill_btn"] = kill_btn
+
+    def _set_row_buttons_enabled(self, entry, enabled):
+        state = "normal" if enabled else "disabled"
+        for key in ("_front_btn", "_kill_btn"):
+            btn = entry.get(key)
+            if btn is None:
+                continue
+            try:
+                btn.configure(state=state)
+            except Exception:
+                pass
+
+    # -- 実行中: 前面化 -------------------------------------------------------
+    def _front_running(self, entry):
+        self._set_row_buttons_enabled(entry, False)
+        threading.Thread(target=self._front_worker, args=(entry,), daemon=True).start()
+
+    def _front_worker(self, entry):
+        outcome = _bring_tool_to_front(entry["root_pid"])
+        self.root.after(0, lambda: self._finish_front(entry, outcome))
+
+    def _finish_front(self, entry, outcome):
+        self._set_row_buttons_enabled(entry, True)
+        if outcome == "ok":
+            log_message("⬆ {} を前面に表示しました（PID {}）".format(
+                entry["label"], entry["root_pid"]))
+        elif outcome == "no_candidate":
+            log_message("⚠️ {} の前面化対象ウィンドウが見つかりません".format(entry["label"]))
+        else:
+            log_message("⚠️ {} を前面に表示できませんでした（PID {}）".format(
+                entry["label"], entry["root_pid"]))
+
+    # -- 実行中: 終了 ---------------------------------------------------------
+    def _kill_running(self, entry):
+        if not any(e is entry for e in self.running):
+            return
+
+        root_pid = entry["root_pid"]
+        if not _process_is_alive(root_pid):
+            outcome = ("detached_gone" if entry.get("tool_id") in DETACHED_LAUNCH_TOOL_IDS
+                      else "already_gone")
+            self._finish_kill(entry, outcome)
+            return
+
+        # PID同一性の再チェック（acquire_single_instanceと同じ安全側の原則:
+        # 少しでも判定に迷ったらtaskkillを呼ばない）。
+        current_basename = _process_image_basename(root_pid)
+        if current_basename != entry.get("image_basename"):
+            log_message(
+                "⚠️ {}（PID {}）はプロセスの同一性を確認できないため終了操作を中止しました"
+                .format(entry["label"], root_pid))
+            self.running = [e for e in self.running if e is not entry]
+            self._update_running_badge()
+            if self.view_name == "running":
+                self._render_running_list()
+            return
+
+        self._set_row_buttons_enabled(entry, False)
+        threading.Thread(target=self._kill_worker, args=(entry,), daemon=True).start()
+
+    def _kill_worker(self, entry):
+        root_pid = entry["root_pid"]
+        try:
+            snapshot = _snapshot_processes()
+            depths = _bfs_depths(root_pid, snapshot)
+            user32 = ctypes.windll.user32 if IS_WINDOWS else None
+            if user32 is not None:
+                for pid in depths.keys():
+                    windows = _find_visible_windows(pid) or []
+                    for hwnd in windows:
+                        try:
+                            user32.PostMessageW(hwnd, WM_CLOSE, 0, 0)
+                        except Exception:
+                            pass
+
+            grace = (KILL_GRACE_SECONDS_IRREPLACEABLE_DATA
+                    if "再取得不可" in (entry.get("note") or "")
+                    else KILL_GRACE_SECONDS_DEFAULT)
+            deadline = time.time() + grace
+            still_alive = True
+            while time.time() < deadline:
+                if not _process_is_alive(root_pid):
+                    still_alive = False
+                    break
+                time.sleep(0.3)
+
+            if not still_alive:
+                outcome = "graceful"
+            else:
+                try:
+                    result = subprocess.run(
+                        ["taskkill", "/F", "/T", "/PID", str(root_pid)],
+                        capture_output=True, text=True, timeout=15,
+                        creationflags=(CREATE_NO_WINDOW if IS_WINDOWS else 0))
+                    outcome = "forced" if result.returncode == 0 else "error"
+                except subprocess.TimeoutExpired:
+                    outcome = "timeout"
+                except Exception:
+                    outcome = "error"
+        except Exception:
+            outcome = "error"
+
+        self.root.after(0, lambda: self._finish_kill(entry, outcome))
+
+    def _finish_kill(self, entry, outcome):
+        self.running = [e for e in self.running if e is not entry]
+        self._update_running_badge()
+
+        messages = {
+            "graceful": "✅ {} を終了しました（正常終了）".format(entry["label"]),
+            "forced": "✅ {} を強制終了しました（PID {}）".format(
+                entry["label"], entry["root_pid"]),
+            "detached_gone": (
+                "ℹ️ {} の追跡プロセスは既に終了していますが、この起動方式では実際の"
+                "ツールが別プロセスとして継続している可能性があります"
+                "（追跡の限界。手動確認を推奨）".format(entry["label"])),
+            "already_gone": "ℹ️ {} は既に終了していました".format(entry["label"]),
+            "timeout": "⚠️ {} の終了処理がタイムアウトしました（PID {}）".format(
+                entry["label"], entry["root_pid"]),
+            "error": "⚠️ {} の終了処理でエラーが発生しました".format(entry["label"]),
+        }
+        log_message(messages.get(
+            outcome, "⚠️ {} の終了処理で不明な結果になりました".format(entry["label"])))
+
+        if self.view_name == "running":
+            self._render_running_list()
 
     # -- ログ枠 -------------------------------------------------------------
     def _build_log(self):
@@ -1089,6 +1711,10 @@ class LauncherApp(object):
         if not os.path.isfile(RESTART_BAT):
             _fail("再起動", "起動用バッチが見つかりません:\n{}".format(RESTART_BAT))
             return
+        if self.running:
+            log_message(
+                "♻️ 再起動によりトラック中の実行中ツール {} 件はこのランチャーのUIから"
+                "追えなくなります（プロセス自体は終了しません）".format(len(self.running)))
         log_message("♻️ ランチャーを再起動します")
         # 新プロセスが多重起動チェックで弾かれないよう、先にミューテックスを解放する。
         release_single_instance()
@@ -1102,6 +1728,12 @@ class LauncherApp(object):
         self.root.destroy()
 
     def on_close(self):
+        if self._poll_after_id is not None:
+            try:
+                self.root.after_cancel(self._poll_after_id)
+            except Exception:
+                pass
+            self._poll_after_id = None
         log_message("🔚 ツールランチャーを終了します")
         release_single_instance()
         self.root.destroy()
