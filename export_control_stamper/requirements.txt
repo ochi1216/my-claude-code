@@ -1,0 +1,7 @@
+# export_control_stamper は、Python の標準ライブラリだけで動く(追加のパッケージは不要)。
+# 対象: Python 3.9 以降
+#
+# 開発・検証に使うもの(pip では入れない):
+#   - Node.js 22.13 以降 : office_scripts/test_stamp_*.mjs(Office Script の模擬テスト)
+#   - pac CLI            : pac solution pack / import(Power Platform CLI)
+#                          dotnet tool install --global Microsoft.PowerApps.CLI.Tool

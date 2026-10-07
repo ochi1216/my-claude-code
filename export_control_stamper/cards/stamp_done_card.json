@@ -1,0 +1,45 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.4",
+  "body": [
+    {
+      "type": "TextBlock",
+      "text": "${Heading}",
+      "weight": "Bolder",
+      "size": "Large",
+      "wrap": true
+    },
+    {
+      "type": "FactSet",
+      "facts": [
+        { "title": "モード", "value": "${Mode}" },
+        { "title": "リクエストID", "value": "${ItemId}" },
+        { "title": "対象ファイル", "value": "${AttachmentName}" },
+        { "title": "押印位置(pt)", "value": "${Placement}" }
+      ]
+    },
+    {
+      "type": "TextBlock",
+      "text": "${Guidance}",
+      "wrap": true
+    }
+  ],
+  "actions": [
+    {
+      "type": "Action.OpenUrl",
+      "title": "リクエストを開く",
+      "url": "${ItemUrl}"
+    },
+    {
+      "type": "Action.OpenUrl",
+      "title": "押印後のファイルを開く",
+      "url": "${WorkFileUrl}"
+    },
+    {
+      "type": "Action.OpenUrl",
+      "title": "実行履歴",
+      "url": "${RunUrl}"
+    }
+  ]
+}
