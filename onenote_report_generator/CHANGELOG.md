@@ -1,4 +1,81 @@
+## VERSION 20261005_01
+
+### 修正: 起動前のポート解放が日本語Windowsで例外になり、アプリが起動できなかった不具合（2026-10-05）
+
+ツールランチャーからOneNote要約ツールを起動すると、バッチは動くのにPythonが
+`AttributeError: 'NoneType' object has no attribute 'splitlines'`
+（`_find_pids_listening_on`内）で即座に落ちた（越智さんの実機報告。ログファイルの
+先頭に`UnicodeDecodeError: 'utf-8' codec can't decode byte 0x83`も出ていた）。
+
+原因：20260928_01で追加した起動前のポート解放（`_free_port_if_stale`）が
+`subprocess.run(["netstat","-ano"], text=True)`で出力を文字列として受けていた。
+日本語Windowsのnetstatの出力はCP932（見出しが日本語）だが、ツールランチャー経由では
+`PYTHONUTF8=1`が引き継がれるためPythonはUTF-8として読もうとし、読み取りスレッドが
+例外になって`stdout`が`None`になっていた。さらにこの関数の呼び出しが例外処理の外
+にあったため、補助機能の失敗でアプリ全体が起動できなくなっていた。
+20260928_01の単体テストはモック（疑似データ）のみで、実際の日本語Windowsの出力
+では確認できていなかった（私の確認不足）。
+
+修正（`onenote_report_generator_20261005_01.py`。旧版は残してある）：
+
+- `netstat`・`tasklist`・`taskkill`の出力を`text=True`ではなくバイト列で受け、
+  `_decode_console_output()`で`errors="replace"`デコードするようにした
+  （必要なのはASCII部分＝TCP/LISTENING/PID/実行ファイル名だけなので、どの
+  エンコーディングでも例外にならない）。
+- `__main__`での`_free_port_if_stale(5000)`の呼び出しを`try/except`で囲み、
+  補助機能が何に失敗してもアプリ本体の起動を止めないようにした。
+- 画面のバージョン表示（`templates/index.html`のtitleと`<small>`）を新版に更新した。
+
+動作確認：実機相当のCP932のnetstat/tasklist出力（先頭バイトがUTF-8として不正）と
+`stdout=None`を使った単体テスト11項目が全件合格（5000番だけの抽出、50001の誤検出
+なし、python.exeのみ終了対象・chrome.exeは終了しない等を含む）。
+**Windows上での実起動は開発環境では不可のため、会社PCでの実機確認が必要。**
+
+### 修正: 起動バッチのif文ブロック内の括弧による構文エラー（2026-10-05）
+
+20260928_01の追記7で英語化した`start_onenote_report_generator.bat`のエラーメッセージ
+`(code: !EXIT_CODE!)`の`)`が`if (...)`ブロックを途中で閉じてしまい、実行後に
+バッチが構文エラーで即終了して`pause`に到達しなかった（そのため、Pythonの
+エラー時にウィンドウがすぐ消えて原因が見えなかった）。括弧を含まない文言
+（`exit code: !EXIT_CODE!`）に変更した。
+
 ## VERSION 20260928_01
+
+### 変更（追記7）: 起動バッチ`start_onenote_report_generator.bat`の不具合修正（2026-10-05）
+
+ツールランチャーのOneNote要約ツールを、起動バッチ経由（`tool_launcher/tools.json`を
+`kind: "bat"`に切替）で起動したところ、会社PCで次のエラーが出て起動できなかった
+（越智さんの実機報告）。
+
+- `'son' is not recognized...` / `'werShell' is not recognized...` /
+  `'��に変更した。' is not recognized...`（バッチ内の日本語コメントの断片が
+  コマンドとして実行されている）
+- `'wmic' is not recognized...`、続いてログファイル名が
+  `auto_onenote_log_~0,8datetime:~8,6.log`という不正な名前になり、
+  Pythonの出力リダイレクトに失敗して終了コード1で終了
+
+原因は独立した2つ：
+
+1. **日本語を含むUTF-8のバッチ＋`chcp 65001`**：cmd.exeはバッチファイル自身を
+   `chcp`ではなくシステムのコードページ（日本語環境ではCP932）の流儀で読むため、
+   UTF-8の日本語バイトを含む行が崩れ、`rem`の途中が別コマンドとして実行された
+   （`PowerShell`が`werShell`に化ける等）。リポジトリの`tool_launcher/run_tool_launcher.bat`
+   が「純ASCIIのみ」としているのと同じ理由。
+2. **`wmic`の廃止**：最近のWindows 11では`wmic`が標準で入っておらず、日時取得が
+   空になり、ログファイル名が不正になった（これが実際の失敗の直接原因）。
+
+修正（`start_onenote_report_generator.bat`のみ。実行ロジックは変更なし）：
+
+- ファイル全体を**純ASCII**にした（日本語の`rem`/`echo`は英語に置換。改行は元の
+  CRLFのまま）。あわせて不要になった`chcp 65001`を削除した（出力はログファイルへ
+  UTF-8でリダイレクトされ、`PYTHONIOENCODING=utf-8`は維持）。
+- 日時取得を`wmic`から`powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"`
+  に変更（ロケール非依存）。取得できない場合でもログパスが不正にならないよう、
+  `unknown`にフォールバックする。
+- 実行系の行の差分は上記2点（`chcp`削除・日時取得）のみ。
+
+動作確認：純ASCII・CRLF維持・実行系の行の差分を機械的に確認。**cmd.exeでの実行は
+開発環境では不可のため、会社PCでの実機確認が必要。**
 
 ### 変更（追記6）: フォルダ構成の整理（コードを`app/`フォルダへ移動）
 
