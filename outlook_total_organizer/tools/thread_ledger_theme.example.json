@@ -1,0 +1,66 @@
+{
+  "_comment": "過去スレッド台帳 S1 のテーマ例。実名・実アドレスは入れず placeholder にしてある。コピーして json/thread_ledger/themes/trade_import.json に置き、自分用に編集する（実データはGitに入れない）。キーが _ で始まる項目は無視される。氏名の別名(name_aliases)の書き方: ASCII表記(Taro Sato)と日本語表記(佐藤)は別々の別名として両方書く。ASCIIは語の境界で照合する(Ono は Onozuka に当たらない)。日本語は姓だけでも、スペース有り(佐藤 太郎)・無し(佐藤太郎)の表示名に一致する(姓の後ろが4文字までなら一致。後ろが続く別姓には当たりうる)。",
+  "theme_version": "example_1",
+  "owner": {
+    "name_aliases": ["Owner Person", "owner.person"],
+    "emails": ["owner.person@example.com"]
+  },
+  "anchors": [
+    {"label": "PM", "name_aliases": ["Pm Person"], "emails": ["pm.person@example.com"]},
+    {"label": "Admin", "name_aliases": ["Admin Person"], "emails": ["admin.person@example.com"]}
+  ],
+  "related_parties": [
+    {"label": "Colleague A", "kind": "person", "name_aliases": ["Colleague Alpha"], "emails": ["person1@example.com"], "domains": []},
+    {"label": "Courier X", "kind": "org", "name_aliases": ["Courier X"], "emails": [], "domains": ["courier-x.example.com"]},
+    {"label": "Broker Y", "kind": "org", "name_aliases": ["Broker Y"], "emails": [], "domains": ["broker-y.example.com"], "weight": 3}
+  ],
+  "keywords": {
+    "到着前書類": {
+      "weight": 2,
+      "strong": ["commercial invoice", "packing list", "air waybill", "AWB", "waybill", "incoterms", "C/O", "原産地", "country of origin"],
+      "weak": ["invoice", "shipment", "出荷", "納期"]
+    },
+    "通関": {
+      "weight": 3,
+      "strong": ["輸入申告", "通関", "customs clearance", "customs entry", "税関", "保税", "bonded", "輸入許可", "通関業者", "designated broker", "修正申告"],
+      "weak": ["hold", "保留"]
+    },
+    "関税・費用": {
+      "weight": 3,
+      "strong": ["関税", "duty", "tariff", "課税価格", "HS code", "HSコード", "demurrage"],
+      "weak": ["請求"]
+    },
+    "該非・輸出管理": {
+      "weight": 3,
+      "strong": ["該非判定", "該非判定書", "パラメータシート", "非該当", "ECCN", "export control", "export compliance", "輸出許可", "輸出貿易管理", "キャッチオール", "prohibited items"],
+      "weak": ["approval request", "承認"]
+    },
+    "物流・配送": {
+      "weight": 1,
+      "strong": ["フォワーダー", "forwarder"],
+      "weak": ["配送"]
+    },
+    "トラブル語": {
+      "weight": 2,
+      "strong": [],
+      "weak": ["遅延", "delay", "delayed", "urgent", "至急", "差し戻し", "修正", "corrective action", "クレーム", "再発", "不足", "missing", "訂正", "amend"]
+    }
+  },
+  "patterns": [
+    {"category": "関税・費用", "regex": "\\b\\d{4}\\.\\d{2}(\\.\\d{2,4})?\\b", "strong": false},
+    {"category": "物流・配送", "regex": "#\\s?\\d{10}", "strong": true}
+  ],
+  "exclude_folder_names": ["削除済みアイテム", "Deleted Items", "迷惑メール", "Junk Email", "Junk E-mail", "RSS フィード", "RSS Feeds", "RSS Subscriptions", "検索フォルダー", "Search Folders", "同期の問題", "Sync Issues", "会話の履歴", "Conversation History", "下書き", "Drafts", "送信トレイ", "Outbox"],
+  "exclude_folder_prefixes": ["note-", "Zenn", "Qiita", "Newsletter", "ニュースレター", "Sync"],
+  "exclude_stores": [],
+  "score_weights": {
+    "subject_multiplier": 2,
+    "weak_multiplier": 0.5,
+    "anchor_each": 3,
+    "related_each": 2,
+    "reply_every": 5,
+    "reply_points": 1,
+    "reply_cap": 5
+  },
+  "period": {"from": "2023-07", "to": "2026-09"}
+}

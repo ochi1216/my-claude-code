@@ -1,0 +1,7 @@
+# 正解件名の例（完全なダミー）。1行1件名。# で始まる行はコメント。
+# 実際の正解件名は json/thread_ledger/calibration_subjects.txt に書く（Git管理外）。
+# RE:/FW:/** internal only ** などの前置は付いていても外れていてもよい（正規化して照合する）。
+Re: Sample subject about topic X
+FW: [Courier X] Import to Country Y #0000000000
+[Request] Sample classification ABC-0000
+Re: Sample escalation about shipment Z

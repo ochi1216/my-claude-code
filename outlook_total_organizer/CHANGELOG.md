@@ -1,5 +1,46 @@
 # CHANGELOG — outlook_total_organizer
 
+## VERSION 20261009_01（過去スレッド台帳 S1: 走査エンジン）
+
+### 追加・修正
+	**過去スレッド台帳の第1段(S1)を単体スクリプトとして新規追加した(画面なし・読み取り専用。本体`app/`は未変更)**: 3年分(既定2023-07〜2026-09)の輸出入トラブルのスレッドを、走査→評価→台帳CSVにまとめる。設計は`trouble_scan_audit_v3.0`(越智さん承認済み)。
+	**第1段(軽量・COM)**: 全ストア(`--stores`/`--skip-stores`で限定)→メールフォルダ再帰(ルート直下は「(ルート直下)」)を、フォルダごとに1回だけISO書式(`YYYY-MM-DD HH:MM`)の`Restrict`(期間全体)→`Sort`昇順で走査。読むのはClass(43=メールのみ)・EntryID・Subject・ReceivedTime(取れなければSentOn)・SenderName・SenderEmailAddress(生値)・To・CC・ConversationIDだけ(Recipients/Body/Attachments/PropertyAccessorは第1段では読まない)。StoreIDはアイテムごとの`Parent.StoreID`ではなくストアの値を1回だけ取得して使う(速度のため)。結果はフォルダ単位で`json/thread_ledger/scan_cache/`にキャッシュ(本文なし)。完了済みはスキップ、`--rescan`で再取得、5000件ごとにチェックポイント(最後のReceivedTime以降をRestrictしEntryIDで重複除去して再開)、Ctrl+Cで保存して終了。Restrictは([ReceivedTime]範囲) OR ([SentOn]範囲)で送信済み系の取りこぼしを防ぐ(失敗する環境では従来のReceivedTime→0件ならSentOnにフォールバック。重複はEntryIDで除去)。
+	**評価(純粋関数・COM不要。`--evaluate-only`でキャッシュだけから再実行)**: ストア横断の重複除去(キー=ReceivedTimeの秒+正規化件名+SenderName、取得元は全て記録、ストア間重複の月別件数を表示)→スレッド化(ConversationID、空なら正規化件名)→候補判定→スコア。候補=条件A(アンカー関与)かつB(越智本人がFrom/To/CC)かつC。条件C=(i)関係者の関与、または(ii)件名/本文のキーワード信号。キーワードは2層で、strongが1語でも当たる、またはweakが異なる2語以上当たると成立(weak1語では不成立)。patternsは正規表現で、patternごとにstrong指定可。スコアは外部JSON(`score_weights`と各カテゴリの`weight`)による単純加算で、件名ヒットは`subject_multiplier`倍。内訳文字列と`theme_version`をCSVに出す。条件A/B/Cのいずれか1つだけ不成立のスレッド件数も表示(再現率の検証・調整用)。
+	**第2段(候補のみ・COM。`--no-stage2`で省略、`--no-body`で本文照合を省略)**: `GetItemFromID`で開き、送信者SMTP・To/CCのSMTP・添付ファイル名・インターネットメッセージID・本文のキーワード/パターン照合(語ごとの件数のみ。本文は保存しない)を`candidate_cache/stage2.json`に保存し、アドレス/ドメイン一致を再評価に反映。項目単位で失敗を握りつぶし、エラー種別のみ集計。対象は既定で「条件AかつBのスレッド」(`--stage2-scope ab`。本文のキーワードで条件Cを満たすスレッドを拾うため。`candidate`で候補のみ、`either`でAまたはB)。
+	**出力(`mail_reports/`、utf-8-sig、Git管理外)**: ①`thread_ledger_<テーマ名>_<日時>.csv`(1スレッド1行・候補のみ・スコア降順。確認結果/メモ/問題の種類は`json/thread_ledger/judgments_<テーマ名>.json`からマージ。ツールは新規行を追加するだけで既存の判定は上書きしない) ②`coverage_<日時>.csv`(ストア×月の走査件数・重複除去後件数・アンカー関与件数・候補スレッド数。全ストア0件の月は「未取得の恐れ」) ③`suggest_participants_<日時>.csv`(`--suggest`。themeに無い参加者の出現スレッド数) ④`candidate_terms_<日時>.csv`(`--suggest-terms`。件名・添付名に偏って出る語。本文は保存していないため対象外) ⑤コンソール総括(件数・重複・エラー種別)と`thread_ledger_scan_<日時>.log`。全てのメール由来文字列はCSVインジェクション対策(先頭が`= + - @ タブ CR`なら先頭に`'`)を通す。
+	**`--check-subjects [ファイル]`**(既定`json/thread_ledger/calibration_subjects.txt`): 正解件名を正規化して評価済みスレッドと完全一致/部分一致で探し、候補判定(条件A/B/C)・スコア順位、見つからない場合は「キャッシュに無い」と「あるが候補外(不成立の条件)」を区別して表示。件名を表示してよいのはこの出力(コンソールのみ・ログには残さない)とCSVだけ。**`--open <thread_id>`**: 台帳CSV(無ければキャッシュ)から最新メールのEntryID/StoreIDを引き、`GetItemFromID(...).Display()`で開く(Display以外は何も呼ばない)。
+	**テーマJSON**: `owner` / `anchors` / `related_parties`(氏名エイリアス・アドレス・ドメイン) / `keywords`(カテゴリごとの`weight`・`strong`・`weak`) / `patterns` / `exclude_folder_names` / `exclude_folder_prefixes` / `exclude_stores` / `score_weights` / `period` / `theme_version`。氏名エイリアスは大文字小文字・全角半角・空白・「姓, 名」「名 姓」・敬称(さん/様/殿/san)を正規化して照合する。ASCIIの別名は語頭・語末の境界を常に要求('Ono'が'Onozuka'に当たらない)。日本語の別名はトークン単位の一致が基本('田中'は'山田中'に当たらない。'田中さん'・'田中 花子'は一致)。加えて姓だけの別名は、表示名が全て非ASCIIで連結が別名で『始まり』残りが0〜4文字のとき一致する('越智'→'越智太郎'、'木村'→'木村美穂')。既知のリスク: 後ろに1〜4文字続く別姓('木村'→'木村戸')も一致する。連結文字列の部分一致(終わる・途中)には戻さないこと。実在の氏名・アドレスは`json/`の実themeにだけ置き、リポジトリには`tools/thread_ledger_theme.example.json`(placeholderのみ)を置く。
+	**コンソール/ログ**: 件名・氏名・アドレスは出さない(ストア名のメールアドレス形式は`<MAIL>`に置換。エラーは種別のみ)。
+
+### レビュー指摘への対応(同日追記・同じ新規ファイル内の修正)
+	**M1 同名ストア**: キャッシュにStoreIDとFilePathを保存し、ストアの識別・重複除去・キャッシュ選択・coverageはこれで行う(store_indexは使わない)。表示名が重複するときは「PST」「PST #2」のようにラベルで一意化(出力・coverage・`--stores`/`--skip-stores`の選択もラベルで区別)。キャッシュのファイル名ハッシュにもStoreIDを使う。
+	**M2 判定JSON**: 存在するのに読めない(壊れている・空・形が不正)ときは上書きせず、タイムスタンプ付き`.bak_`へコピーして警告し、判定の書き出しをスキップ(CSVの判定列は空欄)。値の形が不正な行はそのまま残す。
+	**M3 重複除去**: 統合するのはストア間だけ。同一ストア内でEntryIDが異なるメールは別メール(件数は`same_store`に表示)。統合時のTo/CCは和集合(`; `連結)。
+	**M4 名前照合**: 上記のとおり(ASCIIは語頭・語末の境界、日本語はトークン一致)。`name_matches`はメモ化。
+	**M5 第2段のガード**: 開始前に対象通数と概算時間(1通0.2秒の仮置き。実行中は実測で補正)を表示。`--stage2-max N`(既定5000)を超えると`--yes`が無ければ中止(終了コード3。第1段の結果は出力)し、`--stage2-scope candidate`での試走を案内。stage2.jsonの保存は1000通ごと(と終了時・Ctrl+C時)。エラーがあった第2段レコードには`retry`を付け、次回取り直す。
+	**M6 COM参照**: 列挙時はフォルダのEntryIDとStoreIDだけを記録し、走査時に`GetFolderFromID`で取得してフォルダごとに解放(ストア・ルートも列挙後に解放)。
+	**M7 送信済み**: 上記のとおり。OR方式の再開は並び順が保証できないため期間全体を取り直し、取得済みEntryIDを早期に飛ばす(フォールバック方式はlast_received以降から再開)。
+	**M8 辞書変更後**: 第2段レコードの辞書ハッシュ(`bh`)が現在と不一致なら、評価では本文ヒットを使わず、件数を警告表示(`--no-body`なしの第2段再実行で取り直す)。
+	**再レビュー対応**: ①姓だけの日本語別名がスペース無しのフルネームに一致(上記)。exampleの`_comment`に「ASCII表記と日本語表記は別々の別名として両方書く」旨を追記。 ②StoreIDが空のときは`GetFolderFromID`/`GetItemFromID`の第2引数を省略して呼ぶ。 ③ルートフォルダのEntryIDが空のときはスキップせず、`GetStoreFromID(StoreID).GetRootFolder()`、取れなければ列挙時のストア参照(このときだけ保持)で取得。 ④第2段は途中保存が失敗しても続行し、最終保存を`try/finally`で必ず試みる。 ⑤読めないアイテムが多く途中で止めたとき(iter_error)は、完了済みの旧キャッシュを置換しない(`.part`のまま残し、完了時のみ置換)。 ⑥`restricted.Count`が失敗したときは完了扱いにしない。 ⑦docstringに「初回は--from/--toを1か月、--storesで1ストアに絞って試走(第2段は--stage2-scope candidate)」を追記。
+	**任意改善**: GetNext失敗時は失敗位置を飛ばして`Item(i)`で先へ進む(最大50回。超えたら未完了)。期間変更などの再取得は`.part`に書き、完了時に置換(中断しても旧キャッシュは壊れない)。ConversationIDが空のとき、短い(8文字未満)/一般語の件名は束ねず単独スレッド。`--check-subjects`は完全一致を優先し、完全一致が候補外なら部分一致の候補があってもfoundにしない(部分一致は汎用件名を除外)。coverageの備考に「取得元ゼロ・要確認」、ストア別の0件月数をコンソールに表示。`--candidate-terms`は`--suggest-terms`の別名。resume時のエラー件数の二重計上を修正。
+	**安全性・プライバシー**: patternsの正規表現は200字まで・ネストした量指定子`(a+)+`型は拒否、件名照合は300字・本文は30万字まで。`write_json_atomic`はflush+fsync。`--mask-names`でコンソール/ログのストア名・フォルダ名を連番(Store-01 / Folder-001)に置換(CSVは元の名前)。docstring・テスト・example内の実在の姓を架空名に置換し、実姓が残らないことをテストで確認。
+
+### 追加・変更関数
+	新規スクリプト`tools/thread_ledger_scan_20261009_01.py`の主な関数。純粋関数: `normalize_subject` / `name_key` / `name_matches` / `split_names` / `smtp_like` / `normalize_theme` / `load_theme` / `build_term_regex` / `scan_text_hits` / `keyword_signal`(強弱2層) / `entity_matches` / `evaluate_thread` / `compute_score` / `merge_caches_to_mails`(重複除去) / `build_threads` / `select_caches` / `decide_cache_action` / `summarize_conditions` / `select_stage2_targets` / `csv_safe` / `write_csv` / `merge_judgments` / `build_ledger_rows` / `build_coverage_rows` / `suggest_participants` / `rank_candidate_terms` / `classify_check_subjects`。COM部分: `run_scan` / `enumerate_mail_folders` / `read_light_item` / `scan_folder_items` / `run_stage2` / `read_stage2_item` / `run_open` / `run_with_com` / `Reporter`。既存の関数は変更していない(`app/`は未変更)。
+
+### 新規追加：
+	`tools/thread_ledger_scan_20261009_01.py` / `tools/thread_ledger_theme.example.json`(placeholderのみ) / `tools/calibration_subjects.example.txt`(ダミー件名) / `tests/test_thread_ledger_scan.py`(純粋関数 + COMのフェイクで、件名や例外メッセージが出力に出ないこと・1フォルダの例外で続行・Ctrl+Cでの保存・チェックポイント再開・変更系メソッドを呼ばないこと・第1段でBody等を読まないことを確認)
+
+変更ファイル：
+	`CHANGELOG.md`(このエントリの追記のみ)
+
+変更しないこと（宣誓）：
+	`app/`配下の本体・既存テスト・既存の診断スクリプト・`.gitignore`・`json/`の実データ。Outlookのアイテムの変更・移動・削除・既読化、AddStore等のプロファイル変更は一切しない(Display()は`--open`のときだけ)。コミット・Pushはしていない。
+
+### 動作確認(Linux側)
+	全テスト合格(成功1914・失敗0・エラー0。うち新規`test_thread_ledger_scan.py`は153件。スキップ109はtkinter無しのGUIテスト、想定内の失敗3は既知の記録)。COM部分はフェイクでの確認のみで、実機は未検証。
+	**実機で確認してほしいこと**: ①`--stores`で1ストア(例: PST)に絞った試走で、キャッシュと台帳CSVができること ②全ストアの走査時間(目安1時間前後、夜間推奨)と、2024-04〜07,09,10のストア間重複件数が妥当か ③`--check-subjects`で正解件名の再現率 ④第2段のSMTP取得(EXアドレスの解決)と本文照合の速度 ⑤`--open`で最新メールが開くこと。
+
 ## VERSION 20261008_01（オンラインアーカイブ判定の修正）
 
 ### 追加・修正
