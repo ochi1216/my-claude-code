@@ -1,5 +1,44 @@
 # CHANGELOG — outlook_total_organizer
 
+## VERSION 20261009_02（過去スレッド台帳 S1.5: Excelから件名絞り込みで開く）
+
+### 追加・修正
+	**実機試走(S1)の結果を受けた追加。`tools/thread_ledger_scan_20261009_02.py`を新版とし、旧`_01`は`tools/old/`へ移動(`git mv`)。本体`app/`は未変更。**
+	**1. `--open`を強化(件名で絞り込んだ状態でOutlookを開く)**: `GetItemFromID`で最新メールを取り、`ActiveExplorer`(無ければメールのあるフォルダの`GetExplorer()`)の`CurrentFolder`をメールの`Parent`(PSTのルート直下を含む)に切り替え、`Explorer.Search('subject:"<安全化した件名>"', 0)`で絞り込み、該当メールを選択状態にする。選択できない・失敗したときは`Display()`にフォールバック。件名の安全化(`safe_search_subject`)は本体`show_thread_in_explorer`の考え方に合わせ、RE:/FW:/`** internal only **`等の前置と末尾の括弧書きを除去し、検索を壊す記号を空白にする。指定は`thread_id`(`--open`)、または`--entry-id`/`--store-id`(16進文字列のみ受け付ける)。読み取りのみ。
+	**2. Excel出力**: 台帳を`.xlsx`でも出力(`openpyxl`がimportできるときのみ。無ければCSVのみで`pip install openpyxl`を案内)。件名セルのhyperlinkは`ledger:<thread_id>`(スキームと目標は固定の自前生成。thread_idは`^[A-Za-z0-9_-]{4,64}\Z`に一致するものだけ)。メール由来の文字列は`csv_safe`(先頭が`= + - @ タブ CR`なら`'`付加)に加え、セルの型を文字列に強制して数式化を防ぐ。メール数・スコアは数値セル、確認結果列は入力規則(本物/違う/保留)、先頭行固定・フィルタ付き。CSVも従来どおり出力。
+	**3. `ledger:`プロトコル(オプトイン)**: `--register-protocol`で`HKCU\Software\Classes\ledger`にURL Protocolを登録(HKCUのみ・管理者権限不要)。コマンドは`"<pythonw.exe>" "<このスクリプトの絶対パス>" --open-url "%1"`。実行前に登録内容を表示して確認(`--yes`で省略)。`--unregister-protocol`で削除。`--open-url`は`ledger:<thread_id>`のみ受け付け、thread_idが`^[A-Za-z0-9_-]{4,64}\Z`に一致しなければCOMに触れず拒否(任意のパスやコマンドは受け付けない)。失敗時だけメッセージボックス(`ctypes`の`MessageBoxW`。非Windowsでは何もしない)を出し、失敗ログを書く(成功時はログを作らない)。`winreg`は遅延import。
+	**4. 判定のExcel取込**: `--import-judgments <台帳のcsv|xlsx>`で「確認結果(本物/違う/保留)」「メモ」「問題の種類」をjudgments JSONに取り込む。`thread_id`列で突合し、確認結果は許可リスト(本物/違う/保留/空)で検証して不正値はスキップ(件数を表示)。空のセルは既存を上書きしない。台帳(judgments)に存在するthread_idのみ取り込み、無いIDはスキップして件数を表示。既存の判定JSONは正常でも上書き前に必ず`.bak_<日時>`へコピーし(コピーできなければ中止)、壊れているときは取込を中止。サイズ上限(ファイル50MB・20万行・メモは2000字)あり。**台帳CSVをExcelで開くとthread_idが数値化(例 12345e678901)されることがあるため、取込はxlsxで編集したファイルを推奨**(`--help`・docstringにも記載)。CSVはutf-8-sig/cp932(ExcelのCSV)に対応。
+	**5. `--include-no-anchor`**: B∧Cが成立しAだけが不成立のスレッド(参考候補)も台帳に出す。列「参考(アンカー無し)」に`参考`のフラグ、並びは通常候補の後。既定はオフ。判定JSONにも新規行を追加する。
+	**6. 第2段の見積り**: 1通あたりの仮置きを0.2秒から0.8秒に変更(実測)。`--stage2-max`の既定(5000)は維持。
+	**7. 第1段の見積り**: 開始前に「対象アイテム数×60ms」を表示(実測に基づく)。
+	**その他**: `thread_id`/`entry_id`の検証正規表現は、末尾の改行を許す`$`ではなく`\Z`で閉じた。`Reporter`はpythonw.exe(標準出力なし)でも落ちない。
+
+### レビュー対応(同日追記)
+	**致命**: 新版の末尾から`if __name__ == "__main__": sys.exit(main())`が消えていた(直接実行しても何も起きない)のを復旧。subprocessで`--help`(rc=0・usage出力)と、`--open-url`に不正値でrc!=0を確認するテストと、末尾がmainガード+改行であることを確認するテストを追加。
+	**`--open-url`の他オプション注入対策**: `"%1"`の値に`"`が入ると後続が別引数になる問題に対し、(a)`main`の冒頭(parse直後・make_paths前)で`argv`が正確に`['--open-url', <値>]`であることを検証し、違えば何もせず終了コード2(`--open-url=...`形式も拒否)、(b)`ArgumentParser(allow_abbrev=False)`で省略形(`--reg`等)を拒否、(c)`--open-url`のときは`--data-dir`/`--output-dir`を無視して既定パスを使う、(d)登録コマンドは`--open-url "%1"`のまま。注入のケース(`--unregister-protocol --yes`・`--data-dir`・省略形など)がレジストリ・COMに触れず拒否されることをテスト。
+	**`--open-url`の失敗の可視化**: 失敗時(thread_id不正・台帳に無い・Outlookを開けない・形式不正)は短い日本語のメッセージボックスと、`mail_reports/thread_ledger_open_<日時>.log`を出力。成功時はログを作らない。
+	**Explorer操作**: `CurrentFolder`切替後、`Search`の前に0.4秒待ち、選択(`IsItemSelectableInView`/`AddToSelection`)は0.3秒間隔で最大5回リトライ。失敗なら従来どおり`Display()`。
+	**判定取込**: 台帳に存在するthread_idのみ(不正な確認結果だけの行で空エントリを作らない)、サイズ上限、正常な既存JSONも上書き前に`.bak_`へ退避。
+	**その他**: 台帳CSV/キャッシュ由来の`entry_id`/`store_id`も16進(`HEX_ID_RE`)を検証してから使う。`--unregister-protocol`のログ文言を実際の挙動(非再帰・深い方から4本)に合わせ、`--register-protocol`/`--unregister-protocol`は既存の`ledger`登録があれば内容を表示してから確認する(`--yes`で省略)。
+
+	**`--open-url`の空値による迂回を修正(差分レビュー)**: `--open-url ""`＋他オプション(例 `--open-url "" --unregister-protocol --yes --theme=""`)が、空文字が偽と判定されて通常フローに落ち、削除などを実行できた。`--open-url`の既定値を`None`にし、`args.open_url is not None`、またはargvに`--open-url`/`--open-url=`で始まる要素が1つでもあれば(`has_open_url_token`)必ず厳密検証(`['--open-url', <値>]`のみ)に入る二重の判定にした。空値は`parse_ledger_url`で拒否される。空値＋各オプション(`--unregister-protocol --yes`/`--register-protocol`/`--data-dir`/`--output-dir`/`--theme=`/`--import-judgments`)の全組み合わせが拒否され、レジストリ・COM・ファイルに触れないことをテスト。`--open-url`を含む呼び出しでargparseが`SystemExit`するとき(未知のオプション等)は、pythonwで無反応にならないようメッセージボックスで知らせる。
+
+### 追加・変更関数
+	`safe_search_subject` / `build_subject_query` / `open_thread_in_outlook` / `run_open`(強化) / `parse_ledger_url` / `protocol_plan` / `protocol_command` / `pythonw_path` / `register_protocol` / `unregister_protocol` / `run_protocol` / `write_ledger_xlsx` / `import_openpyxl` / `read_table_rows` / `import_judgment_rows` / `run_import_judgments` / `is_reference_thread` / `build_ledger_rows`(`include_no_anchor`) / `main`(新オプション)。定数`STAGE2_EST_SEC`=0.8、`STAGE1_EST_SEC_PER_ITEM`=0.06。
+
+### 新規追加：
+	`tools/thread_ledger_scan_20261009_02.py`(旧`_01`は`tools/old/`)
+
+変更ファイル：
+	`tests/test_thread_ledger_scan.py`(読み込み対象が`_02`になる。件名安全化・thread_id/URL検証・Explorer操作のフェイク・xlsx(openpyxlがあるとき)・プロトコル登録(フェイクwinreg)・判定取込・参考候補・見積りのテストを追加) / `tools/thread_ledger_theme.example.json`は変更なし / `CHANGELOG.md`(このエントリの追記のみ)
+
+変更しないこと（宣誓）：
+	`app/`配下の本体・既存の診断スクリプト・`.gitignore`・`json/`の実データ。Outlookのアイテムの変更・移動・削除・既読化は一切しない(`Display()`と、Explorerの表示切替・検索・選択のみ)。レジストリはオプトインの`--register-protocol`のときだけ、HKCUの`Software\Classes\ledger`に書く。コミット・Pushはしていない。
+
+### 動作確認(Linux側)
+	全テスト合格(成功1964・失敗0・エラー0。うち`test_thread_ledger_scan.py`は203件。スキップ109はtkinter無しのGUIテスト、想定内の失敗3は既知の記録)。COM・Explorer・レジストリ・Excelのhyperlink起動は実機未検証(フェイクのみ)。
+	**越智さんの手順**: ①`--evaluate-only`でxlsxを出力 ②`python tools\thread_ledger_scan_20261009_02.py --register-protocol`(内容を確認して`y`) ③ExcelでxlsxのB列の件名をクリック→Outlookが件名絞り込みで開く(初回はExcelの警告ダイアログが出ることがある) ④確認結果をExcelで入力して保存→`--import-judgments <保存したファイル>` ⑤不要になったら`--unregister-protocol`。
+
 ## VERSION 20261009_01（過去スレッド台帳 S1: 走査エンジン）
 
 ### 追加・修正

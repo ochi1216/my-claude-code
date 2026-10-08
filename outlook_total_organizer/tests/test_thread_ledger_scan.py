@@ -12,6 +12,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -35,6 +36,8 @@ def _load_tool():
 
 
 T = _load_tool()
+ORIG_WAITS = (T.EXPLORER_SETTLE_SEC, T.SELECT_RETRY_SEC, T.SELECT_RETRIES)
+T.EXPLORER_SETTLE_SEC = T.SELECT_RETRY_SEC = 0      # テストでは待たない（既定値は test_explorer_wait_defaults で確認）
 
 
 def _rd(path, enc="utf-8"):
@@ -1090,19 +1093,24 @@ class FakeNamespace:
 
 
 class FakeOutlook:
-    def __init__(self, ns):
+    def __init__(self, ns, explorer=None):
         self.ns = ns
+        self.explorer = explorer
 
     def GetNamespace(self, name):
         return self.ns
 
+    def ActiveExplorer(self):
+        return self.explorer
+
 
 class FakeClient:
-    def __init__(self, ns):
+    def __init__(self, ns, explorer=None):
         self.ns = ns
+        self.explorer = explorer
 
     def Dispatch(self, name):
-        return FakeOutlook(self.ns)
+        return FakeOutlook(self.ns, self.explorer)
 
 
 class FakePythonCom:
@@ -1117,9 +1125,9 @@ class FakePythonCom:
         self.uninit += 1
 
 
-def fake_com(ns):
+def fake_com(ns, explorer=None):
     pc = FakePythonCom()
-    return (FakeClient(ns), pc), pc
+    return (FakeClient(ns, explorer), pc), pc
 
 
 def dt(m, d, h=9, mi=0, s=0):
@@ -1237,7 +1245,7 @@ class TestScanCom(ComTestBase):
         files = os.listdir(self.out)
         for prefix in ("thread_ledger_theme_", "coverage_", "suggest_participants_", "candidate_terms_"):
             self.assertTrue(any(f.startswith(prefix) and f.endswith(".csv") for f in files), prefix)
-        led = [f for f in files if f.startswith("thread_ledger_theme_")][0]
+        led = [f for f in files if f.startswith("thread_ledger_theme_") and f.endswith(".csv")][0]
         rows = _rdict(os.path.join(self.out, led))
         self.assertEqual(len(rows), 2)        # C1(E1/E2/P1重複) と C2
         self.assertEqual(sorted(r["メール数"] for r in rows), ["1", "2"])
@@ -1586,7 +1594,7 @@ class TestStage2AndModes(ComTestBase):
         j2 = _rj(jp)
         self.assertEqual(j2[tid]["確認結果"], "本物")
         self.assertEqual(j2[tid]["メモ"], "手編集")
-        newest = sorted(f for f in os.listdir(self.out) if f.startswith("thread_ledger_theme_"))[-1]
+        newest = sorted(f for f in os.listdir(self.out) if f.startswith("thread_ledger_theme_") and f.endswith(".csv"))[-1]
         rows = _rdict(os.path.join(self.out, newest))
         self.assertEqual([r["確認結果(本物/違う/保留)"] for r in rows if r["thread_id"] == tid], ["本物"])
 
@@ -1621,14 +1629,16 @@ class TestStage2AndModes(ComTestBase):
     def test_open_uses_ledger_and_only_displays(self):
         self.scan_first()
         run_main(self.argv("--evaluate-only"))
-        led = sorted(f for f in os.listdir(self.out) if f.startswith("thread_ledger_theme_"))[-1]
+        led = sorted(f for f in os.listdir(self.out) if f.startswith("thread_ledger_theme_") and f.endswith(".csv"))[-1]
         rows = _rdict(os.path.join(self.out, led))
         row = rows[0]
         shown = []
         item = FakeItem({"EntryID": row["最新メールEntryID"]}, display_log=shown)
         ns = FakeNamespace([], {(row["最新メールEntryID"], row["最新メールStoreID"]): item})
         com, pc = fake_com(ns)
-        code, out = run_main(["--open", row["thread_id"], "--data-dir", self.data, "--output-dir", self.out], com)
+        import unittest.mock as mock
+        with mock.patch.object(T, "HEX_ID_RE", re.compile(r".+")):          # フェイクのIDは16進ではない
+            code, out = run_main(["--open", row["thread_id"], "--data-dir", self.data, "--output-dir", self.out], com)
         self.assertEqual(code, 0)
         self.assertEqual(shown, [row["最新メールEntryID"]])
         self.assertEqual(ACCESSED, [])
@@ -2021,7 +2031,7 @@ class TestSafetyAndOptions(ComTestBase):
         logtext = _rd(os.path.join(self.out, log), "utf-8-sig")
         for secret in ("2024_Q2", "Inbox", "user@example.com"):
             self.assertNotIn(secret, logtext)
-        led = sorted(f for f in os.listdir(self.out) if f.startswith("thread_ledger_theme_"))[-1]
+        led = sorted(f for f in os.listdir(self.out) if f.startswith("thread_ledger_theme_") and f.endswith(".csv"))[-1]
         csv_text = _rd(os.path.join(self.out, led), "utf-8-sig")
         self.assertTrue("2024_Q2" in csv_text or "user@example.com" in csv_text)           # CSVには元の名前
         T.configure_masking(False)
@@ -2035,12 +2045,12 @@ class TestSafetyAndOptions(ComTestBase):
         self.assertEqual(code, 0)
         self.assertEqual(len(self.caches()), 2)
         self.assertIn("PST #2", out)
-        led = sorted(f for f in os.listdir(self.out) if f.startswith("thread_ledger_theme_"))[-1]
+        led = sorted(f for f in os.listdir(self.out) if f.startswith("thread_ledger_theme_") and f.endswith(".csv"))[-1]
         rows = _rdict(os.path.join(self.out, led))
         self.assertEqual(len(rows), 2)
         self.assertTrue(any("PST #2" in r["取得元(ストア/フォルダ)"] for r in rows))
         run_main(self.argv("--evaluate-only", "--stores", "#2"))
-        led2 = sorted(f for f in os.listdir(self.out) if f.startswith("thread_ledger_theme_"))[-1]
+        led2 = sorted(f for f in os.listdir(self.out) if f.startswith("thread_ledger_theme_") and f.endswith(".csv"))[-1]
         self.assertEqual(len(_rdict(os.path.join(self.out, led2))), 1)
 
     def test_cli_alias_and_defaults(self):
@@ -2169,7 +2179,7 @@ class TestOptionalImprovements(unittest.TestCase):
         words = ["中" + "井", "梶" + "川", "佐" + "治", "Na" + "kai", "Kaji" + "kawa", "Sa" + "ji", "nexp" + "eria",
                  "dhl" + r"\.com", "trade" + "win"]
         pat = re.compile("|".join(words), re.IGNORECASE)
-        targets = [os.path.join(TOOLS_DIR, f) for f in ("thread_ledger_scan_20261009_01.py",
+        targets = [os.path.join(TOOLS_DIR, f) for f in ("thread_ledger_scan_20261009_02.py",
                    "thread_ledger_theme.example.json", "calibration_subjects.example.txt")] + [os.path.abspath(__file__)]
         for t in targets:
             self.assertIsNone(pat.search(_rd(t)), t)
@@ -2304,6 +2314,810 @@ class TestReReviewFixes(ComTestBase):
         txt = _rd(os.path.join(TOOLS_DIR, "thread_ledger_theme.example.json"))
         self.assertIn("別々の別名として両方書く", txt)
 
+
+
+# ============================================================
+# S1.5: 件名絞り込みで開く・xlsx・プロトコル・判定取込・参考候補・見積り
+# ============================================================
+class FakeExplorer:
+    def __init__(self, selectable=True, search_raises=None, folder_explorer=None):
+        self.selectable = selectable
+        self.search_raises = search_raises
+        self.CurrentFolder = None
+        self.queries = []
+        self.selected = []
+        self.activated = 0
+        self.displayed = 0
+        self.cleared = 0
+
+    def Activate(self):
+        self.activated += 1
+
+    def Display(self):
+        self.displayed += 1
+
+    def Search(self, query, scope):
+        if self.search_raises is not None:
+            raise self.search_raises
+        self.queries.append((query, scope))
+
+    def IsItemSelectableInView(self, item):
+        return self.selectable
+
+    def ClearSelection(self):
+        self.cleared += 1
+
+    def AddToSelection(self, item):
+        self.selected.append(item)
+
+
+class FakeParentFolder:
+    def __init__(self, explorer=None):
+        self.explorer = explorer
+
+    def GetExplorer(self):
+        return self.explorer
+
+
+class TestSearchSubject(unittest.TestCase):
+    def test_safe_search_subject(self):
+        f = T.safe_search_subject
+        self.assertEqual(f("RE: FW: ** internal only ** [Export request]2024-04-01 10:00"), "Export request 2024 04 01 10 00")
+        self.assertEqual(f("Re: Import to Japan（PO 8210238665）"), "Import to Japan")
+        self.assertEqual(f("FW: 【DHL】Import \"x\" (a) to Japan from US#0000000000"), "【DHL】Import x a to Japan from US#0000000000")
+        self.assertEqual(f('a"b:c;d<e>{f}\'g\\h*i%j'), "a b c d e f g h i j")
+        self.assertEqual(f("  ＲＥ：  Ｈｅｌｌｏ　　Ｗｏｒｌｄ  "), "Hello World")
+        self.assertEqual(f("RE:"), "")
+        self.assertEqual(f(None), "")
+        self.assertEqual(len(f("x" * 500)), 200)
+
+    def test_build_subject_query(self):
+        self.assertEqual(T.build_subject_query("RE: Topic (A)"), 'subject:"Topic"')
+        self.assertEqual(T.build_subject_query("RE: ()"), "")
+        q = T.build_subject_query('x" OR from:evil')
+        self.assertNotIn('"', q[len('subject:"'):-1])
+
+
+class TestOpenInOutlook(unittest.TestCase):
+    def setUp(self):
+        ACCESSED.clear()
+
+    def run_open(self, explorer, item_fields=None, parent=None, **kw):
+        shown = []
+        fields = {"EntryID": "E" * 20, "Subject": "RE: Topic about shipment (PO 1)", "Parent": parent or FakeParentFolder()}
+        fields.update(item_fields or {})
+        item = FakeItem(fields, display_log=shown, **kw)
+        ns = FakeNamespace([], {("E" * 20, "S" * 20): item})
+        rep = T.Reporter(None)
+        with contextlib.redirect_stdout(io.StringIO()):
+            mode = T.open_thread_in_outlook(FakeClient(ns, explorer), "E" * 20, "S" * 20, "", rep)
+        return mode, shown, item, rep
+
+    def test_active_explorer_switches_folder_searches_and_selects(self):
+        ex = FakeExplorer()
+        parent = FakeParentFolder()
+        mode, shown, item, _ = self.run_open(ex, parent=parent)
+        self.assertEqual(mode, "explorer")
+        self.assertIs(ex.CurrentFolder, parent)                 # メールのあるフォルダに切り替え
+        self.assertEqual(ex.queries, [('subject:"Topic about shipment"', 0)])
+        self.assertEqual(ex.selected, [item])
+        self.assertEqual(shown, [])
+        self.assertEqual(ACCESSED, [])
+
+    def test_no_active_explorer_creates_one_from_parent_folder(self):
+        ex = FakeExplorer()
+        mode, shown, item, _ = self.run_open(None, parent=FakeParentFolder(ex))
+        self.assertEqual(mode, "explorer")
+        self.assertEqual(ex.displayed, 1)
+        self.assertEqual(len(ex.queries), 1)
+
+    def test_falls_back_to_display_when_not_selectable_or_error(self):
+        mode, shown, _i, _r = self.run_open(FakeExplorer(selectable=False))
+        self.assertEqual((mode, len(shown)), ("display", 1))
+        mode, shown, _i, rep = self.run_open(FakeExplorer(search_raises=FakeComError(SECRET_ERR)))
+        self.assertEqual((mode, len(shown)), ("display", 1))
+        self.assertNotIn(SECRET_ERR, "\n".join(rep.lines))
+        mode, shown, _i, _r = self.run_open(FakeExplorer(), item_fields={"Subject": "RE:"})
+        self.assertEqual((mode, len(shown)), ("display", 1))             # 件名が空なら絞り込まない
+        mode, shown, _i, _r = self.run_open(FakeExplorer(), item_fields={"Parent": None})
+        self.assertEqual(mode, "display")
+
+    def test_run_open_by_entry_id_validates_hex(self):
+        args = T.parse_args(["--entry-id", "../x", "--store-id", "ab"])
+        rep = T.Reporter(None)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(T.run_open(args, rep, T.make_paths("/x", "/y"), (2024, 1), (2024, 12)), 2)
+        ns = FakeNamespace([], {})
+        args2 = T.parse_args(["--entry-id", "ab" * 10, "--store-id", "cd" * 10])
+        item = FakeItem({"EntryID": "ab" * 10, "Subject": "Topic long subject", "Parent": FakeParentFolder()})
+        ns.by_id[("ab" * 10, "cd" * 10)] = item
+        ex = FakeExplorer()
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = T.run_open(args2, rep, T.make_paths("/x", "/y"), (2024, 1), (2024, 12), (FakeClient(ns, ex), FakePythonCom()))
+        self.assertEqual((code, len(ex.queries)), (0, 1))
+
+
+class TestThreadIdAndUrlValidation(unittest.TestCase):
+    def test_thread_id_regex(self):
+        ok = ["abcd", "a" * 64, "0123456789ab", "A_b-C"]
+        bad = ["", "abc", "a" * 65, "../etc", "a b c d", "abc;rm", "ab\tcd", "a/b/c/d", "abcd\n", "ａｂｃｄ", "ab..cd", "a&b|cd"]
+        for t in ok:
+            self.assertTrue(T.LEDGER_THREAD_ID_RE.match(t), t)
+        for t in bad:
+            self.assertIsNone(T.LEDGER_THREAD_ID_RE.match(t), repr(t))
+
+    def test_parse_ledger_url(self):
+        self.assertEqual(T.parse_ledger_url("ledger:abcd1234"), "abcd1234")
+        self.assertEqual(T.parse_ledger_url("LEDGER:abcd1234"), "abcd1234")
+        self.assertEqual(T.parse_ledger_url("ledger://abcd1234/"), "abcd1234")
+        for bad in ("", None, "ledger:", "ledger:../../x", "ledger:ab cd", "ledger:abcd;calc", "http://x", "ledger:" + "a" * 65,
+                    "ledger:abcd&calc", "xledger:abcd1234", "ledger:abcd1234 --evil", "file:///c:/x"):
+            self.assertIsNone(T.parse_ledger_url(bad), repr(bad))
+
+
+class FakeWinreg:
+    HKEY_CURRENT_USER = "HKCU"
+    REG_SZ = 1
+
+    def __init__(self):
+        self.created, self.values, self.deleted, self.closed = [], [], [], 0
+
+    def CreateKey(self, root, sub):
+        self.created.append((root, sub))
+        return (root, sub)
+
+    def SetValueEx(self, key, name, reserved, typ, val):
+        self.values.append((key, name, typ, val))
+
+    def CloseKey(self, key):
+        self.closed += 1
+
+    def DeleteKey(self, root, sub):
+        if sub.endswith("\\shell"):
+            raise FileNotFoundError(sub)
+        self.deleted.append((root, sub))
+
+
+class TestProtocol(unittest.TestCase):
+    def test_command_string_and_plan(self):
+        self.assertEqual(T.protocol_command("C:\\Py\\pythonw.exe", "C:\\t\\s.py"),
+                         '"C:\\Py\\pythonw.exe" "C:\\t\\s.py" --open-url "%1"')
+        plan = T.protocol_plan("C:\\Py\\pythonw.exe", "C:\\t\\s.py")
+        self.assertTrue(all(sub.startswith("Software\\Classes\\ledger") for sub, _n, _v in plan))     # HKCU配下のみ
+        self.assertIn(("Software\\Classes\\ledger", "URL Protocol", ""), plan)
+        self.assertEqual(plan[-1][0], "Software\\Classes\\ledger\\shell\\open\\command")
+        with self.assertRaises(ValueError):
+            T.protocol_plan('C:\\a"b\\pythonw.exe', "C:\\t\\s.py")
+
+    def test_pythonw_path(self):
+        with tempfile.TemporaryDirectory() as d:
+            exe = os.path.join(d, "python.exe")
+            _wr(exe, "")
+            self.assertEqual(T.pythonw_path(exe), exe)                         # pythonw.exe が無ければ元のまま
+            _wr(os.path.join(d, "pythonw.exe"), "")
+            self.assertEqual(T.pythonw_path(exe), os.path.join(d, "pythonw.exe"))
+
+    def run_main(self, *argv, answer=None):
+        import unittest.mock as mock
+        wr = FakeWinreg()
+        buf = io.StringIO()
+        with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(buf):
+            args = list(argv) + ["--data-dir", d, "--output-dir", d]
+            if answer is None:
+                code = T.main(args, winreg_mod=wr)
+            else:
+                with mock.patch("builtins.input", return_value=answer):
+                    code = T.main(args, winreg_mod=wr)
+        return code, wr, buf.getvalue()
+
+    def test_register_with_yes_writes_hkcu_only(self):
+        code, wr, out = self.run_main("--register-protocol", "--yes")
+        self.assertEqual(code, 0)
+        self.assertTrue(all(root == "HKCU" for root, _s in wr.created))
+        cmd = [v for (_k, n, _t, v) in wr.values if n == "" and "--open-url" in v][0]
+        self.assertTrue(cmd.endswith('--open-url "%1"'))
+        self.assertIn(os.path.abspath(T.__file__), cmd)
+        self.assertEqual(wr.closed, 3)
+        self.assertIn("--open-url", out)            # 実行前に内容を表示
+
+    def test_register_asks_confirmation(self):
+        code, wr, out = self.run_main("--register-protocol", answer="n")
+        self.assertEqual((code, wr.values), (1, []))
+        code, wr, out = self.run_main("--register-protocol", answer="y")
+        self.assertEqual(code, 0)
+        self.assertTrue(wr.values)
+
+    def test_unregister_deletes_deepest_first_and_ignores_missing(self):
+        code, wr, out = self.run_main("--unregister-protocol", "--yes")
+        self.assertEqual(code, 0)
+        subs = [s for _r, s in wr.deleted]
+        self.assertEqual(subs[0], "Software\\Classes\\ledger\\shell\\open\\command")
+        self.assertEqual(subs[-1], "Software\\Classes\\ledger")
+
+    def test_without_winreg_reports_error(self):
+        import unittest.mock as mock
+        buf = io.StringIO()
+        with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(buf):
+            with mock.patch.dict(sys.modules, {"winreg": None}):
+                code = T.main(["--register-protocol", "--yes", "--data-dir", d, "--output-dir", d])
+        self.assertEqual(code, 2)
+
+
+class LedgerFlowBase(ComTestBase):
+    def scan_first(self):
+        com, _ = fake_com(self.standard_namespace())
+        run_main(self.argv("--no-stage2"), com)
+
+    def latest(self, prefix, ext):
+        fs = sorted(f for f in os.listdir(self.out) if f.startswith(prefix) and f.endswith(ext))
+        return os.path.join(self.out, fs[-1])
+
+
+class TestOpenUrlFlow(LedgerFlowBase):
+    def patched_paths(self):
+        import unittest.mock as mock
+        orig = T.make_paths
+        return mock.patch.object(T, "make_paths", lambda d=None, o=None: orig(self.data, self.out))
+
+    def test_open_url_valid_opens_via_ledger_and_writes_no_log_on_success(self):
+        import unittest.mock as mock
+        self.scan_first()
+        run_main(self.argv("--evaluate-only"))
+        row = _rdict(self.latest("thread_ledger_theme_", ".csv"))[0]
+        item = FakeItem({"EntryID": row["最新メールEntryID"], "Subject": "Topic long subject", "Parent": FakeParentFolder()})
+        ns = FakeNamespace([], {(row["最新メールEntryID"], row["最新メールStoreID"]): item})
+        ex = FakeExplorer()
+        before = set(os.listdir(self.out))
+        boxes = []
+        with self.patched_paths(), mock.patch.object(T, "HEX_ID_RE", re.compile(r".+")), \
+                mock.patch.object(T, "show_message_box", lambda *a, **k: boxes.append(a)):
+            code, out = run_main(["--open-url", "ledger:" + row["thread_id"]], fake_com(ns, ex)[0])
+        self.assertEqual((code, len(ex.queries)), (0, 1))
+        self.assertEqual(boxes, [])
+        self.assertEqual(set(os.listdir(self.out)), before)             # 成功時はログを増やさない
+
+    def test_open_url_failures_show_message_box_and_write_log(self):
+        import unittest.mock as mock
+        orig = T.import_com
+        T.import_com = lambda: (_ for _ in ()).throw(AssertionError("COM禁止"))
+        try:
+            for bad in ("ledger:../../x", "ledger:ab cd", "calc.exe", "ledger:abcd;calc"):
+                boxes = []
+                before = set(os.listdir(self.out)) if os.path.isdir(self.out) else set()
+                with self.patched_paths(), mock.patch.object(T, "show_message_box", lambda *a, **k: boxes.append(a)):
+                    code, out = run_main(["--open-url", bad])
+                self.assertEqual(code, 2, bad)
+                self.assertNotIn("calc", out)
+                self.assertEqual(len(boxes), 1, bad)
+                self.assertIn("開けませんでした", boxes[0][0])
+                new = set(os.listdir(self.out)) - before
+                self.assertTrue(any(f.startswith("thread_ledger_open_") for f in new), bad)    # 失敗時だけログ
+        finally:
+            T.import_com = orig
+
+    def test_open_url_not_found_and_outlook_failure_show_message(self):
+        import unittest.mock as mock
+        boxes = []
+        with self.patched_paths(), mock.patch.object(T, "show_message_box", lambda *a, **k: boxes.append(a)):
+            code, _o = run_main(["--open-url", "ledger:abcd1234"], fake_com(FakeNamespace([], {}))[0])
+        self.assertEqual(code, 2)
+        self.assertIn("見つかりません", boxes[0][0])
+        self.scan_first()
+        run_main(self.argv("--evaluate-only"))
+        row = _rdict(self.latest("thread_ledger_theme_", ".csv"))[0]
+        boxes.clear()
+        with self.patched_paths(), mock.patch.object(T, "HEX_ID_RE", re.compile(r".+")), \
+                mock.patch.object(T, "show_message_box", lambda *a, **k: boxes.append(a)):
+            code, _o = run_main(["--open-url", "ledger:" + row["thread_id"]], fake_com(FakeNamespace([], {}))[0])
+        self.assertEqual(code, 2)
+        self.assertEqual(len(boxes), 1)
+        self.assertNotIn(SECRET_ERR, boxes[0][0])
+
+    def test_non_hex_ids_from_ledger_are_rejected(self):
+        self.scan_first()
+        run_main(self.argv("--evaluate-only"))
+        row = _rdict(self.latest("thread_ledger_theme_", ".csv"))[0]
+        code, out = run_main(["--open", row["thread_id"], "--data-dir", self.data, "--output-dir", self.out],
+                             fake_com(FakeNamespace([], {}))[0])
+        self.assertEqual(code, 2)
+        self.assertIn("形式が不正", out)
+
+
+class TestOpenUrlInjection(unittest.TestCase):
+    """--open-url の値に " が入って別オプションが注入されても、何も実行しない"""
+
+    def setUp(self):
+        import unittest.mock as mock
+        self.boxes = []
+        self.wr = FakeWinreg()
+        self.patches = [mock.patch.object(T, "show_message_box", lambda *a, **k: self.boxes.append(a)),
+                        mock.patch.object(T, "write_failure_log", lambda *a, **k: None),     # リポジトリ側にログを作らない
+                        mock.patch.object(T, "import_com", lambda: (_ for _ in ()).throw(AssertionError("COM禁止")))]
+        for p in self.patches:
+            p.start()
+
+    def tearDown(self):
+        for p in self.patches:
+            p.stop()
+
+    def call(self, argv):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
+            try:
+                code = T.main(argv, winreg_mod=self.wr)
+            except SystemExit as e:
+                code = e.code
+        return code
+
+    def test_extra_options_are_refused_without_side_effects(self):
+        cases = [
+            ["--open-url", "ledger:abcd", "--unregister-protocol", "--yes"],
+            ["--open-url", "ledger:abcd", "--register-protocol", "--yes"],
+            ["--open-url", "ledger:abcd", "--data-dir", "x"],
+            ["--open-url", "ledger:abcd", "--output-dir", "x"],
+            ["--open-url", "ledger:abcd", "--import-judgments", "x.csv"],
+            ["--open-url=ledger:abcd"],
+            ["--yes", "--open-url", "ledger:abcd"],
+            ["--open-url", "ledger:abcd", "--open", "abcd1234"],
+        ]
+        for argv in cases:
+            self.boxes.clear()
+            code = self.call(argv)
+            self.assertEqual(code, 2, argv)
+            self.assertEqual((self.wr.created, self.wr.deleted, self.wr.values), ([], [], []), argv)
+            self.assertEqual(len(self.boxes), 1, argv)
+
+    def test_empty_open_url_value_cannot_bypass_the_strict_check(self):
+        with tempfile.TemporaryDirectory() as d:
+            combos = [
+                ["--unregister-protocol", "--yes"],
+                ["--register-protocol", "--yes"],
+                ["--data-dir", d],
+                ["--output-dir", d],
+                ["--theme="],
+                ["--theme", ""],
+                ["--import-judgments", os.path.join(d, "x.csv")],
+                ["--unregister-protocol", "--yes", "--output-dir", d, "--theme", ""],
+                ["--unregister-protocol", "--yes", "--theme="],
+            ]
+            for extra in combos:
+                for head in (["--open-url", ""], ["--open-url="]):
+                    for argv in (head + extra, extra + head):
+                        self.boxes.clear()
+                        code = self.call(argv)
+                        self.assertEqual(code, 2, argv)
+                        self.assertEqual((self.wr.created, self.wr.deleted, self.wr.values), ([], [], []), argv)
+                        self.assertEqual(os.listdir(d), [], argv)            # ファイルにも触れない
+                        self.assertGreaterEqual(len(self.boxes), 1, argv)
+            # 実攻撃形: %1 に `" --unregister-protocol --yes --theme="` が入った場合
+            self.boxes.clear()
+            self.assertEqual(self.call(["--open-url", "", "--unregister-protocol", "--yes", "--theme", ""]), 2)
+            self.assertEqual(self.wr.deleted, [])
+
+    def test_empty_open_url_alone_is_rejected_as_invalid_url(self):
+        self.assertEqual(self.call(["--open-url", ""]), 2)
+        self.assertEqual(len(self.boxes), 1)
+        self.assertIsNone(T.parse_args([]).open_url)
+        self.assertEqual(T.parse_args(["--open-url", ""]).open_url, "")
+        self.assertTrue(T.has_open_url_token(["--x", "--open-url="]))
+        self.assertFalse(T.has_open_url_token(["--open-u", "x"]))
+        self.assertFalse(T.exact_open_url_argv(["--open-url", None], None))
+
+    def test_parse_error_with_open_url_notifies_by_message_box(self):
+        code = self.call(["--open-url", "ledger:abcd", "--no-such-option"])
+        self.assertEqual(code, 2)                                   # argparse の SystemExit(2)
+        self.assertEqual(len(self.boxes), 1)
+        self.boxes.clear()
+        self.assertEqual(self.call(["--no-such-option"]), 2)
+        self.assertEqual(self.boxes, [])                            # --open-url が無ければ通知しない
+
+    def test_abbreviated_options_are_refused(self):
+        for argv in (["--reg", "--yes"], ["--unreg", "--yes"], ["--open-u", "ledger:abcd"], ["--open-url", "ledger:abcd", "--reg"]):
+            code = self.call(argv)
+            self.assertNotEqual(code, 0, argv)
+            self.assertEqual((self.wr.created, self.wr.deleted), ([], []), argv)
+
+    def test_exact_argv_helper(self):
+        self.assertTrue(T.exact_open_url_argv(["--open-url", "ledger:abcd"], "ledger:abcd"))
+        self.assertFalse(T.exact_open_url_argv(["--open-url", "ledger:abcd", "--yes"], "ledger:abcd"))
+        self.assertFalse(T.exact_open_url_argv(["--open-url=ledger:abcd"], "ledger:abcd"))
+
+    def test_data_and_output_dirs_ignored_for_open_url(self):
+        import unittest.mock as mock
+        seen = []
+        orig = T.make_paths
+        with mock.patch.object(T, "make_paths", lambda d=None, o=None: (seen.append((d, o)), orig(d, o))[1]):
+            self.call(["--open-url", "ledger:abcd1234"])
+        self.assertEqual(seen, [(None, None)])
+
+
+class TestScriptEntryPoint(unittest.TestCase):
+    """直接実行（python tool.py）で動くこと。末尾の main ガードが消えると何も起きなくなる。"""
+
+    def run_tool(self, *args):
+        import subprocess
+        out_dir = os.path.join(os.path.dirname(TESTS_DIR), "mail_reports")
+        before = set(os.listdir(out_dir)) if os.path.isdir(out_dir) else set()
+        path = sorted(glob.glob(os.path.join(TOOLS_DIR, "thread_ledger_scan_*.py")))[-1]
+        r = subprocess.run([sys.executable, "-I", path, *args], capture_output=True, text=True, timeout=60)
+        # 失敗時ログがリポジトリ側の mail_reports に増えていたら片付ける（ごみ箱代わりに一時フォルダへ移す）
+        if os.path.isdir(out_dir):
+            for f in set(os.listdir(out_dir)) - before:
+                shutil_move(os.path.join(out_dir, f), tempfile.gettempdir())
+        return r
+
+    def test_help_prints_usage(self):
+        r = self.run_tool("--help")
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("usage", r.stdout)
+        self.assertIn("--open-url", r.stdout)
+        self.assertIn("数値", r.stdout)                 # thread_id のExcel数値化の注意書き
+
+    def test_open_url_invalid_value_is_rejected_nonzero(self):
+        for bad in ("ledger:../x", "calc.exe", "ledger:ab cd"):
+            r = self.run_tool("--open-url", bad)
+            self.assertNotEqual(r.returncode, 0, bad)
+
+    def test_source_ends_with_main_guard_and_newline(self):
+        text = _rd(sorted(glob.glob(os.path.join(TOOLS_DIR, "thread_ledger_scan_*.py")))[-1])
+        self.assertTrue(text.endswith('if __name__ == "__main__":\n    sys.exit(main())\n'))
+
+
+def shutil_move(src, dst_dir):
+    import shutil
+    try:
+        shutil.move(src, os.path.join(dst_dir, "ledger_test_" + os.path.basename(src)))
+    except Exception:
+        pass
+
+
+class TestMessageBox(unittest.TestCase):
+    def test_calls_messageboxw_and_ignores_failures(self):
+        import types
+        calls = []
+        fake = types.SimpleNamespace(windll=types.SimpleNamespace(user32=types.SimpleNamespace(
+            MessageBoxW=lambda *a: calls.append(a))))
+        import unittest.mock as mock
+        with mock.patch.dict(sys.modules, {"ctypes": fake}):
+            T.show_message_box("本文", "題")
+        self.assertEqual(calls, [(0, "本文", "題", 0x10)])
+        with mock.patch.dict(sys.modules, {"ctypes": types.SimpleNamespace()}):
+            T.show_message_box("x")          # windll が無い（非Windows）でも例外にならない
+
+
+@unittest.skipIf(T.import_openpyxl() is None, "openpyxl が無い環境")
+class TestXlsx(LedgerFlowBase):
+    def test_xlsx_written_with_ledger_hyperlinks_and_safe_cells(self):
+        import openpyxl
+        header = ["thread_id", "件名", "メール数", "スコア", "確認結果(本物/違う/保留)", "メモ"]
+        rows = [["abcd1234ef56", "=HYPERLINK(\"http://evil\",\"x\")", 3, "7.5", "", "+cmd"],
+                ["0123456789ab", "-1+1 normal", 1, "2", "", "@x"],
+                ["../evil", "bad id", 1, "1", "", ""]]
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "l.xlsx")
+            self.assertTrue(T.write_ledger_xlsx(p, header, rows))
+            wb = openpyxl.load_workbook(p)
+            ws = wb.active
+            self.assertEqual(ws["B2"].hyperlink.target, "ledger:abcd1234ef56")
+            self.assertEqual(ws["B3"].hyperlink.target, "ledger:0123456789ab")
+            self.assertIsNone(ws["B4"].hyperlink)                     # 形式が不正な thread_id にはリンクを張らない
+            for ref in ("B2", "F2", "B3", "F3"):
+                self.assertEqual(ws[ref].data_type, "s", ref)           # 数式にならない
+                self.assertTrue(str(ws[ref].value).startswith("'"), ref)
+            self.assertEqual(ws["C2"].value, 3)
+            self.assertEqual(ws["D2"].value, 7.5)
+            self.assertEqual(ws["A1"].value, "thread_id")
+            self.assertEqual(ws.freeze_panes, "C2")
+            self.assertTrue(ws.data_validations.dataValidation)
+
+    def test_pipeline_writes_xlsx_next_to_csv(self):
+        import openpyxl
+        self.scan_first()
+        code, out = run_main(self.argv("--evaluate-only"))
+        self.assertIn("台帳Excel", out)
+        wb = openpyxl.load_workbook(self.latest("thread_ledger_theme_", ".xlsx"))
+        ws = wb.active
+        csv_rows = _rdict(self.latest("thread_ledger_theme_", ".csv"))
+        self.assertEqual(ws.max_row - 1, len(csv_rows))
+        self.assertEqual({ws.cell(row=r, column=1).value for r in range(2, ws.max_row + 1)}, {r["thread_id"] for r in csv_rows})
+        for r in range(2, ws.max_row + 1):
+            self.assertEqual(ws.cell(row=r, column=2).hyperlink.target, "ledger:" + ws.cell(row=r, column=1).value)
+
+
+class TestXlsxMissing(LedgerFlowBase):
+    def test_csv_only_with_guidance_when_openpyxl_missing(self):
+        self.scan_first()
+        for f in os.listdir(self.out):
+            if f.endswith(".xlsx"):
+                os.remove(os.path.join(self.out, f))      # 最初の走査（openpyxlあり）で出たものを消す
+        orig = T.import_openpyxl
+        T.import_openpyxl = lambda: None
+        try:
+            code, out = run_main(self.argv("--evaluate-only"))
+        finally:
+            T.import_openpyxl = orig
+        self.assertEqual(code, 0)
+        self.assertIn("pip install openpyxl", out)
+        self.assertFalse(any(f.endswith(".xlsx") for f in os.listdir(self.out)))
+        self.assertTrue(any(f.startswith("thread_ledger_theme_") and f.endswith(".csv") for f in os.listdir(self.out)))
+
+
+class TestImportJudgments(LedgerFlowBase):
+    def test_import_rows_allowlist_empty_not_overwrite_and_matching(self):
+        existing = {"aaaa1111": {"確認結果": "本物", "メモ": "old", "問題の種類": "通関"},
+                    "bbbb2222": {"確認結果": "", "メモ": "", "問題の種類": ""}, "cccc3333": "oops",
+                    "ffff6666": {"確認結果": "", "メモ": "", "問題の種類": ""}}
+        rows = [
+            {"thread_id": "aaaa1111", "確認結果(本物/違う/保留)": "", "メモ": "", "問題の種類": ""},      # 空は変更なし
+            {"thread_id": "bbbb2222", "確認結果(本物/違う/保留)": "違う", "メモ": "new memo", "問題の種類": "その他"},
+            {"thread_id": "dddd4444", "確認結果(本物/違う/保留)": "保留", "メモ": "", "問題の種類": ""},    # 台帳に無い -> スキップ
+            {"thread_id": "eeee5555", "確認結果(本物/違う/保留)": "たぶん本物", "メモ": "m", "問題の種類": ""},  # 台帳に無い -> スキップ
+            {"thread_id": "ffff6666", "確認結果(本物/違う/保留)": "たぶん本物"},                             # 不正値のみ -> 変化なし
+            {"thread_id": "../bad", "確認結果(本物/違う/保留)": "本物"},
+            {"thread_id": "cccc3333", "確認結果(本物/違う/保留)": "本物"},
+            {"thread_id": "'=evil01", "確認結果(本物/違う/保留)": "本物"},
+        ]
+        merged, st = T.import_judgment_rows(rows, existing)
+        self.assertEqual(merged["aaaa1111"], existing["aaaa1111"])
+        self.assertEqual(merged["bbbb2222"], {"確認結果": "違う", "メモ": "new memo", "問題の種類": "その他"})
+        self.assertNotIn("dddd4444", merged)                    # 既知IDのみ
+        self.assertNotIn("eeee5555", merged)                    # 空エントリも作らない
+        self.assertEqual(merged["ffff6666"], {"確認結果": "", "メモ": "", "問題の種類": ""})
+        self.assertEqual(merged["cccc3333"], "oops")
+        self.assertNotIn("../bad", merged)
+        self.assertEqual((st["invalid_value"], st["unknown"], st["bad_id"], st["bad_entry"]), (1, 2, 2, 1))
+        self.assertEqual((st["matched"], st["updated"]), (3, 3))
+        self.assertEqual(set(merged), set(existing))
+
+    def test_import_unescapes_leading_apostrophe(self):
+        existing = {"aaaa1111": {"確認結果": "", "メモ": "", "問題の種類": ""}}
+        merged, _ = T.import_judgment_rows([{"thread_id": "aaaa1111", "メモ": "'=memo", "確認結果": "'本物"}], existing)
+        self.assertEqual(merged["aaaa1111"]["メモ"], "=memo")
+        self.assertEqual(merged["aaaa1111"]["確認結果"], "")        # 許可リスト外(アポストロフィ付き)はスキップ
+
+    def test_size_limits(self):
+        import unittest.mock as mock
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "a.csv")
+            _wr(p, "thread_id,メモ\n" + "".join("aaaa%04d,x\n" % i for i in range(10)), "utf-8-sig")
+            with mock.patch.object(T, "IMPORT_MAX_ROWS", 5):
+                with self.assertRaises(ValueError):
+                    T.read_table_rows(p)
+            with mock.patch.object(T, "IMPORT_MAX_BYTES", 10):
+                with self.assertRaises(ValueError):
+                    T.read_table_rows(p)
+            self.assertEqual(len(T.read_table_rows(p)), 10)
+            self.assertEqual((T.IMPORT_MAX_BYTES, T.IMPORT_MAX_ROWS), (50 * 1024 * 1024, 200000))
+
+    def test_import_backs_up_existing_valid_judgments_before_writing(self):
+        csv_path, rows = self.edit_ledger_csv()
+        jp = os.path.join(self.data, "judgments_theme.json")
+        before = _rd(jp)
+        tid = rows[0]["thread_id"]
+        edited = os.path.join(self.tmp.name, "e.csv")
+        _wr(edited, "thread_id,確認結果(本物/違う/保留),メモ,問題の種類\n%s,本物,m,\n" % tid, "utf-8-sig")
+        code, out = run_main(self.argv("--import-judgments", edited))
+        self.assertEqual(code, 0)
+        baks = [f for f in os.listdir(self.data) if ".bak_" in f]
+        self.assertEqual(len(baks), 1)
+        self.assertEqual(_rd(os.path.join(self.data, baks[0])), before)       # 取込前の内容が残っている
+        self.assertEqual(_rj(jp)[tid]["確認結果"], "本物")
+        self.assertIn("退避", out)
+
+    def test_import_aborts_when_backup_cannot_be_made(self):
+        import unittest.mock as mock
+        csv_path, rows = self.edit_ledger_csv()
+        jp = os.path.join(self.data, "judgments_theme.json")
+        before = _rd(jp)
+        edited = os.path.join(self.tmp.name, "e.csv")
+        _wr(edited, "thread_id,確認結果(本物/違う/保留)\n%s,本物\n" % rows[0]["thread_id"], "utf-8-sig")
+        with mock.patch.object(T, "backup_file", lambda p: None):
+            code, out = run_main(self.argv("--import-judgments", edited))
+        self.assertEqual(code, 2)
+        self.assertEqual(_rd(jp), before)
+
+    def edit_ledger_csv(self):
+        self.scan_first()
+        run_main(self.argv("--evaluate-only"))
+        csv_path = self.latest("thread_ledger_theme_", ".csv")
+        rows = _rdict(csv_path)
+        return csv_path, rows
+
+    def test_csv_import_end_to_end(self):
+        csv_path, rows = self.edit_ledger_csv()
+        tid = rows[0]["thread_id"]
+        edited = os.path.join(self.tmp.name, "edited.csv")
+        with open(edited, "w", encoding="cp932", newline="") as fh:        # Excel の「CSV(コンマ区切り)」はcp932
+            w = csv.writer(fh)
+            w.writerow(["thread_id", "確認結果(本物/違う/保留)", "メモ", "問題の種類"])
+            w.writerow([tid, "本物", "確認済み", "通関"])
+            w.writerow(["zzzz9999", "違う", "", ""])
+        code, out = run_main(self.argv("--import-judgments", edited))
+        self.assertEqual(code, 0)
+        self.assertIn("判定の取込", out)
+        j = _rj(os.path.join(self.data, "judgments_theme.json"))
+        self.assertEqual(j[tid], {"確認結果": "本物", "メモ": "確認済み", "問題の種類": "通関"})
+        self.assertNotIn("zzzz9999", j)                            # 台帳に無いIDは取り込まない
+        self.assertIn("台帳に無いIDをスキップ 1", out)
+        # 再評価しても保持される
+        run_main(self.argv("--evaluate-only"))
+        self.assertEqual(_rj(os.path.join(self.data, "judgments_theme.json"))[tid]["確認結果"], "本物")
+        # 空セルでは上書きしない
+        blank = os.path.join(self.tmp.name, "blank.csv")
+        _wr(blank, "thread_id,確認結果(本物/違う/保留),メモ,問題の種類\n%s,,,\n" % tid, "utf-8-sig")
+        run_main(self.argv("--import-judgments", blank))
+        self.assertEqual(_rj(os.path.join(self.data, "judgments_theme.json"))[tid]["メモ"], "確認済み")
+
+    @unittest.skipIf(T.import_openpyxl() is None, "openpyxl が無い環境")
+    def test_xlsx_import_end_to_end(self):
+        import openpyxl
+        csv_path, rows = self.edit_ledger_csv()
+        xlsx = self.latest("thread_ledger_theme_", ".xlsx")
+        wb = openpyxl.load_workbook(xlsx)
+        ws = wb.active
+        header = [c.value for c in ws[1]]
+        vi = header.index("確認結果(本物/違う/保留)") + 1
+        ws.cell(row=2, column=vi).value = "保留"
+        ws.cell(row=2, column=header.index("メモ") + 1).value = "Excelで編集"
+        tid = ws.cell(row=2, column=1).value
+        edited = os.path.join(self.tmp.name, "edited.xlsx")
+        wb.save(edited)
+        code, out = run_main(self.argv("--import-judgments", edited))
+        self.assertEqual(code, 0)
+        j = _rj(os.path.join(self.data, "judgments_theme.json"))
+        self.assertEqual((j[tid]["確認結果"], j[tid]["メモ"]), ("保留", "Excelで編集"))
+
+    def test_broken_existing_judgments_abort_import_with_backup(self):
+        csv_path, rows = self.edit_ledger_csv()
+        jp = os.path.join(self.data, "judgments_theme.json")
+        _wr(jp, "{broken")
+        code, out = run_main(self.argv("--import-judgments", csv_path))
+        self.assertEqual(code, 2)
+        self.assertEqual(_rd(jp), "{broken")
+        self.assertTrue(any(".bak_" in f for f in os.listdir(self.data)))
+
+    def test_missing_thread_id_column_or_file(self):
+        csv_path, rows = self.edit_ledger_csv()
+        bad = os.path.join(self.tmp.name, "bad.csv")
+        _wr(bad, "a,b\n1,2\n", "utf-8-sig")
+        self.assertEqual(run_main(self.argv("--import-judgments", bad))[0], 2)
+        self.assertEqual(run_main(self.argv("--import-judgments", os.path.join(self.tmp.name, "none.csv")))[0], 2)
+
+
+class TestIncludeNoAnchor(unittest.TestCase):
+    def build_threads(self):
+        th = make_theme()
+        recs = [
+            rec("E1", "通関 candidate subject", "2024-04-10T09:00:00", "Sato Pm", "Owner Taro", cid="a"),     # 通常候補
+            rec("E2", "通関 no anchor subject", "2024-04-11T09:00:00", "Zed", "Owner Taro", cid="b"),         # A無し・B・C -> 参考
+            rec("E3", "customs clearance no owner", "2024-04-12T09:00:00", "Sato Pm", "Zed", cid="c"),        # B無し -> 対象外
+            rec("E4", "Lunch", "2024-04-13T09:00:00", "Zed", "Owner Taro", cid="d"),                          # C無し -> 対象外
+        ]
+        res, _ = build([cache("S", 1, "\\Inbox", recs)], th)
+        return res, th
+
+    def test_default_off_and_on_ordering_and_flag(self):
+        res, th = self.build_threads()
+        off = T.build_ledger_rows(res["threads"], res["evals"], {}, th)
+        self.assertEqual(len(off), 1)
+        self.assertEqual(off[0][-1], "")
+        on = T.build_ledger_rows(res["threads"], res["evals"], {}, th, include_no_anchor=True)
+        self.assertEqual(len(on), 2)
+        flag = T.LEDGER_COLUMNS.index(T.NO_ANCHOR_COLUMN)
+        self.assertEqual([r[flag] for r in on], ["", "参考"])           # 参考は通常候補の後
+        self.assertEqual(T.LEDGER_COLUMNS[-1], T.NO_ANCHOR_COLUMN)
+        self.assertTrue(T.is_reference_thread(res["evals"][1]))
+        self.assertFalse(T.is_reference_thread(res["evals"][0]))
+
+    def test_cli_flag_end_to_end(self):
+        res, th = self.build_threads()
+        self.assertTrue(T.parse_args(["--include-no-anchor"]).include_no_anchor)
+        self.assertFalse(T.parse_args([]).include_no_anchor)
+
+
+class TestEstimates(LedgerFlowBase):
+    def test_constants_and_stage1_estimate_logged(self):
+        self.assertEqual(T.STAGE2_EST_SEC, 0.8)
+        self.assertEqual(T.STAGE1_EST_SEC_PER_ITEM, 0.06)
+        self.assertEqual(T.STAGE2_MAX_DEFAULT, 5000)
+        com, _ = fake_com(self.standard_namespace())
+        code, out = run_main(self.argv("--no-stage2"), com)
+        self.assertIn("第1段の見積り", out)
+        self.assertIn("60ms", out)
+
+    def test_stage2_estimate_uses_0_8_sec(self):
+        self.scan_first()
+        code, out = run_main(self.argv("--stage2-max", "1"), fake_com(Stage2Helper.namespace())[0])
+        self.assertIn("1通0.8秒", out)
+        self.assertEqual(code, 3)
+
+
+
+class FlakySelectExplorer(FakeExplorer):
+    """絞り込みの反映が遅れて、N回目の確認で初めて選択できるようになる Explorer"""
+
+    def __init__(self, ready_on):
+        super().__init__()
+        self.ready_on = ready_on
+        self.checks = 0
+
+    def IsItemSelectableInView(self, item):
+        self.checks += 1
+        return self.checks >= self.ready_on
+
+
+class TestExplorerTiming(unittest.TestCase):
+    def open_with(self, ex):
+        item = FakeItem({"EntryID": "E" * 20, "Subject": "Topic about shipment", "Parent": FakeParentFolder()},
+                        display_log=[])
+        ns = FakeNamespace([], {("E" * 20, "S" * 20): item})
+        with contextlib.redirect_stdout(io.StringIO()):
+            return T.open_thread_in_outlook(FakeClient(ns, ex), "E" * 20, "S" * 20, "", T.Reporter(None))
+
+    def test_explorer_wait_defaults(self):
+        self.assertTrue(0.3 <= ORIG_WAITS[0] <= 0.5)
+        self.assertEqual(ORIG_WAITS[1], 0.3)
+        self.assertEqual(ORIG_WAITS[2], 5)
+
+    def test_settle_wait_happens_between_folder_switch_and_search(self):
+        import unittest.mock as mock
+        order = []
+
+        class Ex(FakeExplorer):
+            def __setattr__(self, k, v):
+                if k == "CurrentFolder":
+                    order.append("folder")
+                object.__setattr__(self, k, v)
+
+            def Search(self, q, scope):
+                order.append("search")
+                return super().Search(q, scope)
+        ex = Ex()
+        order.clear()
+        with mock.patch.object(T.time, "sleep", lambda sec: order.append(("sleep", sec))):
+            self.open_with(ex)
+        self.assertEqual(order[0], "folder")
+        self.assertEqual(order[1][0], "sleep")
+        self.assertEqual(order[2], "search")
+
+    def test_selection_retried_until_ready(self):
+        ex = FlakySelectExplorer(ready_on=3)
+        self.assertEqual(self.open_with(ex), "explorer")
+        self.assertEqual(ex.checks, 3)
+        ex2 = FlakySelectExplorer(ready_on=99)
+        self.assertEqual(self.open_with(ex2), "display")             # 5回で諦めて Display()
+        self.assertEqual(ex2.checks, 5)
+
+
+class TestProtocolExisting(unittest.TestCase):
+    def test_register_shows_existing_registration_and_unregister_text(self):
+        class WR(FakeWinreg):
+            def OpenKey(self, root, sub):
+                return ("k", sub)
+
+            def QueryValueEx(self, key, name):
+                return ('"C:\\old\\pythonw.exe" "C:\\old.py" --open-url "%1"', 1)
+        for flag, expect in (("--register-protocol", "上書きします"), ("--unregister-protocol", "削除対象です")):
+            wr = WR()
+            buf = io.StringIO()
+            with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(buf):
+                code = T.main([flag, "--yes", "--data-dir", d, "--output-dir", d], winreg_mod=wr)
+            self.assertEqual(code, 0)
+            self.assertIn("既存の ledger: 登録があります", buf.getvalue())
+            self.assertIn("C:\\\\old\\\\pythonw.exe", buf.getvalue())
+            self.assertIn(expect, buf.getvalue())
+            if flag == "--unregister-protocol":
+                self.assertIn("非再帰", buf.getvalue())
+                self.assertIn("4キー", buf.getvalue())
+                self.assertIn("/4キー", buf.getvalue())
+
+    def test_no_existing_registration_has_no_warning(self):
+        wr = FakeWinreg()
+        wr.OpenKey = lambda root, sub: (_ for _ in ()).throw(FileNotFoundError(sub))
+        buf = io.StringIO()
+        with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(buf):
+            T.main(["--register-protocol", "--yes", "--data-dir", d, "--output-dir", d], winreg_mod=wr)
+        self.assertNotIn("既存の ledger", buf.getvalue())
 
 
 if __name__ == "__main__":
