@@ -10,107 +10,64 @@
 ## 1. Project Overview
 
 * プロジェクト名: Outlook オーガナイザー開発
-* プロジェクトの目的: Microsoft Outlook（win32com経由のローカルOutlookクライアント）のメールを解析し、対応が必要なアクション項目をダッシュボード化するツール（`outlook_total_organizer`）の継続開発。S05では、既存の「受信メールへの対応」中心の機能群に加えて、統括コックピットv2（異常検知）と、四半期パフォーマンスレビュー用の「振り返り」タブ（自分の実行・判断の実績を報告優先度付きで可視化）を新規構築した。
-* 主な利用者: ユーザー本人（Japan Site Manager／Engineering Managerとして、TE/PE/PM/VE/Adminの各機能を統括する立場）。四半期パフォーマンスレビューでMAG Leader(上司)へ報告する用途を含む。
-* 実行環境: Windows上のローカルOutlookクライアント＋Python（`win32com`使用のためWindows専用）。Gemini API（`google-genai`）でメール内容を解析。開発・検証環境（Claude Code Web、Linuxコンテナ）ではOutlook実機・tkinter GUIを直接実行できないため、実機での動作確認は毎回ユーザーに依頼している。
+* 目的: Outlook（win32com経由のローカルクライアント）のメールを解析し、**「越智さんの判断を支える」**ツール（`outlook_total_organizer`）として継続開発する。軸と3つの時間軸（毎日／毎週／四半期）は `outlook_total_organizer/docs/AXIS.md`、AIエージェント化の計画は `outlook_total_organizer/docs/AGENT_PLAN_draft.md`（v12）。
+* 主な利用者: 越智さん（Nexperia Japan Site Manager）。
+* 実行環境: Windows＋ローカルOutlook＋Python（win32com）＋Gemini API。開発環境（Linuxコンテナ）ではOutlook実機・tkinter GUIを動かせないため、実機確認は毎回越智さんに依頼する。
 
-## 2. Repository Structure
+## 2. Repository Structure（S07で整理）
 
-* 主要ファイル（リポジトリ直下）
-  * `README.md`: リポジトリ全体の概要と、各ツールの開発ルール（バージョン管理・命名規則）を記載
-  * `CLAUDE.md`: Claude Code Web セッション運用ルール（S05冒頭で「1タスク=1セッション」から「1つの明確な目的=1セッション」に変更）
-  * `HANDOVER_youtube_summary_list.md`: YouTube Summary List ツールの引継ぎ資料
-  * `youtube_summary_list_20260703_01.py`, `youtube_summary_list_20260711_01.py`: YouTube Summary List ツール本体（バージョン別）
-* 主要フォルダ（`outlook_total_organizer/`以外は本プロジェクトと無関係、変更禁止）
-  * `po_database_organizer/`: PO Database Organizer
-  * `rtocs_organizer/`: BBT RTOCS Organizer
-  * `shareflex_dashboard/`: Shareflex Document Dashboard
-  * `outlook_total_organizer/`: Outlook オーガナイザー本体
-    * **最新（コミット済み）リビジョン: `outlook_total_organizer_20260730_05.py`**（約10,460行）
-    * **`outlook_total_organizer_20260730_06.py`が存在するが未コミット・未検証・未納品**（手動追加項目の月別タイムライン日付表示バグ修正。詳細は本ファイル5節・6節、および`docs/NEXT_TASK.md`参照）
-    * それ以前の全リビジョンファイル（`_20260713_03_01.py`〜`_20260730_05.py`）は削除・上書きせずそのまま保持（バージョン管理方針）
-    * `diagnose_archive.py`: オンラインアーカイブ検出調査用のスタンドアロン診断スクリプト（S05で新規作成）。本体のバージョン管理対象外（`_yyyymmdd_NN.py`形式ではない）
-    * `run_outlook_total_organizer.bat`: Windows起動用バッチファイル
-    * `CHANGELOG.md`: ツールの変更履歴（2026-05-07分から記録。最新は`## VERSION 20260730_05`）
-  * `docs/`: セッション引継ぎ管理ファイル（`PROJECT_STATUS.md`本ファイル・`SESSION_HISTORY.md`・`NEXT_TASK.md`）
+* `outlook_total_organizer/`
+  * `run_outlook_total_organizer.bat`: 起動用（ASCIIのみ。`app\` の最新を自動選択。作業フォルダはバッチのある場所＝`json\` 等は従来どおり）
+  * `CHANGELOG.md`: 変更履歴（最新 `## VERSION 20261004_16`）
+  * `app/`: **最新コード1本**（`outlook_total_organizer_20261004_16.py`）／`app/old/`: 過去の版70本（`git mv`済み）
+  * `docs/`: `AGENT_PLAN_draft.md`, `AXIS.md`／`tools/`: `diagnose_action_decisions.py`, `diagnose_archive.py`／`tests/`: 単体テスト（`run_tests.py`、`_loader.py` が `app/` と `app/old/` を探す）
+  * `json/`: 設定・キャッシュ（PC上のみ。Git管理外。場所は従来どおり）
+* 運用ルール: 新しい版を作ったら直前の版を `app/old/` へ移す（`app/` は最新1本）。バッチの書き換えは不要。
+* `tool_launcher/tools.json`: Outlookは `kind=bat`, path `outlook_total_organizer/run_outlook_total_organizer.bat`（変更なし）。ランチャーは `tools.json` を起動時に1回だけ読むので、pull後は再起動が必要。
+* 他プロジェクトのフォルダ（`document_search_manager/`, `onenote_report_generator/` 等）は本プロジェクトと無関係。変更しない。
 
 ## 3. Current Functions
 
-`MailManagerGUI`（tkinterベースのGUI）は6タブ構成:
-
-1. **🔍 検索/整理**: メール検索・整理（`search_mails_fast`）。「未読のみ」検索の高速化済み（S05でRestrict直書き化）。
-2. **📊 プロジェクト俯瞰**: プロジェクト単位のAI要約レポート（`generate_project_report`）。
-3. **👤 スタッフ俯瞰**: スタッフ単位のAI要約レポート（`generate_staff_report`）。登録スタッフ名は`project_knowledge["staffs"]`（キー=スタッフ名）。振り返りタブがこの登録名を読み取り専用で参照する（詳細は後述）。
-4. **🚀 統括コックピット**（v1・v2両方を保持。v2が主）:
-   * v2（`generate_cockpit_v2_data`/`generate_cockpit_v2_report`）はS05で全面刷新済み。数値の「解放スコア」方式を廃止し、🔥催促されている／🧊相手が止まっている／🕰長期沈黙／📈急に燃えている／📥自分待ち、の5カテゴリで分類する方式に変更。生体信号は異常時のみ表示。複数プロジェクトにまたがるスレッドの重複は`conversation_id`単位で統合（「+N」バッジ）。操作は「✅ 確認済み」1つに統一し`cockpit_v2_acknowledged.json`で管理（アクションタブの`action_status.json`とは非連動）。「種類別」「プロジェクト別」の2ビューを切替可能（プロジェクト別も内部で5カテゴリにサブグループ化）。
-5. **📋 アクション**（アクションダッシュボード）: `summarize_action_dashboard`。R19Projフィルタ（3状態）、🚩フラグマーク、カードレイアウトは複数回改善済み。
-6. **📈 振り返り**（**S05で新規構築**、四半期パフォーマンスレビュー用）:
-   * 既存タブが「受信メールへの対応」を扱うのに対し、唯一「自分が送信したメール（＝実行・判断したこと）」を主データ源にする。
-   * 対象月は「対象期間(直近Nか月)」ではなく、**当年1月〜当月の月別チェックボックス**で選ぶ（S05途中でユーザー要望により変更）。チェックした月は既存キャッシュの有無に関わらず必ず強制的に再取得・再分析（`force_refresh`）。チェックを外した月は`analysis_cache/review_monthly/{YYYYMM}.json`のキャッシュをそのまま使う。
-   * メール取得（`OutlookMailManager.get_review_mails_for_month`）は、現行メールボックスに加えて**オンラインアーカイブ**（`_find_online_archive_root`、`ExchangeStoreType==3`判定＋名前パターンのフォールバック）、および現行メールボックス直下にユーザーが手動で退避させた**「アーカイブ」「Archive」「Go2Archive」等の名前パターンのフォルダ**（`_find_manual_archive_folders`、`MANUAL_ARCHIVE_FOLDER_NAMES`）も横断的にスキャンする。
-   * L2機械フィルタ`review_activity_qualifies`: 自分の送信メール基準の判定に加え、**登録スタッフ（部下）が送信し自分がTo/Ccに含まれるスレッド**も対象化（マネジメント成果の可視化）。
-   * `summarize_review_month`でAIが複数スレッドを「実績」単位に統合。Tier1(Javed=MAG Leader, Thomas=BG Leader)/Tier2(Alber=PM Mgr, John=SE Mgr, Alex=TE Mgr, Ulysis=PE Mgr)関与判定、G2(サイト基盤整備)の機能別小分類、スタッフ関与検出(`REVIEW_STAFF_FUNCTIONS`)、報告ランク判定まで、この関数内でannotateしてキャッシュする。
-   * 報告ランクは**4段階（S/A/B/🔵進行中）**の決定木: 成果未確定→🔵進行中／ゴール(G1〜G3)に非紐付け→🅑B／Tier1関与・Tier2 2名以上・Japan Site全体・定量効果・スタッフの成果を牽引のいずれかでS、無ければA。加重和スコアは使わない（統括コックピットv1の反省を踏襲）。
-   * 表示は「ゴール別(既定)」「プロジェクト別」「月別タイムライン」の3軸切替。手動追加（会議・口頭判断等）・非表示・ランク変更・文言修正が可能（`review_manual_items.json`、`/update_review_manual`エンドポイント）。
-   * **既知の未修正バグ**: 手動追加項目の月別タイムライン表示が常に固定文字列「手動追加」になり、入力した完了日が使われない（`_06`で修正コード作成済み、未検証・未コミット。詳細は5節・6節）。
+* 上位タブは4つ: 🔍検索/整理 ／ 📋アクション（毎日）／ 📅毎週(俯瞰＝プロジェクト俯瞰・スタッフ俯瞰・統括コックピットの入れ子) ／ 📈振り返り（四半期、12か月・年またぎ）。起動タブは不変。
+* 毎日（アクション）: ⚖️判断待ちパネル（A1）＋「📥自分待ち・🔥催促」パネル（統括コックピットv2の前回結果から表示。AIなし・費用ゼロ。A6b）。「解析のみ更新」あり。
+* AI費用: 事前見積り＋100円以上で確認ダイアログを、アクション・振り返り・俯瞰2画面・統括コックピット（全自動同期・v2）に適用。実績ログ `json/ai_usage_log.jsonl` で見積りを校正。全自動同期は Stage1 のみ（Stage2は結果を使わないため省略。A7e）。
+* 軽量モデル設定 `gemini_lite_model`（A9）。AIの文の「字数超過」バッジ（A7d）。
+* 安全対策: 俯瞰・検索・振り返り・コックピット・アクションの各HTMLレポートで、メール・AI由来の文字列をエスケープし、iframeにsandboxを付けた（A10/A10b）。
+* 検索: To:Me＋CC:Me の取りこぼしを修正（A8）。
 
 ## 4. Confirmed Specifications
 
-* 確定済みの仕様（S05で新規確定分）:
-  * 振り返りタブのTier1/Tier2は「上」「横」のカウンターパートであり、Ochi氏が直接統括するスタッフ（Nakai=PM, Saji=TE, Oi Yuto=PE/VE兼任, Najib=PE, Kajikawa=Admin）とは別軸。スタッフ名簿は新設せず`project_knowledge["staffs"]`を読み取り専用で参照する（振り返りタブからスタッフ俯瞰タブのデータを書き換えることは一切ない）。
-  * 振り返りタブのランクは加重和スコアではなく決定木＋根拠チップ方式（統括コックピットv1の数値スコア方式が実質2成分しか機能せず失敗した反省を踏襲）。
-  * 振り返りタブの月次キャッシュは「過去月は無条件再利用」が原則だが、(1)AI呼び出しエラー結果は例外的に必ず再試行、(2)チェックボックスで明示的に選択された月は`force_refresh`で必ず再分析、という2つの例外がある。
-  * バージョンファイル命名規則: `outlook_total_organizer_yyyymmdd_NN.py`（S03以降。末尾`_01`なし）。日付が変わったらNNは01にリセット。
-* 維持すべき設計方針:
-  * バージョンアップ時に旧ファイルを削除・上書きしない
-  * 各バージョンのCHANGELOGエントリに「変更しないこと（宣誓）」を明記する
-  * コミット・Pushはユーザーの明示的な指示があった場合のみ行う（Stop hookの自動リマインダーは指示ではない）
+* 軸は「越智さんの判断を支える」。時間軸は毎日／毎週／四半期。
+* 版ファイル名: `outlook_total_organizer_YYYYMMDD_NN.py`。変更のたびに新しい版を作る（既存の確定版を直接編集しない）。CHANGELOGに「変更しないこと（宣誓）」を記載。
+* コード変更は、敵対的サブエージェントPMレビュー合格後にコミット・Push（S07の慣行）。
 
 ## 5. Current Status
 
-* 完了済み（コミット・Push済み。詳細は`docs/SESSION_HISTORY.md`のS05セクション参照）:
-  * S01〜S04: 引継ぎ管理初期設定、R19Projフィルタ、対象期間拡張、フラグマーク追加
-  * S05: Outlook再起動連動の未読書き戻し、統括コックピットv2の新規構築と全面刷新、四半期振り返りタブの新規構築、および振り返りタブの実機テストで発覚した複数の不具合修正（アーカイブ検出、キャッシュのエラー握りつぶし、チェックボックスUI化、4段階ランク、スタッフ成果反映、force_refresh）
-  * 最新コミット: `dc04c76`（`outlook_total_organizer_20260730_05.py`）
-* **作業中（未完了）**:
-  * `outlook_total_organizer_20260730_06.py`: 振り返りタブの手動追加項目が月別タイムラインで日付を無視し常に「手動追加」にまとめられる不具合の修正。`ast.parse`構文チェックのみ実施済み。**diff確認・スタンドアロンテスト・Playwright検証・ユーザーへの納品（SendUserFile）・コミットのいずれも未実施**。
-* 未着手:
-  * `README.md` / `requirements.txt`の整備（他ツールと同様の体裁にするか未確認）
-  * S02〜S04から持ち越しの各種未確認事項（起動方法、環境変数、未使用ブランチの整理）
+* 完了（S07、開発ブランチ `claude_a0739635/peaceful-galileo-a6x0d4`、main統合済み）: `_01`〜`_16`（A1判断待ち、A2費用表示是正、A3振り返り12か月、A4/A5以外のA6タブ統合・A6b、A7a〜e費用確認、A8、A9、A10/A10b、Gemini 2.5提供終了への備え、フォルダ構成整理）。詳細は `docs/SESSION_HISTORY.md` のS07。
+* main: `93e3fb1`（Outlook S07の全変更を統合済み）。越智さんのPCは main で `_16` の起動・AI機能を実機確認済み。
+* テスト: Linux側で全テスト合格（成功1680／失敗0／エラー0／スキップ109＝tkinter無しのGUIテスト／想定内の失敗3）。
 
 ## 6. Known Issues
 
-* 未解決の既知の問題:
-  * `outlook_total_organizer_20260730_06.py`が未完了（上記5節参照）。次セッションで最優先対応。
-  * スタッフ名簿(`project_knowledge["staffs"]`)の登録名と、実際のOutlook送信者表示名(`SenderName`)の表記ゆれが未確認（表記が一致しないとスタッフ成果の検出漏れが起きる）。
-  * `analysis_cache/review_monthly/*.json`のうち、スタッフ成果annotate機能（`_20260730_04`）追加より前に生成されたキャッシュは、該当月をチェックして再生成しない限りスタッフチップ・ランクに反映されない。
-* 暫定対応: なし
-* 技術的リスク:
-  * 本ツールはWindows専用（`win32com`, `pythoncom`使用）のため、本セッションの実行環境（Linuxコンテナ）では実機起動テストが一度もできていない。実機での不具合報告（アーカイブ検出、キャッシュの不安定さ等）はすべてユーザーからの報告を受けて調査・修正する形で進めた。
-  * オンラインアーカイブのストア検出（`ExchangeStoreType`が環境によって想定と異なる値を返すケースをS05で実際に確認済み。名前パターンのフォールバックで対応したが、他の未知のパターンが存在する可能性がある）。
-  * 手動アーカイブフォルダの名称（アーカイブ/Archive/Go2Archive）は組織・ユーザーによって異なる可能性があり、`MANUAL_ARCHIVE_FOLDER_NAMES`に無い名称の場合は検出できない。
+* **Outlookが時々起動しない**（PC再起動後の1回目は起動する傾向）。ツールを使わずOutlookだけを開閉した3回は正常。再現待ち。再現時に `tasklist | findstr /i "outlook python"` とイベントログ（Application Error/Hang）を取得する。コードの回帰ではない（既存の配置処理 `-2146959355` はOutlook未起動のときの既存挙動）。
+* **Geminiモデルの提供終了（2026-10-16）**: 越智さんのPCの `json/mail_manager_config.json` の `gemini_model`・`gemini_lite_model`・`gemini_prices` を後継モデルに更新する必要がある（越智さん既知。手順は CHANGELOG `_10`）。
+* 「🔄表示更新」が検索タブの選択を消す既知の不具合は未修正。
+* ローカルサーバー（レポートのボタンが呼ぶ）が呼び出し元を確かめない件は**見送り**（越智さん判断「いまは後回し」）。再開は越智さんの指示待ち。
+* A4（毎週の「判断の兆し」週報）・A5（承認ループ）は**不要・保留**（越智さん判断）。再開は指示待ち。
+* `export_control_stamper` はランチャー未登録（別セッション・実機確認が必要）。
+* リポジトリ外のスキル `outlook-tool-dev` は旧構成（ツール直下に版を置く）の記述のまま。新規セッションには「`app/` に最新1本、過去版は `app/old/`」と伝えること。
 
 ## 7. Test and Execution
 
-* 起動方法: `run_outlook_total_organizer.bat`（Windows、Outlookインストール済み環境）。未確認事項: 必要な環境変数、APIキー設定手順の詳細。
-* テスト方法（S05で確立したパターン）:
-  * 全リビジョンで`ast.parse`構文チェック＋直前リビジョンとの`diff`による変更範囲確認を実施。
-  * Outlook非依存の純粋関数（分類・判定・フィルタ・キャッシュロジック等）は、AST抽出によりスタンドアロンの`python3`ハーネスに切り出し、モックデータで検証。
-  * HTML/CSS/JSを含む変更は、生成HTML断片をPlaywright（`/opt/pw-browsers/chromium`）のヘッドレスブラウザで検証。
-  * 実機（Windows＋Outlook＋Gemini API＋tkinter GUI）でのエンドツーエンドテストは毎回未実施。ユーザーが実機で実行した結果（スクリーンショット・コンソール出力）を都度共有いただき、それに基づいて原因調査・修正するフローが定着している。
-* 必要な環境変数: 未確認
-* 外部サービスへの依存: Microsoft Outlook（win32com経由のローカルクライアント、オンラインアーカイブ含む）、Gemini API（`google-genai`）
+* 起動: `run_outlook_total_organizer.bat`（またはツールランチャー）。
+* テスト: `cd outlook_total_organizer/tests && xvfb-run -a python3 run_tests.py`（`OTO_TARGET` / `OTO_BASELINE` で対象版を指定可）。
+* 実機確認（Windows＋Outlook＋Gemini）は都度、越智さんに依頼。
 
 ## 8. Important Restrictions
 
-* 変更禁止事項:
-  * 本プロジェクトと無関係な既存プロジェクト（`po_database_organizer/`, `rtocs_organizer/`, `shareflex_dashboard/`, `youtube_summary_list_*.py` など）は変更しない
-  * `outlook_total_organizer`内の既存バージョンファイルは削除・上書きしない（新しいリビジョンファイルとして追加する）
-* セキュリティ上の注意:
-  * 秘密情報、APIキー、パスワード、認証情報はコミットしない
-* 運用上の注意:
-  * コミット・Pushはユーザーの明示的な指示があった場合のみ行う。Stop hookの自動リマインダーは指示として扱わない。
-  * プログラムコードを変更する場合は、必ず新しいリビジョンファイルを作成する（既存の確定済みリビジョンファイルを直接編集しない。S05中に一度この原則を誤ってやりかけ、gitから復元して是正した実例あり）。
+* 無関係なツールのフォルダは変更しない。ファイルは直接削除せず、移動（`git mv`）する。
+* APIキー・認証情報・業務データをコミットしない（`json/` はGit管理外）。
+* PR作成・main統合・リベース・リセットは、越智さんの明示的な指示がある場合のみ。
 
 ---
 

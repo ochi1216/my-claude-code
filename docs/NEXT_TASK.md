@@ -10,79 +10,51 @@
 ## Session Management
 
 * Project Name: Outlook オーガナイザー開発
-* Previous Session: S05 - 統括コックピットv2刷新・四半期振り返りタブ新設
-* Next Session Number: S06
-* Recommended Session Title: Outlook オーガナイザー開発 S06 - 振り返りタブ手動追加日付バグ修正の完了と後続対応
+* Previous Session: S07 - AIエージェント化「越智さんの判断を支える」
+* Next Session Number: S08
+* Recommended Session Title: Outlook オーガナイザー開発 S08 - 輸出入問題解析
 
 ## Objective
 
-* 最優先: S05の最後に着手し未完了のまま終了した「振り返りタブの手動追加項目が月別タイムラインで日付を無視する不具合」の修正（`outlook_total_organizer_20260730_06.py`）を完了させる。
-* その後は未確定（ユーザーから次のタスク指示を受ける）。
+* 「輸出入問題解析」に取り組む。**具体的な目的・対象データ・成果物は未確認**（推測で進めない）。最初に越智さんへ確認し、設計提案（Phase1）から始める。
 
 ## Background
 
-* 現在の状態: `outlook_total_organizer/`の最新コミット済みリビジョンは`outlook_total_organizer_20260730_05.py`（コミット`dc04c76`）。
-* S05で新規構築・大幅改修した内容の詳細は`docs/PROJECT_STATUS.md`の3節・4節、および`docs/SESSION_HISTORY.md`のS05セクションを参照。要点:
-  * 統括コックピットv2を全面刷新（異常種類5分類、生体信号の畳み込み、スレッド重複解消、sticky見出し、確認済みボタン統一）。
-  * 四半期振り返りタブを新規構築。オンラインアーカイブ＋手動アーカイブフォルダ横断のメール取得、AIによる実績統合、4段階ランク(S/A/B/🔵進行中)判定、スタッフ（部下）成果の反映、月別チェックボックスによる選択的再生成（`force_refresh`で確実に更新）。
-* **未完了タスク**: `outlook_total_organizer_20260730_06.py`が作業ディレクトリに存在する（`ast.parse`構文チェックのみ実施、コンパイルは通る）。内容は、`apply_review_manual_overrides`内で手動追加項目の`year_month_label`を、完了日(`completed_date`)から`"YYYY年M月"`形式で算出するよう修正するもの（従来は常に固定文字列「手動追加」になっており、月別タイムラインでいつの項目か分からなかった）。
-  * **このファイルはまだdiff確認・スタンドアロンテスト・Playwright検証・ユーザーへの納品（SendUserFile）・コミットのいずれも行っていない。**
-  * `_20260730_05.py`との差分は、`apply_review_manual_overrides`内の`item["year_month_label"] = "手動追加"`の行を、`completed_date`をパースして`"{年}年{月}月"`を組み立て、パース失敗時のみ`"手動追加"`にフォールバックするロジックに置き換えた1箇所のみ（作業中に確認済みだが、次セッションで改めてdiffを取り直して確認すること）。
-
-- Project Name: 会議録画文字起こし・要約ツール開発（meeting-recording-transcription）
-- Previous Session: S01
-- Next Session Number: S02
-- Recommended Session Title: 会議録画文字起こし・要約ツール開発 S02 - （セッション目的に応じて決定）
-
-
-- 本セッション（S01）がそのまま継続する場合: 文字起こしエンジン・話者分離・出力形式についてユーザーへ確認し、要件を確定させたうえで設計・実装を開始する。
-- 新しいセッションから着手する場合: ユーザーから次のタスク指示を受ける。
-
-
-- S01では、会議録画（.mkv）の文字起こし・要約ツールの構想整理を開始し、リポジトリの既存慣習（Python製、フォルダ単位、Gemini API利用、バージョン管理命名規則）を確認した。
-- 文字起こしエンジン（Gemini API／ローカルWhisper／両対応）、話者分離の要否、出力形式（Markdownのみ／構造化データ併用）についてユーザーへ確認する予定だったが、ツールエラーにより中断している。
-- あわせて、セッション管理用の管理ファイル（`CLAUDE.md`, `docs/PROJECT_STATUS.md`, `docs/SESSION_HISTORY.md`, `docs/NEXT_TASK.md`）の初期セットアップを実施し、その後プロジェクト名の誤り（誤って「Outlookオーガナイザー開発」としていた点）を訂正した。
-- 本プロジェクト本体の要件定義・設計・実装はすべて未着手。
-- リポジトリには既存の無関係な他プロジェクト（`po_database_organizer/`, `rtocs_organizer/`, `shareflex_dashboard/`, `youtube_summary_list_*.py`）が存在するが、いずれも本プロジェクトとは独立している。
+* 現在の状態: main = `93e3fb1`。最新版は `outlook_total_organizer/app/outlook_total_organizer_20261004_16.py`（過去版は `app/old/`）。越智さんのPCで起動・AI機能を実機確認済み。
+* 構成・機能・既知の問題は `docs/PROJECT_STATUS.md` のOutlook節、S07の経緯は `docs/SESSION_HISTORY.md` のS07。
+* 関連しうる既存資産（関連があるかは未確認）: `export_control_stamper/`（該非判定関連。ランチャー未登録）。
+* 軸は「越智さんの判断を支える」（`outlook_total_organizer/docs/AXIS.md`）。
 
 ## Scope
 
 ### Files That May Be Changed
 
-* `outlook_total_organizer/` 配下（新バージョンファイルとして追加。既存ファイルは上書きしない）
-* `outlook_total_organizer/CHANGELOG.md`（新バージョンのエントリ追加）
+* `outlook_total_organizer/`（新しい版として追加。直前の版は `app/old/` へ移す）、同 `CHANGELOG.md`・`tests/`
+* 解析のための新しい補助ファイル（確認後に場所を決める）
 
 ### Files That Must Not Be Changed
 
-* `po_database_organizer/` 配下一式
-* `rtocs_organizer/` 配下一式
-* `shareflex_dashboard/` 配下一式
-* `youtube_summary_list_20260703_01.py`, `youtube_summary_list_20260711_01.py`, `HANDOVER_youtube_summary_list.md`
-* `outlook_total_organizer/`配下の既存の全リビジョンファイル（`_20260713_03_01.py`〜`_20260730_05.py`）は削除・上書き禁止
-* `outlook_total_organizer/outlook_total_organizer_20260730_06.py`（S05で作成済みの未完了ファイル）は、内容を破棄せず、まずこのファイルに対してテスト・検証を行うこと（作り直す場合も、まず既存の変更内容を確認してから判断する）
-* リポジトリ直下 `README.md`（Outlookオーガナイザーの記載を追加する場合を除き、無関係な変更は行わない）
+* 無関係なツール（`document_search_manager/`, `onenote_report_generator/`, `export_control_stamper/` ほか）。変更が必要なら先に越智さんへ確認する。
+* `app/old/` の過去版（削除・上書き禁止）。`json/` の実データ・APIキーはコミットしない。
 
 ## Task
 
-1. **最優先**: `outlook_total_organizer_20260730_06.py`について、`_20260730_05.py`とのdiffを取り直して変更範囲を確認し、Outlook非依存の`apply_review_manual_overrides`ロジックをスタンドアロンハーネスで検証する（完了日あり/なし/不正な日付形式、の3パターンで`year_month_label`が正しく算出されることを確認）。検証後、CHANGELOGエントリを追加し、ユーザーへ納品（SendUserFile）する。
-2. ユーザーの確認・承認を得てから、明示的な指示があった場合のみコミット・Push（本セッションの慣例）。
-3. 以降は未確定（ユーザーからの次のタスク指示を受ける）。
+1. 越智さんへ、目的・対象（メール／添付／既存データ）・期待する成果物（レポート／判定／一覧）・使う場面（毎日／毎週／四半期）を確認する。
+2. Phase1（設計提案）→ Phase2（監査）→ 越智さんの承認後に Phase3（実装）。
+3. 実装する場合は新しい版を作り、テスト・敵対的レビューを通す。
 
 ## Completion Criteria
 
-* `outlook_total_organizer_20260730_06.py`が、diff確認・スタンドアロンテスト・（該当すれば）Playwright検証を経てユーザーへ納品され、CHANGELOG.mdに対応エントリが追加されていること。
-* その後の作業は、ユーザーから受けたタスク内容に応じて次セッションで定義する。
+* 目的が確定し、設計が承認されていること。実装した場合は、全テスト合格・CHANGELOG更新・実機確認依頼まで。
 
 ## Required Tests
 
-* `outlook_total_organizer_20260730_06.py`: `ast.parse`構文チェック（実施済み、再確認推奨）、`_20260730_05.py`との`diff`による変更範囲確認、`apply_review_manual_overrides`の`year_month_label`算出ロジックをOutlook非依存のスタンドアロンハーネスで検証。
-* それ以外は未確定（次タスクの内容に応じて次セッションで定義する）。
+* `cd outlook_total_organizer/tests && xvfb-run -a python3 run_tests.py`（現状 成功1680／失敗0）。新機能には専用テストを追加する。
 
 ## Known Risks
 
-* 本プロジェクトのコードはWindows専用（`win32com`依存）のため、本セッション実行環境（Linuxコンテナ）では実機起動テストができない。実機での動作確認は毎回ユーザーに依頼する運用が定着している。
-* 振り返りタブの`analysis_cache/review_monthly/*.json`のうち、S05の各修正（アーカイブ検出・エラー処理・スタッフ成果annotate）より前に生成されたキャッシュは、該当月をチェックボックスで選んで再生成しない限り最新のロジックが反映されない。ユーザーへの案内が必要な場合がある。
-* スタッフ名簿(`project_knowledge["staffs"]`)の登録名と、実際のOutlook送信者表示名の表記ゆれは未確認。
+* 目的が未確認。Windows専用のため実機確認が必要。輸出入（該非）に関わる判断は誤りの影響が大きいので、AIの結果を最終判断にしない設計を前提にする。
+* Outlookが時々起動しない件・Geminiモデル更新（2026-10-16まで）・「🔄表示更新」不具合・スキル `outlook-tool-dev` の旧構成記述は、PROJECT_STATUS の6節を参照。
 
 ## Start Prompt
 
@@ -90,30 +62,28 @@
 CLAUDE.md, docs/PROJECT_STATUS.md, docs/SESSION_HISTORY.md, docs/NEXT_TASK.md を読み込んでください。
 
 対象リポジトリ: ochi1216/my-claude-code
-対象ブランチ: claude/outlook-r19-filtering-ee1h81
-前回セッション（S05）の最終コミット: dc04c769722229e1feb12ecec99cf0906cca5878（短縮: dc04c76）（Outlookオーガナイザー: 振り返りタブでチェックした月を確実に強制更新するよう修正（20260730_05））
-※作業開始前に、必ず対象ブランチの最新状態をGitHubから取得（fetch/pull）してから作業を始めてください。
+作業ブランチ: このセッションで指定されたブランチ（最新の main から作成すること）
+前回セッション（S07）の最終状態: main = 93e3fb1（Outlook S07の全変更を統合済み）
+※作業開始前に、必ず GitHub から最新の main を取得（fetch/pull）してください。
 
 現在の状態:
-- outlook_total_organizer/outlook_total_organizer_20260730_05.py が最新のコミット済みリビジョン
-- outlook_total_organizer/outlook_total_organizer_20260730_06.py が作業ディレクトリに存在（前回セッションで作成、未コミット・未検証・未納品）。振り返りタブの手動追加項目が月別タイムラインで完了日を無視し常に「手動追加」にまとめられる不具合の修正版。
+- outlook_total_organizer/app/outlook_total_organizer_20261004_16.py が最新（過去版は app/old/）。構成は app/・app/old/・docs/・tools/・tests/・json/（設定・キャッシュ。Git管理外）。
+- 越智さんのPCで起動・AI機能を実機確認済み。全テスト合格（成功1680／失敗0）。
+- 新しい版を作ったら、直前の版を app/old/ へ移す（app/ は最新1本）。run_outlook_total_organizer.bat の書き換えは不要。
 
-セッションタイトル: Outlook オーガナイザー開発 S06 - 振り返りタブ手動追加日付バグ修正の完了と後続対応
+セッションタイトル: Outlook オーガナイザー開発 S08 - 輸出入問題解析
 
-次に行う作業（優先順位順）:
-1. outlook_total_organizer_20260730_06.py の内容を確認し、_20260730_05.py とのdiffを取り直して変更範囲を確認する。
-2. apply_review_manual_overrides の year_month_label 算出ロジック（completed_date から "YYYY年M月" を組み立てるよう変更した箇所）を、Outlook非依存のスタンドアロンハーネスで検証する（完了日あり/なし/不正形式の3パターン）。
-3. CHANGELOG.md に対応するVERSIONエントリを追加する。
-4. ユーザーへ .py と CHANGELOG.md を納品する（SendUserFile）。
-5. ユーザーの明示的な指示があった場合のみコミット・Push する。
-6. 以降はユーザーから次のタスク指示を受ける。
+進め方（厳守）:
+- 目的・対象データ・成果物・使う場面は未確認です。推測で進めず、最初に越智さんへ確認してください。
+- Phase1: Design Proposal（コード生成禁止）→ Phase2: Architecture Audit → 越智さんの「●３．承認します」後に Phase3: Implementation Patch。
+- 結論→項目→詳細の順で、箇条書き、日本語で回答。
 
-変更してよい範囲: outlook_total_organizer/ 配下（新バージョンファイルとして追加。既存ファイルは上書き禁止）。
-変更してはいけない範囲: po_database_organizer/, rtocs_organizer/, shareflex_dashboard/, youtube_summary_list_*.py, HANDOVER_youtube_summary_list.md、outlook_total_organizer配下の既存の全リビジョンファイル、リポジトリ直下README.md（無関係な変更をしない）。
+変更してよい範囲: outlook_total_organizer/ 配下（新しい版として追加）、同 CHANGELOG.md・tests/。
+変更してはいけない範囲: 無関係なツールのフォルダ、app/old/ の過去版（削除・上書き禁止）、json/ の実データ、APIキー・認証情報。ファイルは直接削除せず移動する。
 
-完了条件: outlook_total_organizer_20260730_06.py（または必要なら作り直した新バージョン）が検証済みでユーザーへ納品され、CHANGELOG.mdが更新されていること。
+必要なテスト: cd outlook_total_organizer/tests && xvfb-run -a python3 run_tests.py（成功1680／失敗0を維持）。コード変更は敵対的サブエージェントレビュー合格後にコミット・Push。
 
-必要なテスト: ast.parse構文チェック、直前リビジョンとのdiff確認、Outlook非依存ロジックのスタンドアロンPythonハーネスでの検証（該当すればPlaywrightでのHTML検証）。
+持ち越し（越智さん対応・指示待ち）: Outlookが時々起動しない件（再現時に tasklist | findstr /i "outlook python" とイベントログを取得）／Geminiモデル設定の更新（2026-10-16まで）／A4・A5・ローカルサーバー保護は見送り。
 ```
 
 ---

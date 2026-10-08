@@ -19,6 +19,7 @@
 | S03 | Outlook オーガナイザー開発 S03 - アクションタブの対象期間に3週間・1か月を追加 | 2026-07-16 | 完了 | outlook_total_organizer/outlook_total_organizer_20260716_02.py, outlook_total_organizer/CHANGELOG.md, docs/PROJECT_STATUS.md, docs/SESSION_HISTORY.md, docs/NEXT_TASK.md |
 | S04 | Outlook オーガナイザー開発 S04 - アクションカードにフラグマークを追加 | 2026-07-16 | 完了 | outlook_total_organizer/outlook_total_organizer_20260716_03.py, outlook_total_organizer/CHANGELOG.md, docs/PROJECT_STATUS.md, docs/SESSION_HISTORY.md, docs/NEXT_TASK.md |
 | S05 | Outlook オーガナイザー開発 S05 - 統括コックピットv2刷新・四半期振り返りタブ新設 | 2026-07-16〜2026-07-30 | 一部未完了（詳細は本文参照） | outlook_total_organizer/outlook_total_organizer_20260730_05.py（コミット済み最新）, outlook_total_organizer/outlook_total_organizer_20260730_06.py（未コミット・未検証・未納品）, outlook_total_organizer/diagnose_archive.py, outlook_total_organizer/CHANGELOG.md, CLAUDE.md, docs/PROJECT_STATUS.md, docs/SESSION_HISTORY.md, docs/NEXT_TASK.md |
+| S07 | Outlook オーガナイザー開発 S07 - AIエージェント化「越智さんの判断を支える」 | 2026-10-04〜2026-10-08 | 完了（A4/A5は不要・保留） | outlook_total_organizer/app/outlook_total_organizer_20261004_16.py ほか（`_01`〜`_16`）, outlook_total_organizer/CHANGELOG.md, outlook_total_organizer/docs/, tests/ |
 
 ## S01 - 引継ぎ管理の初期設定
 
@@ -310,6 +311,50 @@
   3. 以降は未確定（ユーザーからの次のタスク指示を受ける）。
 * 次回の推奨タイトル: `Outlook オーガナイザー開発 S06 - 振り返りタブ手動追加日付バグ修正の完了と後続対応`
 
+
+## S07 - AIエージェント化「越智さんの判断を支える」
+
+### Purpose
+
+* 計画 `outlook_total_organizer/docs/AGENT_PLAN_draft.md`（v12）に沿い、軸「越智さんの判断を支える」（毎日／毎週／四半期）でツールを作り替える。常設指示: 完成まで自動で進める／質問はPM推奨で決める／サブエージェントを活用／10分毎に短い状況通知／コード変更は敵対的サブエージェントPMレビュー合格後にコミット・Push。
+* 注: S06 の記録は本リポジトリの docs に無い（未確認）。
+
+### Work Completed
+
+* `_01` A1 判断待ちパネル／`_02` A2 費用表示の是正／`_03` A3 振り返りの12か月・年またぎ／`_04`・`_05` アクション・振り返りのAI費用の事前確認／`_06` A6 上位タブを6→4に統合。
+* `_07`・`_08` 俯瞰2画面・統括コックピット（全自動同期・v2）の費用確認（共有トークン集計のリセットを費用確認の後に移動）／`_09` A6b 「📥自分待ち・🔥催促」パネル／`_10` A9 軽量モデル設定・Gemini 2.5 提供終了(2026-10-16)への備え／`_11` A7d 字数超過バッジ。
+* `_12` A10・`_15` A10b HTMLレポートのエスケープ漏れ修正＋iframe sandbox／`_13` A8 検索の To:Me＋CC:Me 取りこぼし修正／`_14` A7e 全自動同期から使われないStage2を省略（費用削減）。
+* `_16` フォルダ構成の整理（`app/` に最新1本、`app/old/` に過去70本、`docs/`・`tools/`・`tests/`、`.bat` をASCII化して `app\` の最新を起動）。本体の変更は `common` の探し先1箇所のみ。
+* 運用対応: ランチャーの古い `tools.json`（起動時1回読み）が原因のOneNote起動エラーを案内。別ブランチ起因の「先祖返り」を調査し main に統合。Document Search Manager セッション・Tool Launcher セッションへ状況を連絡。
+* main統合（越智さんの承認後）: `292336f`（Outlook S07＋Document Search Manager S04）, `441e99e`, `a5493c7`, `93e3fb1`（フォルダ構成整理）。
+
+### Files Changed
+
+* `outlook_total_organizer/` 配下一式（版 `_01`〜`_16`、CHANGELOG、`docs/`、`tools/`、`tests/`、`.bat`）。
+* `docs/PROJECT_STATUS.md` / `docs/SESSION_HISTORY.md` / `docs/NEXT_TASK.md`（本終了処理）。
+
+### Decisions
+
+* A4（判断の兆し週報）・A5（承認ループ）は「今は不要」。ローカルサーバー保護（トークン導入）は「いまは後回し」。どちらも越智さんの再開指示まで着手しない。
+* 最初の階層をシンプルにするため、案A（`app/`・`app/old/`・`docs/`・`tools/`・`tests/`・`json/`）を採用。
+* 費用確認の閾値は100円。全自動同期は Stage1 のみ。
+
+### Tests
+
+* Linux側で全テスト合格（成功1680／失敗0／エラー0／スキップ109／想定内の失敗3）。各版で敵対的サブエージェントPMレビュー合格。
+* 実機（Windows）: `_16` の起動・AI機能・`json/` の読み込みを越智さんが確認済み（「機能しました」）。
+
+### Open Items
+
+* Outlookが時々起動しない件（再現待ち。取得する情報は PROJECT_STATUS の6節）。
+* Geminiモデル設定の更新（2026-10-16まで。越智さんの作業）。
+* 「🔄表示更新」が検索の選択を消す不具合（未修正）。
+* `export_control_stamper` のランチャー登録（別セッション・実機確認が必要）。
+* 開発用スキル `outlook-tool-dev`（リポジトリ外）の旧構成記述。
+
+### Next Session
+
+* 次回: `Outlook オーガナイザー開発 S08 - 輸出入問題解析`（詳細は `docs/NEXT_TASK.md`。目的の詳細は未確認のため、最初に越智さんへ確認する）。
 
 ---
 
