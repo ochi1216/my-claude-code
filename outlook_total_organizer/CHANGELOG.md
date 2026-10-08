@@ -1,5 +1,28 @@
 # CHANGELOG — outlook_total_organizer
 
+## VERSION 20261008_01（オンラインアーカイブ判定の修正）
+
+### 追加・修正
+	**`_find_online_archive_root`の判定を実機の事実に合わせた**: 実機で`Store.ExchangeStoreType`は、現行メールボックス=0・オンラインアーカイブ=1(表示名「オンライン アーカイブ - <メール>」)・PST(Outlookデータファイル)=3と確定した。従来は「型値3=olExchangeArchiveMailbox」を第一判定にしていたため、PSTがアーカイブより先に列挙されると、PSTがオンラインアーカイブと誤判定され、振り返りタブ(`get_review_mails_for_month`等)が本物のオンラインアーカイブを見ない恐れがあった。
+	**新しい判定**: (a)表示名パターン一致(「オンライン アーカイブ」/"online archive"/"in-place archive"/"archive -")を第一、(b)補助として`ExchangeStoreType==1`かつ既定ストアでなく、かつ表示名に"archive"または「アーカイブ」を含む場合。型値3(PST)は、表示名が(a)に一致しない限りアーカイブ扱いにしない。docstring・コメントも実機の事実に更新。
+	**他の箇所**: `ExchangeStoreType`を参照しているのは同関数のみ(grepで確認)。
+
+### 変更関数
+	`OutlookMailManager._find_online_archive_root`(判定部分とdocstringのみ)
+
+### 新規追加：
+	`app/outlook_total_organizer_20261008_01.py`(旧`_20261004_16`は`app/old/`へgit mv) / `tests/test_online_archive_detection.py`(PSTが先に並ぶ・PSTのみ・英語名・既定ストア除外・無関係な型値1・例外ストアで続行 など10件)
+
+変更ファイル：
+	`app/outlook_total_organizer_20261008_01.py` / `app/old/`(_16の移動) / `tests/test_online_archive_detection.py` / `CHANGELOG.md`(このエントリの追記のみ)
+
+変更しないこと（宣誓）：
+	上記関数以外の本体ロジック・UI・既存テスト・`run_outlook_total_organizer.bat`(最新版を自動で選ぶため変更不要)・`json/`の実データ。Outlookのアイテムの変更・移動・削除・既読化は一切しない。
+
+### 動作確認(Linux側)
+	全テスト合格(成功1761・失敗0・エラー0。スキップ109はtkinter無しのGUIテスト)。判定はフェイクのStoresでの確認のみ。
+	**実機で確認してほしいこと**: PST接続状態で振り返りタブを実行し、オンラインアーカイブ(型値1)のメールが取得されること。
+
 ## VERSION 20261008_01（診断スクリプト）
 
 ### 追加・修正
