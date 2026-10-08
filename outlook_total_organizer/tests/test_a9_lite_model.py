@@ -502,8 +502,8 @@ def short_diff(a, b, limit=30):
 class TestScopeGuardA9(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.baseline = os.path.join(_loader.TOOL_DIR, OLD_REV)
-        cls.target = os.path.join(_loader.TOOL_DIR, NEW_REV)
+        cls.baseline = _loader.rev_path(OLD_REV)
+        cls.target = _loader.rev_path(NEW_REV)
         if not (os.path.isfile(cls.baseline) and os.path.isfile(cls.target)):
             raise unittest.SkipTest("A9 のリビジョン対 (20261004_09 / 20261004_10) が無い")
         cls.old = _index_source(cls.baseline)

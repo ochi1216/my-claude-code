@@ -2415,8 +2415,8 @@ class TestScopeGuardA6b(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.target = os.path.join(_loader.TOOL_DIR, NEW_REV)
-        cls.baseline = os.path.join(_loader.TOOL_DIR, OLD_REV)
+        cls.target = _loader.rev_path(NEW_REV)
+        cls.baseline = _loader.rev_path(OLD_REV)
         if not (os.path.isfile(cls.target) and os.path.isfile(cls.baseline)):
             raise unittest.SkipTest(f"A6b のリビジョン対({OLD_REV} / {NEW_REV})が無い")
         cls.old = a6tabs._index_source(cls.baseline)
@@ -2590,8 +2590,8 @@ class TestScopeGuardA6b(unittest.TestCase):
 class TestSpecGapScopeGuardA6b(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        target = os.path.join(_loader.TOOL_DIR, NEW_REV)
-        baseline = os.path.join(_loader.TOOL_DIR, OLD_REV)
+        target = _loader.rev_path(NEW_REV)
+        baseline = _loader.rev_path(OLD_REV)
         if not (os.path.isfile(target) and os.path.isfile(baseline)):
             raise unittest.SkipTest(f"A6b のリビジョン対({OLD_REV} / {NEW_REV})が無い")
         cls.target, cls.baseline = target, baseline

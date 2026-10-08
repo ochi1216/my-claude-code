@@ -54,7 +54,7 @@ OTHER = "taro.sato@example.com"
 @functools.lru_cache(maxsize=None)
 def load_rev(filename):
     """ツールフォルダの指定リビジョンを別名で読み込む (突き合わせ用)。無ければ None。"""
-    path = os.path.join(_loader.TOOL_DIR, filename)
+    path = _loader.rev_path(filename)
     if not os.path.isfile(path):
         return None
     oto()                                                  # 先に最小スタブを入れておく
@@ -571,8 +571,8 @@ def _cc_if_nodes(fn):
 class TestScopeGuardA8(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.target = os.path.join(_loader.TOOL_DIR, NEW_REV)
-        cls.baseline = os.path.join(_loader.TOOL_DIR, OLD_REV)
+        cls.target = _loader.rev_path(NEW_REV)
+        cls.baseline = _loader.rev_path(OLD_REV)
         if not (os.path.isfile(cls.target) and os.path.isfile(cls.baseline)):
             raise unittest.SkipTest(f"A8 のリビジョン対({OLD_REV} / {NEW_REV})が無い")
         cls.old = a7a._index_source(cls.baseline)

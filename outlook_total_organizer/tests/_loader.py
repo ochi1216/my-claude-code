@@ -32,6 +32,9 @@ sys.dont_write_bytecode = True
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 TOOL_DIR = os.path.dirname(TESTS_DIR)
+# 本体は app/ に最新の1本、過去の版は app/old/ に置く(20261004_16 から)
+APP_DIR = os.path.join(TOOL_DIR, "app")
+OLD_DIR = os.path.join(APP_DIR, "old")
 MODULE_NAME = "oto_under_test"
 TARGET_GLOB = "outlook_total_organizer_*.py"
 
@@ -67,8 +70,18 @@ A1_ALL_NAMES = A1_CONSTANTS + A1_FUNCTIONS + A1_GUI_ATTRS
 # 対象ファイルの特定
 # ============================================================
 def list_revisions():
-    """tool フォルダ内の outlook_total_organizer_*.py を名前順で返す"""
-    return sorted(glob.glob(os.path.join(TOOL_DIR, TARGET_GLOB)))
+    """app/ と app/old/ の outlook_total_organizer_*.py を、ファイル名の順(新しいものが後ろ)で返す"""
+    paths = glob.glob(os.path.join(APP_DIR, TARGET_GLOB)) + glob.glob(os.path.join(OLD_DIR, TARGET_GLOB))
+    return sorted(paths, key=os.path.basename)
+
+
+def rev_path(filename):
+    """リビジョンのファイル名から、実際のパスを返す(app/ → app/old/ の順に探す。無ければ app/ 側のパス)"""
+    for d in (APP_DIR, OLD_DIR):
+        cand = os.path.join(d, filename)
+        if os.path.isfile(cand):
+            return cand
+    return os.path.join(APP_DIR, filename)
 
 
 def find_target_path():
@@ -76,13 +89,13 @@ def find_target_path():
     無ければ名前順で最後のリビジョン。"""
     env = os.environ.get("OTO_TARGET", "").strip()
     if env:
-        for cand in (env, os.path.join(TOOL_DIR, env)):
+        for cand in (env, os.path.join(TOOL_DIR, env), rev_path(env)):
             if os.path.isfile(cand):
                 return os.path.abspath(cand)
         raise FileNotFoundError(f"OTO_TARGET が見つかりません: {env}")
     revs = list_revisions()
     if not revs:
-        raise FileNotFoundError(f"{TOOL_DIR} に {TARGET_GLOB} がありません")
+        raise FileNotFoundError(f"{APP_DIR}(と old/)に {TARGET_GLOB} がありません")
     return revs[-1]
 
 
@@ -91,7 +104,7 @@ def find_baseline_path(target=None):
     環境変数 OTO_BASELINE があればそれを使う (既存コード不変ガードの比較元)。"""
     env = os.environ.get("OTO_BASELINE", "").strip()
     if env:
-        for cand in (env, os.path.join(TOOL_DIR, env)):
+        for cand in (env, os.path.join(TOOL_DIR, env), rev_path(env)):
             if os.path.isfile(cand):
                 return os.path.abspath(cand)
         raise FileNotFoundError(f"OTO_BASELINE が見つかりません: {env}")

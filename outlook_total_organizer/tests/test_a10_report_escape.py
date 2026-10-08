@@ -68,7 +68,7 @@ def oto():
 def load_revision(filename):
     """tool フォルダのリビジョンをファイル名で指定して、別名のモジュールとして読み込む (無ければ None)。
     (OTO_TARGET で変異版を指しても、こちらは常に tool フォルダのファイル)"""
-    path = os.path.join(_loader.TOOL_DIR, filename)
+    path = _loader.rev_path(filename)
     if not os.path.isfile(path):
         return None
     oto()                                                  # 先に最小スタブを入れておく
@@ -1381,8 +1381,8 @@ def _unwrap_js_line(line):
 class TestScopeGuardA10(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.baseline = os.path.join(_loader.TOOL_DIR, OLD_REV)
-        cls.target = os.path.join(_loader.TOOL_DIR, NEW_REV)
+        cls.baseline = _loader.rev_path(OLD_REV)
+        cls.target = _loader.rev_path(NEW_REV)
         if not (os.path.isfile(cls.baseline) and os.path.isfile(cls.target)):
             raise unittest.SkipTest(f"A10 のリビジョン対 ({OLD_REV} / {NEW_REV}) が無い")
         cls.old = _index_source(cls.baseline)
