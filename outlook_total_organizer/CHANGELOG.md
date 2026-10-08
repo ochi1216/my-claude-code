@@ -1,5 +1,30 @@
 # CHANGELOG — outlook_total_organizer
 
+## VERSION 20261008_01（診断スクリプト）
+
+### 追加・修正
+	**T0 事前診断スクリプトを新規追加した(読み取り専用。本体は変更していない)**: 過去スレッド台帳に着手する前に、越智さんのOutlook環境で「ストア・フォルダ・月別件数・日付書式・速度・索引検索」を確認するための単体スクリプト。
+	①全ストア(現行・オンラインアーカイブ・PST)の名前・ExchangeStoreTypeの生の値・PSTのファイルパスを一覧。アーカイブ判定は「型値」と「表示名」の根拠を別々に表示し、型値だけ一致の場合は「要確認」(値の意味が未確認のため)。 ②各ストアのメールフォルダ(DefaultItemType=メールのみ)を再帰列挙し、削除済み・迷惑メール・検索フォルダー・RSSは「除外候補」として別集計。 ③2023-10〜2026-09(`--from`/`--to`で変更可)の月別件数をRestrictの件数だけで取得。先に全期間で1回数え、0件のフォルダは月別を省略。月境界の前後1日重ねは、ストアごとの件数上位フォルダ(`--overlap-folders`、既定5)のみ。 ④Restrictの日付書式は多数決にせず、ISO系(YYYY-MM-DD)を基準に他書式との件数差を表示。13日以降を含む窓(月の13〜27日)も試験して日/月の取り違えを判別する。差のある書式は「ロケール依存の疑い・要確認」とし自動採用しない。 ⑤速度比較(Items列挙+Restrict と GetTable)と索引検索(DASLのLIKEとci_phrasematch)は、ストアごとに「データのある最新月」で、件数上位のフォルダ(`--max-test-folders`、ストア単位)を対象に実施。(a)(b)は交互に2回ずつ実行して2回目を採用。試験対象が無いストアはログと総括に明示。LIKEは部分一致・ci_phrasematchは語一致のため、不一致でも直ちに異常とは限らない旨を注記。 ⑥古い月が0件のストアに「キャッシュ期間外・保持ポリシーの可能性」と警告。
+	**出力**: コンソール(日本語+絵文字)と、`mail_reports/`(.gitignore済み。無ければ作成)の`diagnose_mail_inventory_<日時>.txt`(`--output`で変更可)。保存先に書けないときは一時フォルダ(`tempfile.gettempdir()`)へ退避してパスを表示。ログは1フォルダ完了ごとに追記・flushするので、落ちても直前までが残る。Ctrl+Cでは、そこまでのストア別集計を出力して保存する。
+	**出力する情報**: 件名・本文・送信者・宛先アドレスは出力も保存もしない。出すのは件数・所要時間・エラー種別・フォルダ名・ストア名・PSTファイル名。**フォルダ名・ストア名・PSTファイル名は出力されるので、共有前に内容を確認すること**。パスのユーザー名は`<USER>`、メールアドレス形式は`<MAIL>`に置換(ストア名・フォルダ名にも適用)。`--mask-names`で全ストア名・フォルダ名・PSTファイル名を連番(Store-01 / Folder-001)に置換できる。
+	**注記**: 件数には会話履歴・同期の問題・下書き・送信トレイ等のフォルダも含まれる。本体処理を別関数に切り出し、関数を抜けて全フォルダ・全ストアのCOM参照(`com`)を外してから`gc.collect()`→`CoUninitialize`する。日付書式の試験フォルダは「全期間の件数>0」のものから選び、基準(ISO)が全窓0件のときは「判別できません(要確認)」とする。月別取得がエラーで止まったフォルダは合計から除外して注記する。退避時のコンソール表示パスもマスクする。
+
+### 変更関数
+	なし(本体`app/`は未変更)。新規スクリプトの主な純粋関数: `parse_ym` / `month_range` / `month_bounds` / `overlap_bounds` / `build_range_filter` / `build_month_filter_variants` / `build_probe_windows` / `compare_date_formats` / `build_dasl_filters` / `mask_user_path` / `mask_display_name` / `NameMasker` / `archive_evidence` / `archive_verdict` / `classify_folder_name` / `build_zero_warning` / `latest_nonzero_index` / `select_test_folders` / `judge_index_result` / `error_kind` / `resolve_output_path`。
+
+### 新規追加：
+	`tools/diagnose_mail_inventory_20261008_01.py` / `tests/test_t0_mail_inventory.py`(純粋関数 + COMのフェイクで、秘密文字列が出力に出ないこと・1フォルダの例外で続行・Ctrl+Cでの保存・試験対象のストア単位選定・保存先の退避を確認)
+
+変更ファイル：
+	`CHANGELOG.md`(このエントリの追記のみ)
+
+変更しないこと（宣誓）：
+	`app/`配下の本体・既存テスト・既存の診断スクリプト・`.gitignore`・`json/`の実データ。Outlookのアイテムの変更・移動・削除・既読化、AddStore等のプロファイル変更は一切しない。
+
+### 動作確認(Linux側)
+	全テスト合格(成功1747・失敗0・エラー0。スキップ109はtkinter無しのGUIテスト)。COM部分はフェイクでの確認のみで、実機は未検証。
+	**実機で確認してほしいこと**: ①Outlook起動状態で`python tools\diagnose_mail_inventory_20261008_01.py`を実行し、txtが`mail_reports\`にできること ②PST接続後に再実行し、PSTがストア一覧に出ること ③出力に件名・アドレスが含まれないこと(フォルダ名・ストア名は出る) ④ISO書式のRestrictが通るか、ExchangeStoreTypeの生の値と各ストアの対応 ⑤txtを確認してから共有。
+
 ## VERSION 20261004_16
 
 ### 追加・修正
