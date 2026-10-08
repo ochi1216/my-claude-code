@@ -1,5 +1,41 @@
 # CHANGELOG — outlook_total_organizer
 
+## VERSION 20261009_03（過去スレッド台帳 S1.6: Exchange系ストアの高速化・会話ID統一・レジリエンス）
+
+### 追加・修正
+	**実機の全期間走査(_02)の結果を受けた修正。`tools/thread_ledger_scan_20261009_03.py`を新版とし、旧`_02`は`tools/old/`へ移動(`git mv`)。本体`app/`は未変更。**
+	**実機の事実**: PSTは全て成功(2023_Q3 6784通/2分40秒など。速い)。現行メールボックス(オンラインモード)は1通約1秒、オンラインアーカイブは1通約1.4秒で、途中停止後は`com_error(0x80020009)`で以降の全フォルダが即失敗(`EntryID:com_error(0x80040115)`=MAPI_E_NETWORK_ERROR)。原因は(1)オンラインモードでは1通ごとのアイテムアクセスが約1秒のRPC(60ms/通の見積りはPST実測)、(2)ネットワーク瞬断後にCOMセッションが壊れたままになること。
+	**1. Table方式(`--scan-mode auto|table|items`、既定auto=PSTはItems・それ以外はTable)**: `Folder.GetTable(filter)`で列を設定(`Columns.RemoveAll()`→`Add`: EntryID、Subject、ReceivedTime(`urn:schemas:httpmail:datereceived`)、送信日時(PR_CLIENT_SUBMIT_TIME `0x00390040`)、SenderName(`fromname`)、送信者アドレス(`0x5D01001F`と`0x0C1F001F`)、To/CC表示名(`displayto`/`displaycc`)、会話ID(PR_CONVERSATION_ID `0x30130102`)、メッセージクラス(`0x001A001E`))し、`GetArray(500)`のバルク取得を`EndOfTable`まで繰り返す(アイテムを開かない)。日付フィルタは`([ReceivedTime]範囲) OR ([SentOn]範囲)`(ISO)→`ReceivedTime`のみ→フィルタ無しで全件取得して手元で期間に絞る、の順にフォールバック。Tableが全く使えないフォルダは警告を出してItems方式に切り替える。クラスは`IPM.Note`/`IPM.Note.*`のみ採用し、他はスキップ件数に加算。列の追加に失敗しても(EntryIDと日時の列以外は)続行する。再開は期間全体を取り直して取得済みEntryIDを飛ばす(Tableは高速で、並び順に依存せず取りこぼさないため。ReceivedTimeだけで絞るItems方式のフォールバックは従来どおりlast_received以降から再開)。「読めないアイテムが多く止める」閾値はTable方式には適用しない。
+	**2. 会話IDの統一とスキーマ版**: Items方式でも`PropertyAccessor.GetProperty(PR_CONVERSATION_ID)`のバイナリを大文字16進にして会話ID(`c`)に採用(従来の`item.ConversationID`はfallback欄`c2`に保持)。Table方式も同じ形式。両方式のスレッドが統合できる(評価は`c`→`c2`→正規化件名の順で束ねる)。キャッシュのスキーマ版を2に上げ、旧版(1)は再走査する(評価では無視し、旧版のみのときは再走査が必要と案内)。`--probe-conversation-id`: 1フォルダ・数通で、Items(`item.ConversationID`とPR_CONVERSATION_ID)とTable(PR_CONVERSATION_ID)を並べて、一致/長さ/関係(同一・先頭一致・不一致)を表示(件名は出さない)。
+	**3. レジリエンス**: フォルダ単位で最大2回リトライ(待ち5秒→15秒。取得済みの行から再開)。連続3フォルダ失敗したらOutlook接続を作り直す(新しい`Dispatch`/`GetNamespace`。ストア参照は破棄し`GetStoreFromID`で取り直す)。各フォルダの前に軽いCOM呼び出し(ストア数)で接続を確認し、切れていれば再接続。それでも失敗したフォルダは「失敗」として総括に理由種別つきで出し、キャッシュは完了にしない(取得済みの行はチェックポイントとして保存し、再実行で再開)。Items方式で読めないアイテムが多く止まったフォルダがあっても、ストア全体は諦めず次のフォルダへ進む。
+	**4. 見積りと進捗**: 開始前に方式別の見積りを表示(PST/Items 60ms/通、非PST/Table 10ms/通(仮置き。実測で補正)、非PST/Items 1.0秒/通)。フォルダごとに使う方式と、方式別の実測で補正した残り時間、行/秒を表示し、ストアごとの行/秒も出す。
+	**5. `--probe-table`**: 1フォルダ(既定は件数最大。`--probe-folder`で指定)・`--from`の1か月・最大N行(`--probe-limit`、既定100、最大500)でTable方式とItems方式を両方実行し、取得件数の一致、1行あたりの時間、使われたフィルタ方式、会話IDの一致を表示(件名・氏名・アドレスは出さない。キャッシュは作らない。読み取りのみ)。
+	**変更しないこと**: 読み取り専用、件名等をコンソールに出さない、CSV対策、`--open`/`--open-url`の厳密検証、判定の保持などの既存仕様は変更していない。
+
+### レビュー対応(同日追記)
+	**Table日時のUTC/ローカル**: Tableの時刻はUTCで返る可能性があるため、`to_naive_dt(value, tz_mode)`にモードを追加し、Table方式だけ`--table-time auto|utc|local`(既定auto)で扱う。auto=tzinfoが付いていれば`astimezone()`でローカルに直し、無ければローカルとみなす / utc=tzinfoの無い値をUTCとみなしてローカルに直す / local=tzinfoを見ずそのまま。**Items方式は従来どおり(tzinfoを見ない。実機で検証済みの挙動を変えないため)**。`--probe-table`は共通EntryIDの日時差(Table−Items、時間単位の最頻値)を表示し、0以外で±14時間以内なら「Table日時はUTC疑い」と警告して`--table-time utc`を案内する。境界(月初・月末)が9時間ずれないことをテスト(TZ=Asia/Tokyo)。
+	**接続系エラーを「Table使用不可」にしない**: `GetTable`/列追加が接続系エラー(0x80040115・0x80020009・0x800706BA・0x800706BE・0x80070005・RPC_E_*。0x80020009は内側のscodeがあればそれで判定)で失敗したときは再送出し、フォルダ単位のリトライ側で扱う(Itemsへ永久に落ちない。`task["mode"]`を`items`に書き換えるのは`TableUnavailable`のときだけ)。構文・列のエラーのときだけ次のフィルタ→`TableUnavailable`。
+	**その他の修正**: ①`GetArray`の最初のチャンクで行の長さが列数と一致しない(転置の疑い)ときは`TableUnavailable`(形状不正)としてItemsへ落とし、`--probe-table`に形状(行×列)を表示。 ②Tableの文字列列がstr/bytes以外(数値のエラーコード等)のときは空文字にして`列値:<列名>`を計上。 ③会話ID: `c`(PR_CONVERSATION_ID)が空のメールは、既定でスレッドを正規化件名で束ねる(`c2`=`item.ConversationID`はキャッシュに保持のみ)。`--conv-fallback c2`を選ぶと`ci:`接頭辞つきで使う(c由来のキーと衝突しない)。ストア別に「PR_CONVERSATION_ID空の件数」「c2のみの件数」を総括に表示し、`ConvID(PA)`のエラーは専用カウンタ(会話ID取得失敗件数)に分けてエラー種別集計のノイズにしない。 ④`--probe-table`/`--probe-conversation-id`: `--from`未指定のときは`--to`の月、どちらも無ければ先月を対象月にし(既定の開始月は使わない)、0件なら「0件でした。--from YYYY-MM を指定してください」と表示。`--stores`未指定なら全ストアを順に試し、該当月にメールのある最初のストアを使って名前を表示。出力の最後に「結果の見方」を表示。 ⑤リトライ中の再接続: 2回目のリトライ前、またはDISP_E_*系のときは1回目から`conn.reconnect()`。`conn.check()`はストア数に加えて軽い`GetFolderFromID`を1回行う。 ⑥メッセージクラス列を`0x001A001F`(Unicode)に変更。総括に方式別(table/items)のフォルダ数とリトライ回数を表示。 ⑦Tableのフィルタが`ReceivedTime`のみ/フィルタ無しまでフォールバックしたとき、走査ログに明示。 ⑧Tableの再開時に`processed`/`non_mail`を数え直す(二重加算しない。速度表示はTableなら最後の試行の時間で計算)。 ⑨テストの`PropertyAccessor`検査を、第1段では`PR_CONVERSATION_ID`(0x30130102)の`GetProperty`のみ許可する検査にした(本文系プロパティの混入を検出)。
+	**曖昧な0x80020009の扱い(最終確認での修正)**: 内側のscodeが無い`0x80020009`(DISP_E_EXCEPTION)は、接続断でもフィルタ構文エラーでも同じ形で返るため、`open_table`では即再送出せず次のフィルタ(ORの構文エラーなら`ReceivedTime`のみ→フィルタ無し)を試す。全フィルタが同じ曖昧エラーで失敗したときだけ、`conn.check()`(ストア数+`GetFolderFromID`)で生死を確認し、死んでいれば接続系として再送出(フォルダ単位のリトライへ)、生きていれば`TableUnavailable`(構文・列の可能性)としてItems方式にフォールバックする。明確な接続系(0x80040115・0x800706BA/BE・0x80070005・RPC_E_*・内側scodeが接続系のもの)は従来どおり即再送出。総括に「曖昧な0x80020009を判定した回数」と「table→itemsフォールバックのフォルダ数」を表示。
+	**期間判定の差(Table方式とItems方式)**: Table方式は取得後に`t`(ReceivedTime、無ければSentOn)で期間判定するため、ReceivedTimeが期間外でSentOnだけ期間内のメールはキャッシュに入らない。Items方式のOR式はそのメールをキャッシュに取り込むが、評価時に`t`(ReceivedTime)で期間外として落とすため、台帳の結果は同じ(違うのはキャッシュの内容だけ)。
+	**PSTの所要の注意**: Items方式でも`PropertyAccessor.GetProperty(PR_CONVERSATION_ID)`を1通ごとに読むため、PSTは従来の60ms/通より遅くなりうる。実機でPSTの所要を再計測すること。
+
+### 追加・変更関数
+	`conv_hex` / `is_note_class` / `open_table` / `table_filter_attempts` / `scan_folder_table` / `scan_folder` / `choose_scan_mode` / `est_class` / `OutlookConn`(接続・確認・再接続) / `compare_probe` / `conv_relation` / `run_probe` / `count_other_schema_caches` / `read_light_item`(会話ID) / `scan_folder_items`(`max_items`) / `_scan_core`(方式選択・リトライ・再接続・見積り)。定数`SCHEMA_VERSION`=2、`EST_SEC`、`TABLE_CHUNK`=500、`RETRY_WAITS`=(5,15)、`RECONNECT_AFTER`=3。
+
+### 新規追加：
+	`tools/thread_ledger_scan_20261009_03.py`(旧`_02`は`tools/old/`)
+
+変更ファイル：
+	`tests/test_thread_ledger_scan.py`(読み込み対象が`_03`になる。Table/GetArrayのフェイク(バイナリ・None・タプル・チャンク境界・EndOfTable・列の取得失敗)、フィルタのフォールバック順、Table失敗→Itemsフォールバック、リトライと再接続、チェックポイント再開、会話IDの統一、非IPM.Noteのスキップ、スキーマ版、診断のテストを追加) / `CHANGELOG.md`(このエントリの追記のみ)
+
+変更しないこと（宣誓）：
+	`app/`配下の本体・既存の診断スクリプト・`.gitignore`・`json/`の実データ。Outlookのアイテムの変更・移動・削除・既読化は一切しない。コミット・Pushはしていない。
+
+### 動作確認(Linux側)
+	全テスト合格(成功2078・失敗0・エラー0。うち`test_thread_ledger_scan.py`は268件。スキップ109はtkinter無しのGUIテスト、想定内の失敗3は既知の記録)。COM・Table/GetArrayの実挙動は実機未検証(フェイクのみ)。
+	**実機で確認してほしいこと**: ①まず診断: `python tools\thread_ledger_scan_20261009_03.py --probe-table --stores <現行メールボックスの名前の一部> --from 2024-11 --to 2024-11`(Table方式の件数がItemsと一致するか、1行あたりの時間、会話IDの一致)。`--probe-conversation-id`で会話IDの形式も確認 ②問題なければ全体実行(旧スキーマのキャッシュは自動で再走査。PSTは数分、非PSTはTableで高速になる想定) ③非PSTのTable方式の速度(仮置き10ms/通)と、`GetTable`のOR式・`GetArray`の値の型(バイナリ・日時)が実環境で想定どおりか。**特にTable日時のUTC/ローカル(`--probe-table`の「日時差」が0時間か。±数時間なら`--table-time utc`で再確認)** ④リトライ・再接続が実際のMAPI_E_NETWORK_ERRORで効くか。
+
 ## VERSION 20261009_02（過去スレッド台帳 S1.5: Excelから件名絞り込みで開く）
 
 ### 追加・修正

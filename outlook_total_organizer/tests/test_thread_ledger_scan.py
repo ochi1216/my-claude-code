@@ -37,6 +37,8 @@ def _load_tool():
 
 T = _load_tool()
 ORIG_WAITS = (T.EXPLORER_SETTLE_SEC, T.SELECT_RETRY_SEC, T.SELECT_RETRIES)
+ORIG_RETRY_WAITS = T.RETRY_WAITS
+T.RETRY_WAITS = (0, 0)          # リトライの待ちはテストでは無し（既定値は test_resilience_defaults で確認）
 T.EXPLORER_SETTLE_SEC = T.SELECT_RETRY_SEC = 0      # テストでは待たない（既定値は test_explorer_wait_defaults で確認）
 
 
@@ -111,7 +113,7 @@ def rec(eid, subj, t, sender="", to="", cc="", cid="", addr=""):
 
 
 def cache(store, sidx, folder, records, sid=None, scanned_at="2024-12-31T00:00:00"):
-    return {"schema": 1, "store_index": sidx, "store_name": store, "store_id": sid or f"SID{sidx}",
+    return {"schema": T.SCHEMA_VERSION, "store_index": sidx, "store_name": store, "store_id": sid or f"SID{sidx}",
             "folder_path": folder, "range": ["2024-01", "2024-12"], "complete": True, "records": records,
             "scanned_at": scanned_at, "counts": {"mail": len(records), "non_mail": 0, "errors": {}}}
 
@@ -830,17 +832,19 @@ class TestCheckSubjects(unittest.TestCase):
 class TestCachePolicy(unittest.TestCase):
     def test_decide_cache_action(self):
         f, t = (2024, 1), (2024, 12)
-        done = {"complete": True, "range": ["2023-07", "2026-09"]}
+        done = {"schema": T.SCHEMA_VERSION, "complete": True, "range": ["2023-07", "2026-09"]}
         self.assertEqual(T.decide_cache_action(done, f, t, False), "skip")
         self.assertEqual(T.decide_cache_action(done, f, t, True), "fresh")
         self.assertEqual(T.decide_cache_action(None, f, t, False), "fresh")
-        self.assertEqual(T.decide_cache_action({"complete": True, "range": ["2024-03", "2024-12"]}, f, t, False), "fresh")
-        self.assertEqual(T.decide_cache_action({"complete": True, "range": ["2024-01", "2024-11"]}, f, t, False), "fresh")
-        cp = {"complete": False, "range": ["2024-01", "2024-12"], "last_received": "2024-05-01T00:00:00"}
+        self.assertEqual(T.decide_cache_action({"schema": T.SCHEMA_VERSION, "complete": True, "range": ["2024-03", "2024-12"]}, f, t, False), "fresh")
+        self.assertEqual(T.decide_cache_action({"schema": T.SCHEMA_VERSION, "complete": True, "range": ["2024-01", "2024-11"]}, f, t, False), "fresh")
+        cp = {"schema": T.SCHEMA_VERSION, "complete": False, "range": ["2024-01", "2024-12"], "last_received": "2024-05-01T00:00:00"}
         self.assertEqual(T.decide_cache_action(cp, f, t, False), "resume")
         self.assertEqual(T.decide_cache_action(cp, (2024, 2), t, False), "fresh")
-        self.assertEqual(T.decide_cache_action({"complete": False, "range": ["2024-01", "2024-12"]}, f, t, False), "fresh")
+        self.assertEqual(T.decide_cache_action({"schema": T.SCHEMA_VERSION, "complete": False, "range": ["2024-01", "2024-12"]}, f, t, False), "fresh")
         self.assertEqual(T.decide_cache_action({"range": "bad"}, f, t, False), "fresh")
+        old = {"schema": 1, "complete": True, "range": ["2023-07", "2026-09"]}
+        self.assertEqual(T.decide_cache_action(old, f, t, False), "fresh")        # 旧スキーマは再走査
 
     def test_folder_cache_path_stable_and_distinct(self):
         p = T.make_paths("/x/data", "/x/out")
@@ -863,12 +867,24 @@ class TestCachePolicy(unittest.TestCase):
 FORBIDDEN = {"Delete", "Move", "Save", "SaveAs", "Copy", "MarkAsTask", "UnRead", "Categories", "AddStore",
              "RemoveStore", "FlagStatus", "Send"}
 ACCESSED = []         # 禁止属性にアクセスされた記録
-STAGE2_ONLY = {"Body", "Recipients", "Attachments", "PropertyAccessor"}
+STAGE2_ONLY = {"Body", "Recipients", "Attachments"}      # PropertyAccessor は会話ID(PR_CONVERSATION_ID)のため第1段でも読む
 LIGHT_ACCESSED = []   # 第1段で読んではいけない属性にアクセスされた記録
 
 
 class FakeComError(Exception):
     pass
+
+
+class GuardedPA:
+    """第1段のアイテムの PropertyAccessor。PR_CONVERSATION_ID 以外の GetProperty は LIGHT_ACCESSED に記録する。"""
+
+    def __init__(self, inner):
+        self.inner = inner
+
+    def GetProperty(self, url):
+        if url != T.PR_CONVERSATION_ID_URL:
+            LIGHT_ACCESSED.append("GetProperty:" + str(url))
+        return self.inner.GetProperty(url)
 
 
 class FakeItem:
@@ -894,6 +910,14 @@ class FakeItem:
             raise AttributeError(name)
         if self._stage1 and name in STAGE2_ONLY:
             LIGHT_ACCESSED.append(name)
+        if self._stage1 and name == "PropertyAccessor":
+            # 第1段で許すのは PR_CONVERSATION_ID(0x30130102) の GetProperty だけ。本文系などの混入を検出する
+            if name in self._r:
+                raise self._r[name]
+            inner = self._f.get("PropertyAccessor")
+            if inner is None:
+                raise AttributeError(name)
+            return GuardedPA(inner)
         if name in self._r:
             raise self._r[name]
         if name in self._f:
@@ -995,12 +1019,66 @@ class FakeFolders:
         return self.folders[i - 1]
 
 
+NAME2KEY = {name: key for key, name in T.TABLE_COLUMNS}
+
+
+class FakeColumns:
+    def __init__(self, tbl):
+        self.tbl = tbl
+
+    def RemoveAll(self):
+        self.tbl.cols = []
+
+    def Add(self, name):
+        if name in self.tbl.folder.table_opts.get("col_fail", ()):
+            raise FakeComError(SECRET_ERR)
+        self.tbl.cols.append(NAME2KEY[name])
+
+
+class FakeTable:
+    """GetArray でバルク取得できる Table のフェイク（値は列の追加順のタプル。None・バイナリ・日時を含む）"""
+
+    def __init__(self, folder, rows):
+        self.folder, self.rows, self.pos, self.cols = folder, rows, 0, []
+        self.Columns = FakeColumns(self)
+
+    @property
+    def EndOfTable(self):
+        return self.pos >= len(self.rows)
+
+    def Sort(self, prop, desc):
+        if self.folder.table_opts.get("sort_fail"):
+            raise FakeComError(SECRET_ERR)
+        self.rows = sorted(self.rows, key=lambda r: r.get("recv") or datetime.max)
+
+    def GetArray(self, n):
+        self.folder.array_calls += 1
+        if self.folder.array_calls in self.folder.table_opts.get("array_fail_calls", ()):
+            raise FakeComError(SECRET_ERR)
+        chunk = self.rows[self.pos:self.pos + n]
+        self.pos += len(chunk)
+        data = tuple(tuple(r.get(k) for k in self.cols) for r in chunk)
+        if self.folder.table_opts.get("transpose") and data:
+            return tuple(zip(*data))          # 列×行（転置）で返す壊れたAPIのフェイク
+        return data
+
+
+def trow(eid, subj="subj", t=None, sent=None, sender="Sato Pm", smtp="", semail="", to="Owner Taro", cc="",
+         conv=None, cls="IPM.Note"):
+    return {"eid": eid, "subj": subj, "recv": t, "sent": sent, "sender": sender, "smtp": smtp, "semail": semail,
+            "to": to, "cc": cc, "conv": conv, "cls": cls}
+
+
 _FID = [0]
 
 
 class FakeFolder:
     def __init__(self, name, items=None, subfolders=None, item_type=0, items_raise=None, next_raises=None,
-                 fail_or=False, item_raises=None):
+                 fail_or=False, item_raises=None, table_rows=None, table_opts=None):
+        self.table_rows = table_rows
+        self.table_opts = table_opts or {}
+        self.table_filters = []
+        self.array_calls = 0
         self.Name = name
         _FID[0] += 1
         self.EntryID = f"FID{_FID[0]}"
@@ -1012,6 +1090,31 @@ class FakeFolder:
     @property
     def Items(self):
         return self._items
+
+    def GetTable(self, flt=None, contents=0):
+        self.table_filters.append(flt)
+        o = self.table_opts
+        self.get_table_calls = getattr(self, "get_table_calls", 0) + 1
+        if o.get("get_table_exc") is not None and self.get_table_calls in o.get("get_table_exc_calls", range(1, 10 ** 6)):
+            raise o["get_table_exc"]
+        if self.table_rows is None or o.get("get_table_fail"):
+            raise FakeComError(SECRET_ERR)
+        if flt and " OR " in flt and o.get("fail_or"):
+            raise FakeComError(SECRET_ERR)
+        if flt and o.get("fail_any_filter"):
+            raise FakeComError(SECRET_ERR)
+        rows = list(self.table_rows)
+        if flt:
+            clauses = re.findall(r"\[(\w+)\] >= '([^']+)' AND \[\w+\] < '([^']+)'", flt)
+            keep = []
+            for r in rows:
+                for field, a, b in clauses:
+                    v = r.get("recv" if field == "ReceivedTime" else "sent")
+                    if isinstance(v, datetime) and datetime.strptime(a, "%Y-%m-%d %H:%M") <= v < datetime.strptime(b, "%Y-%m-%d %H:%M"):
+                        keep.append(r)
+                        break
+            rows = keep
+        return FakeTable(self, rows)
 
 
 class FakeStore:
@@ -1165,7 +1268,7 @@ class ComTestBase(unittest.TestCase):
         self.tmp.cleanup()
 
     def argv(self, *extra):
-        return ["--theme", self.theme_path, "--data-dir", self.data, "--output-dir", self.out, *extra]
+        return ["--theme", self.theme_path, "--data-dir", self.data, "--output-dir", self.out, "--scan-mode", "items", *extra]
 
     def paths(self):
         return T.make_paths(self.data, self.out)
@@ -1223,10 +1326,11 @@ class TestScanCom(ComTestBase):
         self.assertTrue(inbox["complete"])
         self.assertEqual(inbox["store_id"], "SID-user@example.com")
         r1 = [r for r in inbox["records"] if r["e"] == "E1"][0]
-        self.assertEqual((r1["n"], r1["to"], r1["c"], r1["a"]), ("Sato Pm", "Owner Taro", "C1", "pm@example.com"))
+        self.assertEqual((r1["n"], r1["to"], r1["c2"], r1["a"]), ("Sato Pm", "Owner Taro", "C1", "pm@example.com"))
+        self.assertEqual(r1["c"], "")            # PropertyAccessor が無いフェイクでは PR_CONVERSATION_ID は空
         self.assertEqual(r1["t"], "2024-04-10T09:00:00")
         for k in r1:
-            self.assertIn(k, {"e", "s", "t", "n", "a", "to", "cc", "c"})                # 本文は含めない
+            self.assertIn(k, {"e", "s", "t", "n", "a", "to", "cc", "c", "c2"})                # 本文は含めない
         # フィルタはISO・期間全体で1回
         flt = ns.Stores.Item(1).GetRootFolder().Folders.Item(1).filters
         self.assertEqual(flt, ["([ReceivedTime] >= '2024-01-01 00:00' AND [ReceivedTime] < '2025-01-01 00:00') OR ([SentOn] >= '2024-01-01 00:00' AND [SentOn] < '2025-01-01 00:00')"])
@@ -1992,7 +2096,7 @@ class TestSafetyAndOptions(ComTestBase):
         ns = self.standard_namespace()
         com, pc = fake_com(ns)
         run_main(self.argv("--no-stage2"), com)
-        self.assertEqual(len(ns.folder_fetches), 2)               # Inbox と PST の(ルート直下)
+        self.assertGreaterEqual(len(ns.folder_fetches), 2)        # Inbox と PST の(ルート直下)（+ 接続確認の GetFolderFromID）
         gc.collect()
         self.assertTrue(PROXIES and all(r() is None for r in PROXIES))
         task_like = T.enumerate_mail_folders(ns.Stores.Item(1).GetRootFolder(), "SID", [], [], {}, {})
@@ -2179,7 +2283,7 @@ class TestOptionalImprovements(unittest.TestCase):
         words = ["中" + "井", "梶" + "川", "佐" + "治", "Na" + "kai", "Kaji" + "kawa", "Sa" + "ji", "nexp" + "eria",
                  "dhl" + r"\.com", "trade" + "win"]
         pat = re.compile("|".join(words), re.IGNORECASE)
-        targets = [os.path.join(TOOLS_DIR, f) for f in ("thread_ledger_scan_20261009_02.py",
+        targets = [os.path.join(TOOLS_DIR, f) for f in ("thread_ledger_scan_20261009_03.py",
                    "thread_ledger_theme.example.json", "calibration_subjects.example.txt")] + [os.path.abspath(__file__)]
         for t in targets:
             self.assertIsNone(pat.search(_rd(t)), t)
@@ -3118,6 +3222,885 @@ class TestProtocolExisting(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(buf):
             T.main(["--register-protocol", "--yes", "--data-dir", d, "--output-dir", d], winreg_mod=wr)
         self.assertNotIn("既存の ledger", buf.getvalue())
+
+
+# ============================================================
+# S1.6: Table方式・会話ID統一・レジリエンス・診断
+# ============================================================
+CONV_A = bytes(range(1, 17))
+CONV_A_HEX = "0102030405060708090A0B0C0D0E0F10"
+
+
+class TestConvIdAndClass(unittest.TestCase):
+    def test_conv_hex_variants(self):
+        self.assertEqual(T.conv_hex(CONV_A), CONV_A_HEX)
+        self.assertEqual(T.conv_hex(bytearray(CONV_A)), CONV_A_HEX)
+        self.assertEqual(T.conv_hex(memoryview(CONV_A)), CONV_A_HEX)
+        self.assertEqual(T.conv_hex(tuple(CONV_A)), CONV_A_HEX)
+        self.assertEqual(T.conv_hex(list(CONV_A)), CONV_A_HEX)
+        self.assertEqual(T.conv_hex(CONV_A_HEX.lower()), CONV_A_HEX)
+        self.assertEqual(T.conv_hex(b""), "")
+        for bad in (None, "", "zz-not-hex", 12, (1, "x")):
+            self.assertEqual(T.conv_hex(bad), "", repr(bad))
+
+    def test_is_note_class(self):
+        for ok in ("IPM.Note", "ipm.note", "IPM.Note.SMIME", "IPM.Note.Exchange.Rules.Reminder"):
+            self.assertTrue(T.is_note_class(ok), ok)
+        for bad in ("", None, "IPM.Appointment", "IPM.Notefoo", "IPM.Schedule.Meeting.Request", "REPORT.IPM.Note.NDR"):
+            self.assertFalse(T.is_note_class(bad), repr(bad))
+
+    def test_same_mail_gives_same_conv_id_by_items_and_table_and_threads_merge(self):
+        item = mk_item("A1", "Topic long subject", dt(4, 10), "Sato Pm", "Owner Taro", cid="OUTLOOK-STRING",
+                       PropertyAccessor=FakePA({T.PR_CONVERSATION_ID_URL: CONV_A}))
+        kind, rec_items = T.read_light_item(item, {})
+        self.assertEqual((kind, rec_items["c"], rec_items["c2"]), ("mail", CONV_A_HEX, "OUTLOOK-STRING"))
+        f = FakeFolder("F", table_rows=[trow("T1", "Topic long subject", dt(4, 11), conv=CONV_A)])
+        st = T.new_scan_state()
+        T.scan_folder_table(f, datetime(2024, 1, 1), datetime(2025, 1, 1), st)
+        self.assertEqual(st["records"][0]["c"], CONV_A_HEX)
+        a = cache("MB", 1, "\\Inbox", [rec_items])
+        b = cache("PST", 2, "\\x", [dict(st["records"][0], t="2024-04-11T09:00:00")])
+        mails, _ = T.merge_caches_to_mails([a, b], (2024, 1), (2024, 12))
+        threads = T.build_threads(mails)
+        self.assertEqual(len(threads), 1)                 # Items由来とTable由来のスレッドが統合される
+        self.assertEqual(threads[0]["key"], "c:" + CONV_A_HEX)
+
+    def test_c2_used_when_pr_conversation_id_missing(self):
+        mails, _ = T.merge_caches_to_mails([cache("MB", 1, "\\Inbox", [rec("E1", "x long subject", "2024-04-10T09:00:00", "A")])],
+                                           (2024, 1), (2024, 12))
+        r = rec("E2", "y long subject", "2024-04-10T09:00:01", "A")
+        r["c2"] = "OLD-FORM"
+        mails, _ = T.merge_caches_to_mails([cache("MB", 1, "\\Inbox", [r])], (2024, 1), (2024, 12))
+        self.assertEqual((mails[0]["cid"], mails[0]["cid2"]), ("", "OLD-FORM"))      # c2 はスレッドキーにしない（保持のみ）
+        self.assertEqual(T.thread_key_of(mails[0])[:2], "s:")                        # 既定: 正規化件名
+        self.assertEqual(T.thread_key_of(mails[0], "c2"), "ci:OLD-FORM")             # 選べば接頭辞つきで使う（c由来と衝突しない）
+        mails2, _ = T.merge_caches_to_mails([cache("MB", 1, "\\Inbox", [rec("E3", "z long subject", "2024-04-10T09:00:02", "A", cid="OLD-FORM")])],
+                                            (2024, 1), (2024, 12))
+        self.assertEqual(T.thread_key_of(mails2[0], "c2"), "c:OLD-FORM")             # c由来とは別のキー空間
+        self.assertNotEqual(T.thread_key_of(mails[0], "c2"), T.thread_key_of(mails2[0], "c2"))
+        self.assertEqual(len(T.build_threads(mails + mails2, "c2")), 2)
+    def test_pa_failure_other_than_missing_is_counted(self):
+        errs = {}
+        item = mk_item("A1", "s", dt(4, 10), "Zed", "Owner Taro",
+                       PropertyAccessor=FakePA({}))          # GetProperty が FakeComError
+        T.read_light_item(item, errs)
+        self.assertIn("ConvID(PA):FakeComError", errs)
+
+    def test_constants_and_schema(self):
+        self.assertEqual(T.SCHEMA_VERSION, 2)
+        self.assertEqual(ORIG_RETRY_WAITS, (5, 15))
+        self.assertEqual((T.RECONNECT_AFTER, T.TABLE_CHUNK), (3, 500))
+        self.assertEqual(T.EST_SEC, {"pst": 0.06, "table": 0.010, "items": 1.0})
+
+
+class TableBase(ComTestBase):
+    def argv_t(self, *extra):
+        return self.argv("--scan-mode", "table", "--no-stage2", *extra)
+
+    def one_store(self, folder, name="MB", path=""):
+        return FakeNamespace([FakeStore(name, FakeFolder("root", [], subfolders=[folder]), path=path)])
+
+    def mails_for(self, n, start_day=1):
+        return [trow(f"R{i}", f"s{i}", dt(4, start_day + i), conv=CONV_A) for i in range(n)]
+
+
+class TestTableScan(TableBase):
+    def test_basic_rows_values_and_classes(self):
+        rows = [
+            trow("R1", "s1", dt(4, 1), smtp="pm@example.com", conv=CONV_A, cc="Cc One"),
+            trow("R2", "s2", None, sent=dt(4, 2), semail="/O=EXCH/CN=X"),                 # ReceivedTime 無し -> 送信日時
+            trow("R3", "s3", dt(4, 3), cls="IPM.Appointment"),                              # メール以外
+            trow("R4", None, dt(4, 4), sender=None, to=None, conv=None),                    # None の値
+            trow("R5", "s5", dt(4, 5), cls="IPM.Note.SMIME"),
+            trow("R6", "s6", datetime(2023, 1, 1), cls="IPM.Note"),                        # 期間外
+            trow("", "s8", dt(4, 8)),                                                      # EntryID なし
+        ]
+        f = FakeFolder("F", table_rows=rows)
+        code, out = run_main(self.argv_t(), fake_com(self.one_store(f))[0])
+        self.assertEqual(code, 0)
+        c = self.caches()[0]
+        by = {r["e"]: r for r in c["records"]}
+        self.assertEqual(sorted(by), ["R1", "R2", "R4", "R5"])
+        self.assertEqual((by["R1"]["a"], by["R1"]["c"], by["R1"]["cc"]), ("pm@example.com", CONV_A_HEX, "Cc One"))
+        self.assertEqual(by["R2"]["t"], "2024-04-02T09:00:00")
+        self.assertEqual(by["R2"]["a"], "/O=EXCH/CN=X")
+        self.assertEqual((by["R4"]["s"], by["R4"]["n"], by["R4"]["to"], by["R4"]["c"]), ("", "", "", ""))
+        self.assertEqual(c["counts"]["non_mail"], 1)
+        self.assertEqual((c["schema"], c["date_field"], c["scan_mode"], c["complete"]), (2, "table", "table", True))
+        self.assertIn("EntryIDなし", c["counts"]["errors"])
+        self.assertEqual(f._items.filters, [])                      # アイテムは開かない（Restrictも呼ばない）
+        self.assertEqual(f.table_filters[0].count(" OR "), 1)
+        self.assertNotIn(SECRET_ERR, out)
+
+    def test_chunk_boundaries(self):
+        old = T.TABLE_CHUNK
+        try:
+            for n_rows, chunk in ((7, 3), (6, 3), (1, 3), (3, 3), (0, 3), (4, 500)):
+                T.TABLE_CHUNK = chunk
+                f = FakeFolder("F", table_rows=self.mails_for(n_rows))
+                st = T.new_scan_state()
+                T.scan_folder_table(f, datetime(2024, 1, 1), datetime(2025, 1, 1), st)
+                self.assertEqual([r["e"] for r in st["records"]], [f"R{i}" for i in range(n_rows)], (n_rows, chunk))
+                self.assertTrue(st["complete"])
+        finally:
+            T.TABLE_CHUNK = old
+
+    def test_column_failure_is_tolerated_but_entry_id_failure_is_not(self):
+        f = FakeFolder("F", table_rows=[trow("R1", "s1", dt(4, 1), cc="Cc One", conv=CONV_A)],
+                       table_opts={"col_fail": ("urn:schemas:httpmail:displaycc", T.PR_CONVERSATION_ID_URL)})
+        st = T.new_scan_state()
+        T.scan_folder_table(f, datetime(2024, 1, 1), datetime(2025, 1, 1), st)
+        self.assertEqual((st["records"][0]["cc"], st["records"][0]["c"], st["records"][0]["s"]), ("", "", "s1"))
+        self.assertIn("Column(cc):FakeComError", st["errors"])
+        self.assertIn("Column(conv):FakeComError", st["errors"])
+        f2 = FakeFolder("F", table_rows=[trow("R1", "s1", dt(4, 1))], table_opts={"col_fail": ("EntryID",)})
+        with self.assertRaises(T.TableUnavailable):
+            T.scan_folder_table(f2, datetime(2024, 1, 1), datetime(2025, 1, 1), T.new_scan_state())
+        f3 = FakeFolder("F", table_rows=[trow("R1", "s1", dt(4, 1))],
+                        table_opts={"col_fail": ("urn:schemas:httpmail:datereceived", T.PR_URL + "0x00390040")})
+        with self.assertRaises(T.TableUnavailable):                  # 日時の列が全く無い
+            T.scan_folder_table(f3, datetime(2024, 1, 1), datetime(2025, 1, 1), T.new_scan_state())
+
+    def test_class_column_failure_accepts_all_rows(self):
+        f = FakeFolder("F", table_rows=[trow("R1", "s1", dt(4, 1), cls="IPM.Appointment")],
+                       table_opts={"col_fail": (dict(T.TABLE_COLUMNS)["cls"],)})
+        st = T.new_scan_state()
+        T.scan_folder_table(f, datetime(2024, 1, 1), datetime(2025, 1, 1), st)
+        self.assertEqual(len(st["records"]), 1)
+
+    def test_filter_fallback_order(self):
+        rows = [trow("IN", "s", dt(4, 1)), trow("OUT", "s", datetime(2023, 5, 1)), trow("SENT", "s", None, sent=dt(5, 1))]
+        f = FakeFolder("F", table_rows=rows, table_opts={"fail_or": True})
+        st = T.new_scan_state()
+        T.scan_folder_table(f, datetime(2024, 1, 1), datetime(2025, 1, 1), st)
+        self.assertEqual([x.split()[0] if x else x for x in f.table_filters], ["([ReceivedTime]", "[ReceivedTime]"])
+        self.assertEqual([r["e"] for r in st["records"]], ["IN"])             # ReceivedTime のみのフィルタ
+        self.assertEqual(st["table_filter"], "ReceivedTime")
+        f2 = FakeFolder("F", table_rows=rows, table_opts={"fail_any_filter": True})
+        st2 = T.new_scan_state()
+        T.scan_folder_table(f2, datetime(2024, 1, 1), datetime(2025, 1, 1), st2)
+        self.assertEqual(f2.table_filters[-1], None)
+        self.assertEqual(len(f2.table_filters), 3)
+        self.assertEqual(sorted(r["e"] for r in st2["records"]), ["IN", "SENT"])   # 全件取得して手元で期間に絞る
+        self.assertEqual(st2["table_filter"], "all")
+        f_nodate = FakeFolder("F", table_rows=[trow("ND", "s", datetime(4501, 1, 1), sent=None)], table_opts={"fail_any_filter": True})
+        st_nd = T.new_scan_state()
+        T.scan_folder_table(f_nodate, datetime(2024, 1, 1), datetime(2025, 1, 1), st_nd)
+        self.assertEqual((st_nd["records"], st_nd["errors"].get("日時なし")), ([], 1))        # 日時が取れない行はエラー種別だけ集計
+        f3 = FakeFolder("F", table_rows=rows)
+        st3 = T.new_scan_state()
+        T.scan_folder_table(f3, datetime(2024, 1, 1), datetime(2025, 1, 1), st3)
+        self.assertEqual(sorted(r["e"] for r in st3["records"]), ["IN", "SENT"])   # OR で送信日時だけのメールも拾う
+        self.assertEqual(st3["table_filter"], "or")
+
+    def test_table_failure_falls_back_to_items_with_warning(self):
+        f = FakeFolder("F", [mk_item("I1", "s1", dt(4, 1), "Zed", "Owner Taro")], table_rows=None)    # GetTable が失敗
+        code, out = run_main(self.argv_t(), fake_com(self.one_store(f))[0])
+        self.assertEqual(code, 0)
+        self.assertIn("Items方式に切り替えます", out)
+        self.assertNotIn(SECRET_ERR, out)
+        c = self.caches()[0]
+        self.assertEqual([r["e"] for r in c["records"]], ["I1"])
+        self.assertEqual(c["scan_mode"], "items")
+        self.assertIn("Tableフォールバック", c["counts"]["errors"])
+
+    def test_auto_mode_uses_items_for_pst_and_table_otherwise(self):
+        pst_f = FakeFolder("P", [mk_item("P1", "s1", dt(4, 1), "Zed", "Owner Taro")], table_rows=self.mails_for(2))
+        mb_f = FakeFolder("M", [mk_item("M1", "s1", dt(4, 1), "Zed", "Owner Taro")], table_rows=self.mails_for(3))
+        ns = FakeNamespace([FakeStore("2024_Q2", FakeFolder("root", [], subfolders=[pst_f]), path="C:\\a.pst"),
+                            FakeStore("MB", FakeFolder("root", [], subfolders=[mb_f]))])
+        code, out = run_main(self.argv("--scan-mode", "auto", "--no-stage2"), fake_com(ns)[0])
+        self.assertEqual(code, 0)
+        self.assertEqual(pst_f.table_filters, [])               # PST は Items
+        self.assertTrue(mb_f.table_filters)                     # PST 以外は Table
+        self.assertEqual(mb_f._items.filters, [])
+        modes = {c["store_name"]: c["scan_mode"] for c in self.caches()}
+        self.assertEqual(modes, {"2024_Q2": "items", "MB": "table"})
+        self.assertEqual(T.choose_scan_mode("auto", "PST"), "items")
+        self.assertEqual(T.choose_scan_mode("auto", "アーカイブ"), "table")
+        self.assertEqual(T.choose_scan_mode("table", "PST"), "table")
+        self.assertEqual(T.choose_scan_mode("items", "メールボックス/PST"), "items")
+
+    def test_estimates_by_mode_and_rates_logged(self):
+        pst_f = FakeFolder("P", [mk_item("P1", "s1", dt(4, 1), "Zed", "Owner Taro")])
+        mb_f = FakeFolder("M", [mk_item("M1", "s1", dt(4, 1), "Zed", "Owner Taro")], table_rows=self.mails_for(3))
+        ns = FakeNamespace([FakeStore("2024_Q2", FakeFolder("root", [], subfolders=[pst_f]), path="C:\\a.pst"),
+                            FakeStore("MB", FakeFolder("root", [], subfolders=[mb_f]))])
+        code, out = run_main(self.argv("--scan-mode", "auto", "--no-stage2"), fake_com(ns)[0])
+        self.assertIn("PST(Items方式) 1件 × 60ms", out)
+        self.assertIn("Table方式(非PST) 1件 × 10ms(仮置き。実測で補正)", out)
+        self.assertIn("行/秒", out)
+        self.assertIn("📈", out)
+        code, out = run_main(self.argv("--scan-mode", "items", "--no-stage2", "--rescan"),
+                             fake_com(FakeNamespace([FakeStore("MB", FakeFolder("root", [], subfolders=[
+                                 FakeFolder("M", [mk_item("M1", "s", dt(4, 1), "Zed", "Owner Taro")])]))]))[0])
+        self.assertIn("Items方式(非PST) 1件 × 1000ms", out)
+
+    def test_table_mode_has_no_unreadable_items_threshold(self):
+        old = T.MAX_ITEM_SKIP
+        T.MAX_ITEM_SKIP = 0
+        try:
+            rows = [trow(f"R{i}", f"s{i}", dt(4, 1 + i % 20)) for i in range(30)] + [trow(None, "bad", dt(4, 1))] * 20
+            f = FakeFolder("F", table_rows=rows)
+            st = T.new_scan_state()
+            T.scan_folder_table(f, datetime(2024, 1, 1), datetime(2025, 1, 1), st)
+        finally:
+            T.MAX_ITEM_SKIP = old
+        self.assertTrue(st["complete"])
+        self.assertEqual(len(st["records"]), 30)
+
+    def test_checkpoint_during_table_scan(self):
+        saved = []
+        st = T.new_scan_state()
+        f = FakeFolder("F", table_rows=self.mails_for(7))
+        T.scan_folder_table(f, datetime(2024, 1, 1), datetime(2025, 1, 1), st, checkpoint_cb=lambda s_: saved.append(len(s_["records"])),
+                            checkpoint_every=3)
+        self.assertEqual(saved, [3, 6])
+
+
+class TestResilience(TableBase):
+    def test_transient_error_is_retried_and_resumes_without_duplicates(self):
+        old = T.TABLE_CHUNK
+        T.TABLE_CHUNK = 2
+        try:
+            f = FakeFolder("F", table_rows=self.mails_for(7), table_opts={"array_fail_calls": {2}})
+            code, out = run_main(self.argv_t(), fake_com(self.one_store(f))[0])
+        finally:
+            T.TABLE_CHUNK = old
+        self.assertEqual(code, 0)
+        self.assertIn("リトライ 1/2", out)
+        self.assertNotIn(SECRET_ERR, out)
+        c = self.caches()[0]
+        self.assertTrue(c["complete"])
+        eids = [r["e"] for r in c["records"]]
+        self.assertEqual(sorted(eids), [f"R{i}" for i in range(7)])
+        self.assertEqual(len(eids), len(set(eids)))
+
+    def test_persistent_error_fails_folder_keeps_checkpoint_and_rerun_resumes(self):
+        old = T.TABLE_CHUNK
+        T.TABLE_CHUNK = 2
+        try:
+            bad = FakeFolder("F", table_rows=self.mails_for(7), table_opts={"array_fail_calls": set(range(2, 100))})
+            code, out = run_main(self.argv_t(), fake_com(self.one_store(bad))[0])
+            self.assertIn("リトライ 2/2", out)
+            self.assertIn("失敗フォルダ 1個", out)
+            self.assertIn("FakeComError=1", out)
+            self.assertNotIn(SECRET_ERR, out)
+            c = self.caches()[0]
+            self.assertFalse(c["complete"])                           # 完了にしない
+            self.assertEqual(len(c["records"]), 2)                    # 取得済みの行はチェックポイント保存
+            good = FakeFolder("F", table_rows=self.mails_for(7))
+            code2, out2 = run_main(self.argv_t(), fake_com(self.one_store(good))[0])
+        finally:
+            T.TABLE_CHUNK = old
+        self.assertIn("再開", out2)
+        c2 = self.caches()[0]
+        self.assertTrue(c2["complete"])
+        eids = [r["e"] for r in c2["records"]]
+        self.assertEqual(sorted(eids), [f"R{i}" for i in range(7)])
+        self.assertEqual(len(eids), len(set(eids)))
+
+    def test_retry_waits_are_used(self):
+        import unittest.mock as mock
+        sleeps = []
+        f = FakeFolder("F", table_rows=self.mails_for(3), table_opts={"array_fail_calls": set(range(1, 100))})
+        with mock.patch.object(T, "RETRY_WAITS", (5, 15)), mock.patch.object(T.time, "sleep", lambda s_: sleeps.append(s_)):
+            run_main(self.argv_t(), fake_com(self.one_store(f))[0])
+        self.assertEqual([x for x in sleeps if x in (5, 15)], [5, 15])
+
+    def test_reconnect_after_three_consecutive_folder_failures(self):
+        bad = [FakeFolder(f"Bad{i}", [mk_item(f"B{i}", "s", dt(4, 1))], items_raise=FakeComError(SECRET_ERR)) for i in range(3)]
+        good = FakeFolder("Good", [mk_item("G1", "ok", dt(4, 2), "Zed", "Owner Taro")])
+        ns = FakeNamespace([FakeStore("MB", FakeFolder("root", [], subfolders=bad + [good]))])
+        com, pc = fake_com(ns)
+        client = com[0]
+        dispatches = []
+        orig = client.Dispatch
+        client.Dispatch = lambda name: (dispatches.append(name), orig(name))[1]
+        code, out = run_main(self.argv("--no-stage2", "--scan-mode", "items"), com)
+        self.assertEqual(code, 0)
+        self.assertEqual(len(dispatches), 5)                          # 最初の接続 + 2回目のリトライ前の再接続×3 + 3フォルダ連続失敗の再接続×1
+        self.assertIn("接続を作り直します", out)
+        self.assertIn("失敗フォルダ 3個", out)
+        self.assertIn("再接続 4回", out)
+        self.assertEqual([c["folder_path"] for c in self.caches()], ["\\Good"])
+        self.assertNotIn(SECRET_ERR, out)
+
+    def test_two_failures_then_success_do_not_reconnect(self):
+        bad = [FakeFolder(f"Bad{i}", [], items_raise=FakeComError(SECRET_ERR)) for i in range(2)]
+        bad[0]._items.items = bad[1]._items.items = [mk_item("B", "s", dt(4, 1))]
+        good = FakeFolder("Good", [mk_item("G1", "ok", dt(4, 2), "Zed", "Owner Taro")])
+        com, _ = fake_com(FakeNamespace([FakeStore("MB", FakeFolder("root", [], subfolders=bad + [good]))]))
+        client = com[0]
+        dispatches = []
+        orig = client.Dispatch
+        client.Dispatch = lambda name: (dispatches.append(name), orig(name))[1]
+        run_main(self.argv("--no-stage2", "--scan-mode", "items"), com)
+        self.assertEqual(len(dispatches), 3)          # 最初の接続 + 2回目のリトライ前の再接続×2（連続3失敗の再接続は無し）
+
+    def test_connection_check_failure_triggers_reconnect(self):
+        ns = FakeNamespace([FakeStore("MB", FakeFolder("root", [], subfolders=[
+            FakeFolder("A", [mk_item("A1", "s", dt(4, 1), "Zed", "Owner Taro")])]))])
+        com, _ = fake_com(ns)
+        client = com[0]
+        dispatches = []
+        orig = client.Dispatch
+        client.Dispatch = lambda name: (dispatches.append(name), orig(name))[1]
+        calls = {"n": 0}
+        real_check = T.OutlookConn.check
+
+        def flaky(self_):
+            calls["n"] += 1
+            return False if calls["n"] == 1 else real_check(self_)
+        T.OutlookConn.check = flaky
+        try:
+            code, out = run_main(self.argv("--no-stage2", "--scan-mode", "items"), com)
+        finally:
+            T.OutlookConn.check = real_check
+        self.assertEqual(code, 0)
+        self.assertEqual(len(dispatches), 2)
+        self.assertIn("再接続します", out)
+        self.assertEqual(len(self.caches()), 1)
+
+    def test_items_mode_unreadable_folder_does_not_give_up_the_store(self):
+        old = T.MAX_ITEM_SKIP
+        T.MAX_ITEM_SKIP = 1
+        try:
+            bad = FakeFolder("Bad", [mk_item(f"B{i}", "s", dt(4, 1)) for i in range(3)], next_raises=(1, FakeComError(SECRET_ERR)),
+                             item_raises=FakeComError(SECRET_ERR))
+            good = FakeFolder("Good", [mk_item("G1", "ok", dt(4, 2), "Zed", "Owner Taro")])
+            ns = FakeNamespace([FakeStore("MB", FakeFolder("root", [], subfolders=[bad, good]))])
+            code, out = run_main(self.argv("--no-stage2", "--scan-mode", "items"), fake_com(ns)[0])
+        finally:
+            T.MAX_ITEM_SKIP = old
+        self.assertEqual(code, 0)
+        paths = {c["folder_path"]: c["complete"] for c in self.caches()}
+        self.assertEqual(paths, {"\\Bad": False, "\\Good": True})
+
+
+class TestSchemaMigration(TableBase):
+    def test_old_schema_cache_is_rescanned_and_ignored_in_evaluation(self):
+        f = FakeFolder("F", table_rows=self.mails_for(3))
+        run_main(self.argv_t(), fake_com(self.one_store(f))[0])
+        path = [os.path.join(self.paths()["scan_cache"], x) for x in os.listdir(self.paths()["scan_cache"]) if x.endswith(".json")][0]
+        c = _rj(path)
+        c["schema"] = 1
+        _wj(path, c)
+        self.assertEqual(T.load_all_caches(self.paths()["scan_cache"]), [])
+        code, out = run_main(["--theme", self.theme_path, "--data-dir", self.data, "--output-dir", self.out, "--evaluate-only"])
+        self.assertEqual(code, 2)
+        self.assertIn("旧スキーマのキャッシュが1個", out)
+        f2 = FakeFolder("F", table_rows=self.mails_for(3))
+        code, out = run_main(self.argv_t(), fake_com(self.one_store(f2))[0])
+        self.assertIn("新規 1", out)                                 # 旧版は完了済みでもスキップしない
+        self.assertEqual(_rj(path)["schema"], 2)
+
+
+class TestProbe(TableBase):
+    def probe_ns(self):
+        items = [mk_item(f"E{i}", SECRET + str(i), dt(4, 1 + i), "Zed", "Owner Taro", cid=f"OLD{i}",
+                         PropertyAccessor=FakePA({T.PR_CONVERSATION_ID_URL: CONV_A})) for i in range(4)]
+        rows = [trow(f"E{i}", SECRET + str(i), dt(4, 1 + i), conv=CONV_A) for i in range(4)]
+        f = FakeFolder("Big", items, table_rows=rows)
+        small = FakeFolder("Small", [mk_item("S1", "s", dt(4, 1))], table_rows=[trow("S1", "s", dt(4, 1))])
+        return FakeNamespace([FakeStore("MB", FakeFolder("root", [], subfolders=[small, f]))]), f
+
+    def run_probe(self, *extra):
+        ns, f = self.probe_ns()
+        return run_main(["--data-dir", self.data, "--output-dir", self.out, "--from", "2024-04", "--to", "2024-04", *extra],
+                        fake_com(ns)[0])
+
+    def test_probe_table_compares_both_modes_without_subjects(self):
+        code, out = self.run_probe("--probe-table")
+        self.assertEqual(code, 0)
+        self.assertNotIn(SECRET, out)
+        self.assertIn("table:", out)
+        self.assertIn("items:", out)
+        self.assertIn("共通 4件", out)
+        self.assertIn("一致 4", out)
+        self.assertIn("1行あたり", out)
+        self.assertIn("Big", out)                       # 件数最大のフォルダを選ぶ
+        self.assertEqual(self.caches(), [])             # 診断はキャッシュを作らない
+
+    def test_probe_conversation_id_lists_rows(self):
+        code, out = self.run_probe("--probe-conversation-id")
+        self.assertEqual(code, 0)
+        self.assertNotIn(SECRET, out)
+        self.assertIn("#1:", out)
+        self.assertIn("PRどうし=一致", out)
+        self.assertIn("ConversationID対PR=不一致", out)
+
+    def test_probe_limit_folder_filter_and_errors(self):
+        code, out = self.run_probe("--probe-table", "--probe-limit", "2")
+        self.assertIn("Items 2件 / Table 2件", out)
+        code, out = self.run_probe("--probe-table", "--probe-folder", "small")
+        self.assertIn("Small", out)
+        code, out = self.run_probe("--probe-table", "--probe-folder", "nothing-matches")
+        self.assertEqual(code, 2)
+        code, out = run_main(["--data-dir", self.data, "--output-dir", self.out, "--probe-table", "--stores", "zzz"],
+                             fake_com(self.probe_ns()[0])[0])
+        self.assertEqual(code, 2)
+
+    def test_probe_reports_table_unavailable(self):
+        items = [mk_item("E1", "s", dt(4, 1), "Zed", "Owner Taro")]
+        f = FakeFolder("F", items, table_rows=None)
+        code, out = run_main(["--data-dir", self.data, "--output-dir", self.out, "--from", "2024-04", "--to", "2024-04",
+                              "--probe-table"], fake_com(self.one_store(f))[0])
+        self.assertEqual(code, 0)
+        self.assertIn("table: 利用できません", out)
+        self.assertNotIn(SECRET_ERR, out)
+
+    def test_compare_probe_and_conv_relation(self):
+        a = [{"e": "1", "c": "AA"}, {"e": "2", "c": ""}, {"e": "3", "c": "BB"}]
+        b = [{"e": "1", "c": "AA"}, {"e": "2", "c": "CC"}, {"e": "3", "c": "DD"}, {"e": "4", "c": "EE"}]
+        r = T.compare_probe(a, b)
+        self.assertEqual((r["common"], r["only_items"], r["only_table"]), (3, 0, 1))
+        self.assertEqual((r["conv_match"], r["conv_mismatch"], r["conv_empty_items"]), (1, 1, 1))
+        self.assertEqual(T.conv_relation("abcd", "ABCD"), "同一")
+        self.assertEqual(T.conv_relation("abcdef", "ABCD"), "先頭一致")
+        self.assertEqual(T.conv_relation("zz", "ABCD"), "不一致")
+        self.assertEqual(T.conv_relation("", "ABCD"), "比較不可")
+
+    def test_probe_does_not_need_theme(self):
+        code, out = self.run_probe("--probe-table")
+        self.assertEqual(code, 0)
+
+
+class TestRegressionKeepsReadOnly(TableBase):
+    def test_table_scan_calls_no_forbidden_methods_and_hides_subjects(self):
+        rows = [trow("R1", SECRET, dt(4, 1)), trow("R2", SECRET + "2", dt(4, 2))]
+        f = FakeFolder("F", table_rows=rows)
+        code, out = run_main(self.argv_t(), fake_com(self.one_store(f))[0])
+        self.assertEqual(code, 0)
+        self.assertNotIn(SECRET, out)
+        self.assertEqual(ACCESSED, [])
+        log = sorted(x for x in os.listdir(self.out) if x.endswith(".log"))[-1]
+        self.assertNotIn(SECRET, _rd(os.path.join(self.out, log), "utf-8-sig"))
+
+    def test_end_to_end_table_candidates_flow_to_ledger(self):
+        rows = [trow("R1", "通関 shipment topic", dt(4, 1), to="Owner Taro", sender="Sato Pm", conv=CONV_A),
+                trow("R2", "RE: 通関 shipment topic", dt(4, 2), to="Sato Pm", sender="Owner Taro", conv=CONV_A)]
+        f = FakeFolder("F", table_rows=rows)
+        code, out = run_main(self.argv_t(), fake_com(self.one_store(f))[0])
+        self.assertEqual(code, 0)
+        led = sorted(x for x in os.listdir(self.out) if x.startswith("thread_ledger_theme_") and x.endswith(".csv"))[-1]
+        got = _rdict(os.path.join(self.out, led))
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0]["メール数"], "2")
+
+
+
+# ============================================================
+# S1.6 レビュー対応: タイムゾーン・接続系エラー・形状・列値・会話IDカウンタ・診断
+# ============================================================
+@contextlib.contextmanager
+def tokyo_tz():
+    import time as _time
+    old = os.environ.get("TZ")
+    os.environ["TZ"] = "Asia/Tokyo"
+    _time.tzset()
+    try:
+        yield
+    finally:
+        if old is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = old
+        _time.tzset()
+
+
+UTC = __import__("datetime").timezone.utc
+
+
+class TestTableTimezone(TableBase):
+    def test_to_naive_dt_modes(self):
+        aware = datetime(2024, 3, 31, 16, 0, 0, tzinfo=UTC)          # JST では 2024-04-01 01:00
+        naive = datetime(2024, 3, 31, 16, 0, 0)
+        with tokyo_tz():
+            self.assertEqual(T.to_naive_dt(aware), datetime(2024, 3, 31, 16, 0))              # 従来（Items方式）は tzinfo を見ない
+            self.assertEqual(T.to_naive_dt(aware, "auto"), datetime(2024, 4, 1, 1, 0))
+            self.assertEqual(T.to_naive_dt(naive, "auto"), datetime(2024, 3, 31, 16, 0))       # tzinfo 無しはローカルとみなす
+            self.assertEqual(T.to_naive_dt(naive, "utc"), datetime(2024, 4, 1, 1, 0))          # UTCとみなしてローカルに直す
+            self.assertEqual(T.to_naive_dt(aware, "utc"), datetime(2024, 4, 1, 1, 0))
+            self.assertEqual(T.to_naive_dt(aware, "local"), datetime(2024, 3, 31, 16, 0))
+            self.assertEqual(T.to_naive_dt(naive, "local"), datetime(2024, 3, 31, 16, 0))
+            for mode in (None, "auto", "utc", "local"):
+                self.assertIsNone(T.to_naive_dt(datetime(4501, 1, 1), mode), mode)
+                self.assertIsNone(T.to_naive_dt(datetime(4501, 1, 1, tzinfo=UTC), mode), mode)
+
+    def scan_rows(self, rows, mode, start=datetime(2024, 4, 1), end=datetime(2024, 5, 1)):
+        f = FakeFolder("F", table_rows=rows, table_opts={"fail_any_filter": True})      # フィルタ無し→手元で期間に絞る
+        st = T.new_scan_state()
+        st["tz_mode"] = mode
+        T.scan_folder_table(f, start, end, st)
+        return st
+
+    def test_boundary_is_not_9_hours_off(self):
+        rows = [trow("IN", "s", datetime(2024, 3, 31, 16, 0, tzinfo=UTC)),         # JST 04-01 01:00 -> 期間内
+                trow("OUT", "s", datetime(2024, 4, 30, 15, 30, tzinfo=UTC))]       # JST 05-01 00:30 -> 期間外
+        with tokyo_tz():
+            st = self.scan_rows(rows, "auto")
+        self.assertEqual([r["e"] for r in st["records"]], ["IN"])
+        self.assertEqual(st["records"][0]["t"], "2024-04-01T01:00:00")
+        # tzinfo 無し + utc 指定
+        rows2 = [trow("IN", "s", datetime(2024, 3, 31, 16, 0)), trow("OUT", "s", datetime(2024, 4, 30, 15, 30))]
+        with tokyo_tz():
+            self.assertEqual([r["e"] for r in self.scan_rows(rows2, "utc")["records"]], ["IN"])
+            self.assertEqual([r["e"] for r in self.scan_rows(rows2, "auto")["records"]], ["OUT"])   # autoは naive をローカル扱い
+            self.assertEqual([r["e"] for r in self.scan_rows(rows2, "local")["records"]], ["OUT"])
+
+    def test_cli_default_and_passed_through_state(self):
+        self.assertEqual(T.parse_args([]).table_time, "auto")
+        self.assertEqual(T.parse_args(["--table-time", "utc"]).table_time, "utc")
+        with tokyo_tz():
+            rows = [trow("R1", "s", datetime(2024, 3, 31, 16, 0))]
+            f = FakeFolder("F", table_rows=rows, table_opts={"fail_any_filter": True})
+            code, out = run_main(self.argv_t("--table-time", "utc", "--from", "2024-04", "--to", "2024-04"),
+                                 fake_com(self.one_store(f))[0])
+        self.assertEqual(self.caches()[0]["records"][0]["t"], "2024-04-01T01:00:00")
+
+    def test_compare_probe_time_difference_and_warning(self):
+        a = [{"e": str(i), "c": "X", "t": "2024-04-01T10:00:00"} for i in range(5)]
+        b = [{"e": str(i), "c": "X", "t": "2024-04-01T01:00:00"} for i in range(4)] + [{"e": "4", "c": "X", "t": "2024-04-01T10:00:00"}]
+        r = T.compare_probe(a, b)
+        self.assertEqual((r["time_diff_mode"], r["time_diff_n"], r["utc_suspect"]), (-9, 5, True))
+        self.assertEqual(r["time_diff_counts"], {-9: 4, 0: 1})
+        r0 = T.compare_probe(a, a)
+        self.assertEqual((r0["time_diff_mode"], r0["utc_suspect"]), (0, False))
+        far = [{"e": "0", "c": "", "t": "2024-05-01T10:00:00"}]
+        self.assertFalse(T.compare_probe(a[:1], far)["utc_suspect"])            # 差が大きすぎる（数時間でない）ときは疑わない
+        self.assertIsNone(T.compare_probe([], [])["time_diff_mode"])
+
+
+class TestConnectionErrors(TableBase):
+    CONN = -2147221227          # 0x80040115 MAPI_E_NETWORK_ERROR
+
+    def test_is_connection_error(self):
+        E = FakeComError
+        for code in (0x80040115, 0x80020009, 0x800706BA, 0x800706BE, 0x80070005, 0x80010108, 0x8001010E):
+            self.assertTrue(T.is_connection_error(E(code - (1 << 32), "x")), hex(code))
+            self.assertTrue(T.is_connection_error(E(code, "x")), hex(code))
+        self.assertTrue(T.is_connection_error(E(-2147352567, "x", (0, "src", "d", None, 0, self.CONN))))     # 内側のscodeが接続系
+        self.assertFalse(T.is_connection_error(E(-2147352567, "x", (0, "src", "d", None, 0, -2147219196))))   # 内側が構文系ならfalse
+        self.assertFalse(T.is_connection_error(E(SECRET_ERR)))
+        self.assertFalse(T.is_connection_error(ValueError("x")))
+        self.assertFalse(T.is_connection_error(E(0x80040109, "x")))
+        self.assertTrue(T.is_disp_error(E(-2147352567, "x")))
+        self.assertFalse(T.is_disp_error(E(self.CONN, "x")))
+
+    def test_open_table_reraises_connection_error_but_falls_back_on_syntax_error(self):
+        f = FakeFolder("F", table_rows=self.mails_for(2), table_opts={"get_table_exc": FakeComError(self.CONN, "x")})
+        with self.assertRaises(FakeComError):
+            T.open_table(f, datetime(2024, 1, 1), datetime(2025, 1, 1), {})
+        self.assertEqual(len(f.table_filters), 1)                      # 次のフィルタへ進まない
+        g = FakeFolder("F", table_rows=self.mails_for(2), table_opts={"fail_or": True})
+        tbl, fmode, cols = T.open_table(g, datetime(2024, 1, 1), datetime(2025, 1, 1), {})
+        self.assertEqual(fmode, "ReceivedTime")
+
+    def test_column_connection_error_is_not_swallowed(self):
+        class Cols:
+            def RemoveAll(self):
+                pass
+
+            def Add(self, name):
+                raise FakeComError(TestConnectionErrors.CONN, "x")
+
+        class Tbl:
+            Columns = Cols()
+        with self.assertRaises(FakeComError):
+            T._setup_table_columns(Tbl(), {})
+
+    def test_transient_connection_error_retries_in_table_mode_without_items_fallback(self):
+        f = FakeFolder("F", table_rows=self.mails_for(3),
+                       table_opts={"get_table_exc": FakeComError(self.CONN, "x"), "get_table_exc_calls": {1}})
+        code, out = run_main(self.argv_t(), fake_com(self.one_store(f))[0])
+        self.assertEqual(code, 0)
+        self.assertIn("リトライ 1/2", out)
+        self.assertNotIn("Items方式に切り替えます", out)
+        c = self.caches()[0]
+        self.assertEqual((c["scan_mode"], c["complete"], len(c["records"])), ("table", True, 3))
+        self.assertEqual(f._items.filters, [])
+
+    def test_persistent_connection_error_fails_folder_and_keeps_table_mode(self):
+        f = FakeFolder("F", [mk_item("I1", "s", dt(4, 1))], table_rows=self.mails_for(3),
+                       table_opts={"get_table_exc": FakeComError(self.CONN, "x")})
+        code, out = run_main(self.argv_t(), fake_com(self.one_store(f))[0])
+        self.assertIn("失敗フォルダ 1個", out)
+        self.assertNotIn("Items方式に切り替えます", out)
+        self.assertEqual(f._items.filters, [])                         # Items（1通1秒の方式）へ落ちない
+        self.assertEqual(self.caches(), [])
+
+    def test_disp_error_reconnects_before_first_retry_and_check_probes_a_folder(self):
+        bad = FakeFolder("Bad", [mk_item("B", "s", dt(4, 1))], items_raise=FakeComError(-2147352567, "x"))
+        com, _ = fake_com(FakeNamespace([FakeStore("MB", FakeFolder("root", [], subfolders=[bad]))]))
+        dispatches = []
+        orig = com[0].Dispatch
+        com[0].Dispatch = lambda name: (dispatches.append(name), orig(name))[1]
+        run_main(self.argv("--no-stage2", "--scan-mode", "items"), com)
+        self.assertEqual(len(dispatches), 3)             # 最初 + DISP_E_*の1回目リトライ前 + 2回目リトライ前
+        conn = T.OutlookConn(FakeClient(FakeNamespace([], {})))
+        conn.connect()
+        self.assertTrue(conn.check())
+        conn.probe_ids = ("ab" * 10, "cd" * 10)
+        self.assertFalse(conn.check())                   # GetFolderFromID が失敗 -> 壊れた扱い
+
+
+class TestShapeAndValues(TableBase):
+    def test_transposed_array_falls_back_to_items(self):
+        f = FakeFolder("F", [mk_item("I1", "s1", dt(4, 1), "Zed", "Owner Taro")], table_rows=self.mails_for(4),
+                       table_opts={"transpose": True})
+        with self.assertRaises(T.TableUnavailable) as cm:
+            T.scan_folder_table(f, datetime(2024, 1, 1), datetime(2025, 1, 1), T.new_scan_state())
+        self.assertIn("形状不正", str(cm.exception))
+        code, out = run_main(self.argv_t(), fake_com(self.one_store(f))[0])
+        self.assertIn("形状不正", out)
+        self.assertIn("Items方式に切り替えます", out)
+        self.assertEqual([r["e"] for r in self.caches()[0]["records"]], ["I1"])
+
+    def test_shape_recorded_for_probe(self):
+        f = FakeFolder("F", table_rows=self.mails_for(3))
+        st = T.new_scan_state()
+        T.scan_folder_table(f, datetime(2024, 1, 1), datetime(2025, 1, 1), st)
+        self.assertEqual(st["table_shape"], (3, len(T.TABLE_COLUMNS)))
+
+    def test_non_string_values_in_string_columns_become_empty_with_error_count(self):
+        rows = [trow("R1", 12345, dt(4, 1), sender=-2147221233, to=FakeComError("x"), cc=3.5, smtp=0x8004010F, conv=7)]
+        f = FakeFolder("F", table_rows=rows)
+        st = T.new_scan_state()
+        T.scan_folder_table(f, datetime(2024, 1, 1), datetime(2025, 1, 1), st)
+        r = st["records"][0]
+        self.assertEqual((r["s"], r["n"], r["to"], r["cc"], r["a"], r["c"]), ("", "", "", "", "", ""))
+        for k in ("subj", "sender", "to", "cc", "smtp", "conv"):
+            self.assertIn(f"列値:{k}", st["errors"], k)
+        self.assertEqual(T._tstr(None), "")
+        self.assertEqual(T._tstr(b"abc"), "abc")
+        e = {}
+        self.assertEqual(T._tstr(5, e, "x"), "")
+        self.assertEqual(e, {"列値:x": 1})
+
+    def test_message_class_uses_unicode_property(self):
+        self.assertTrue(dict(T.TABLE_COLUMNS)["cls"].endswith("0x001A001F"))
+
+
+class TestConvIdCounters(TableBase):
+    def test_per_store_counters_and_conv_failures_split_from_error_kinds(self):
+        good = mk_item("A1", "s1", dt(4, 1), "Zed", "Owner Taro", cid="OLD1",
+                       PropertyAccessor=FakePA({T.PR_CONVERSATION_ID_URL: CONV_A}))
+        c2only = mk_item("A2", "s2", dt(4, 2), "Zed", "Owner Taro", cid="OLD2")
+        failing = mk_item("A3", "s3", dt(4, 3), "Zed", "Owner Taro", cid="OLD3", PropertyAccessor=FakePA({}))
+        f = FakeFolder("F", [good, c2only, failing])
+        code, out = run_main(self.argv("--no-stage2"), fake_com(self.one_store(f))[0])
+        self.assertIn("メール3件中 PR_CONVERSATION_ID空 2件（うち item.ConversationID のみ 2件）", out)
+        self.assertIn("会話ID取得失敗 1件", out)
+        self.assertNotIn("ConvID(PA)", out.split("エラー種別")[-1] if "エラー種別" in out else "")
+        self.assertIn("--conv-fallback c2", out)
+        self.assertEqual(T.conv_counts([{"c": "A"}, {"c": "", "c2": "x"}, {"c": ""}]), (3, 2, 1))
+        other, n = T.split_conv_errors({"ConvID(PA):X": 2, "Subject:Y": 1})
+        self.assertEqual((other, n), ({"Subject:Y": 1}, 2))
+
+    def test_mode_and_retry_counts_in_summary(self):
+        f = FakeFolder("F", table_rows=self.mails_for(2), table_opts={"array_fail_calls": {1}})
+        code, out = run_main(self.argv_t(), fake_com(self.one_store(f))[0])
+        self.assertIn("方式別フォルダ数: table 1 / items 0 / リトライ 1回", out)
+
+    def test_conv_fallback_option_changes_threading(self):
+        r1 = rec("E1", "Short a", "2024-04-10T09:00:00", "Sato Pm", "Owner Taro")
+        r2 = rec("E2", "Short b", "2024-04-11T09:00:00", "Owner Taro", "Sato Pm")
+        r1["c2"] = r2["c2"] = "OLD"
+        th = make_theme()
+        c = cache("S", 1, "\\Inbox", [r1, r2])
+        res_default = T.evaluate_all([c], th, {}, (2024, 1), (2024, 12))
+        res_c2 = T.evaluate_all([c], th, {}, (2024, 1), (2024, 12), conv_fallback="c2")
+        self.assertEqual((len(res_default["threads"]), len(res_c2["threads"])), (2, 1))
+        self.assertEqual(T.parse_args([]).conv_fallback, "subject")
+        self.assertEqual(T.parse_args(["--conv-fallback", "c2"]).conv_fallback, "c2")
+
+
+class TestProbeDefaults(TableBase):
+    def two_stores(self, first_has_mail):
+        month_day = dt(4, 5)
+        empty = FakeFolder("E", [mk_item("X", "s", datetime(2023, 1, 1))], table_rows=[trow("X", "s", datetime(2023, 1, 1))])
+        full_items = [mk_item(f"E{i}", SECRET + str(i), dt(4, 1 + i), "Zed", "Owner Taro", cid="o",
+                              PropertyAccessor=FakePA({T.PR_CONVERSATION_ID_URL: CONV_A})) for i in range(3)]
+        full = FakeFolder("Full", full_items, table_rows=[trow(f"E{i}", "s", dt(4, 1 + i), conv=CONV_A) for i in range(3)])
+        a = FakeStore("StoreA", FakeFolder("root", [], subfolders=[full if first_has_mail else empty]), sid="SA")
+        b = FakeStore("StoreB", FakeFolder("root", [], subfolders=[empty if first_has_mail else full]), sid="SB")
+        return FakeNamespace([a, b])
+
+    def probe(self, ns, *extra):
+        return run_main(["--data-dir", self.data, "--output-dir", self.out, *extra], fake_com(ns)[0])
+
+    def test_month_defaults_to_to_month_and_zero_rows_message(self):
+        code, out = self.probe(self.two_stores(True), "--probe-table", "--to", "2024-04")
+        self.assertEqual(code, 0)
+        self.assertIn("対象月: 2024-04", out)
+        code, out = self.probe(self.two_stores(True), "--probe-table")          # --from/--to 無し -> 先月（テスト日付では0件）
+        self.assertEqual(code, 2)
+        self.assertIn("0件でした。--from YYYY-MM を指定してください", out)
+        code, out = self.probe(self.two_stores(True), "--probe-table", "--from", "2024-04", "--to", "2024-06")
+        self.assertIn("対象月: 2024-04", out)                                    # --from が優先
+
+    def test_tries_stores_in_order_until_one_has_mail(self):
+        code, out = self.probe(self.two_stores(False), "--probe-table", "--from", "2024-04")
+        self.assertEqual(code, 0)
+        self.assertIn("StoreA: 2024-04 に該当メールなし", out)
+        self.assertIn("ストア: StoreB", out)
+        self.assertNotIn(SECRET, out)
+
+    def test_explanations_and_shape_and_time_warning(self):
+        code, out = self.probe(self.two_stores(True), "--probe-table", "--from", "2024-04")
+        self.assertIn("結果の見方", out)
+        self.assertIn("形状(行×列)=3×", out)
+        self.assertIn("日時差", out)
+        self.assertNotIn("UTC疑い", out)
+        # Table が -9 時間ずれて返る（UTC）環境を再現: 行の時刻を 9 時間引く
+        ns = self.two_stores(True)
+        full = ns.Stores.Item(1).GetRootFolder().Folders.Item(1)
+        from datetime import timedelta
+        full.table_rows = [dict(r, recv=r["recv"] - timedelta(hours=9)) for r in full.table_rows]
+        with tokyo_tz():
+            code, out = self.probe(ns, "--probe-table", "--from", "2024-04", "--table-time", "local")
+            self.assertIn("UTC疑い", out)
+            self.assertIn("-9時間", out)
+            self.assertIn("--table-time utc", out)
+            code, out = self.probe(ns, "--probe-table", "--from", "2024-04", "--table-time", "utc")
+            self.assertNotIn("UTC疑い", out)
+            self.assertIn("最頻 +0時間", out)
+
+
+
+class TestStage1PropertyGuard(unittest.TestCase):
+    def test_guard_detects_non_conversation_id_property_in_stage1(self):
+        LIGHT_ACCESSED.clear()
+        item = FakeItem({"PropertyAccessor": FakePA({T.PR_CONVERSATION_ID_URL: CONV_A, "http://x/body": "b"})})
+        item.PropertyAccessor.GetProperty(T.PR_CONVERSATION_ID_URL)
+        self.assertEqual(LIGHT_ACCESSED, [])                                   # 会話IDは許可
+        item.PropertyAccessor.GetProperty("http://x/body")
+        self.assertEqual(LIGHT_ACCESSED, ["GetProperty:http://x/body"])         # それ以外は検出される
+        LIGHT_ACCESSED.clear()
+
+    def test_real_stage1_read_only_requests_conversation_id(self):
+        LIGHT_ACCESSED.clear()
+        item = mk_item("A1", "s", dt(4, 1), "Zed", "Owner Taro",
+                       PropertyAccessor=FakePA({T.PR_CONVERSATION_ID_URL: CONV_A}))
+        T.read_light_item(item, {})
+        self.assertEqual(LIGHT_ACCESSED, [])
+
+    def test_resume_does_not_double_count_processed_or_non_mail(self):
+        rows = [trow(f"R{i}", "s", dt(4, 1 + i)) for i in range(4)] + [trow("N1", "s", dt(4, 9), cls="IPM.Appointment")]
+        f = FakeFolder("F", table_rows=rows)
+        st = T.new_scan_state()
+        T.scan_folder_table(f, datetime(2024, 1, 1), datetime(2025, 1, 1), st)
+        self.assertEqual((st["processed"], st["non_mail"], len(st["records"])), (5, 1, 4))
+        # 同じ state で再開（リトライ・再実行相当）: 取得済みは飛ばし、メール以外は数え直す。processed は今回の見た行数だけ
+        T.scan_folder_table(FakeFolder("F", table_rows=rows), datetime(2024, 1, 1), datetime(2025, 1, 1), st, resume=True)
+        self.assertEqual((st["processed"], st["non_mail"], len(st["records"])), (1, 1, 4))
+
+
+class TestFilterFallbackLogs(TableBase):
+    def test_all_filter_and_received_only_are_announced(self):
+        f = FakeFolder("F", table_rows=self.mails_for(2), table_opts={"fail_any_filter": True})
+        code, out = run_main(self.argv_t(), fake_com(self.one_store(f))[0])
+        self.assertIn("フィルタ無し（全件取得して手元で絞る）", out)
+        g = FakeFolder("F", table_rows=self.mails_for(2), table_opts={"fail_or": True})
+        code, out = run_main(self.argv_t("--rescan"), fake_com(self.one_store(g))[0])
+        self.assertIn("ReceivedTime のみで絞りました", out)
+        h = FakeFolder("F", table_rows=self.mails_for(2))
+        code, out = run_main(self.argv_t("--rescan"), fake_com(self.one_store(h))[0])
+        self.assertNotIn("フィルタ無し", out)
+        self.assertNotIn("ReceivedTime のみ", out)
+
+
+
+class TestAmbiguousDispatchError(TableBase):
+    AMB = -2147352567            # 0x80020009 DISP_E_EXCEPTION（内側のscodeなし）
+
+    def amb(self):
+        return FakeComError(self.AMB, "x")
+
+    def test_classification(self):
+        self.assertTrue(T.is_ambiguous_dispatch_error(self.amb()))
+        self.assertTrue(T.is_ambiguous_dispatch_error(FakeComError(self.AMB, "x", (0, "s", "d", None, 0, self.AMB))))
+        self.assertFalse(T.is_ambiguous_dispatch_error(FakeComError(-2147221227, "x")))             # 0x80040115 は明確な接続系
+        self.assertFalse(T.is_ambiguous_dispatch_error(FakeComError(self.AMB, "x", (0, "s", "d", None, 0, -2147221227))))
+        self.assertFalse(T.is_ambiguous_dispatch_error(FakeComError(SECRET_ERR)))
+        self.assertTrue(T.is_connection_error(self.amb()))                                        # リトライ側では従来どおり接続系扱い
+        self.assertFalse(T.is_definite_connection_error(self.amb()))
+        for code in (0x80040115, 0x800706BA, 0x800706BE, 0x80070005, 0x80010108):
+            self.assertTrue(T.is_definite_connection_error(FakeComError(code - (1 << 32), "x")), hex(code))
+
+    def test_ambiguous_error_on_or_filter_falls_back_to_received_time_only(self):
+        f = FakeFolder("F", table_rows=self.mails_for(3), table_opts={"get_table_exc": self.amb(), "get_table_exc_calls": {1}})
+        stats = {}
+        tbl, fmode, cols = T.open_table(f, datetime(2024, 1, 1), datetime(2025, 1, 1), {}, alive=lambda: False, stats=stats)
+        self.assertEqual(fmode, "ReceivedTime")                    # 接続が死んでいても、後のフィルタが通れば成功（alive は呼ばない）
+        self.assertEqual(stats["ambiguous_disp"], 1)
+        self.assertEqual(len(f.table_filters), 2)
+
+    def test_all_filters_ambiguous_and_connection_alive_means_table_unavailable(self):
+        f = FakeFolder("F", table_rows=self.mails_for(3), table_opts={"get_table_exc": self.amb()})
+        stats = {}
+        with self.assertRaises(T.TableUnavailable):
+            T.open_table(f, datetime(2024, 1, 1), datetime(2025, 1, 1), {}, alive=lambda: True, stats=stats)
+        self.assertEqual((len(f.table_filters), stats["ambiguous_disp"]), (3, 3))        # 全フィルタを試した
+
+    def test_all_filters_ambiguous_and_connection_dead_reraises(self):
+        f = FakeFolder("F", table_rows=self.mails_for(3), table_opts={"get_table_exc": self.amb()})
+        with self.assertRaises(FakeComError):
+            T.open_table(f, datetime(2024, 1, 1), datetime(2025, 1, 1), {}, alive=lambda: False)
+        self.assertEqual(len(f.table_filters), 3)
+
+    def test_mixed_failures_do_not_check_connection(self):
+        f = FakeFolder("F", table_rows=self.mails_for(3), table_opts={"fail_any_filter": True, "fail_or": True})
+        calls = []
+        tbl, fmode, cols = T.open_table(f, datetime(2024, 1, 1), datetime(2025, 1, 1), {}, alive=lambda: calls.append(1) or False)
+        self.assertEqual((fmode, calls), ("all", []))
+
+    def test_definite_connection_error_is_reraised_immediately(self):
+        f = FakeFolder("F", table_rows=self.mails_for(3), table_opts={"get_table_exc": FakeComError(-2147221227, "x")})
+        calls = []
+        with self.assertRaises(FakeComError):
+            T.open_table(f, datetime(2024, 1, 1), datetime(2025, 1, 1), {}, alive=lambda: calls.append(1) or True)
+        self.assertEqual((len(f.table_filters), calls), (1, []))
+
+    def test_e2e_or_ambiguous_still_scans_in_table_mode_and_counts(self):
+        f = FakeFolder("F", table_rows=self.mails_for(3), table_opts={"get_table_exc": self.amb(), "get_table_exc_calls": {1}})
+        code, out = run_main(self.argv_t(), fake_com(self.one_store(f))[0])
+        self.assertEqual(code, 0)
+        c = self.caches()[0]
+        self.assertEqual((c["scan_mode"], c["complete"], len(c["records"])), ("table", True, 3))
+        self.assertIn("曖昧な 0x80020009（DISP_E_EXCEPTION）を判定した回数: 1回 / table→items フォールバック: 0フォルダ", out)
+        self.assertIn("ReceivedTime のみで絞りました", out)
+        self.assertEqual(f._items.filters, [])
+
+    def test_e2e_all_ambiguous_with_live_connection_falls_back_to_items(self):
+        f = FakeFolder("F", [mk_item("I1", "s", dt(4, 1), "Zed", "Owner Taro")], table_rows=self.mails_for(3),
+                       table_opts={"get_table_exc": self.amb()})
+        code, out = run_main(self.argv_t(), fake_com(self.one_store(f))[0])
+        self.assertEqual(code, 0)
+        self.assertIn("Items方式に切り替えます", out)
+        self.assertIn("曖昧な 0x80020009（DISP_E_EXCEPTION）を判定した回数: 3回 / table→items フォールバック: 1フォルダ", out)
+        self.assertEqual(self.caches()[0]["scan_mode"], "items")
+
+    def test_e2e_all_ambiguous_with_dead_connection_goes_to_retry(self):
+        f = FakeFolder("F", [mk_item("I1", "s", dt(4, 1), "Zed", "Owner Taro")], table_rows=self.mails_for(3),
+                       table_opts={"get_table_exc": self.amb()})
+        real = T.OutlookConn.check
+        calls = {"n": 0}
+
+        def dead_after_first(self_):
+            calls["n"] += 1
+            return calls["n"] == 1          # 走査前の確認は通り、その後（曖昧エラー時）は死んでいる扱い
+        T.OutlookConn.check = dead_after_first
+        try:
+            code, out = run_main(self.argv_t(), fake_com(self.one_store(f))[0])
+        finally:
+            T.OutlookConn.check = real
+        self.assertIn("リトライ 1/2", out)
+        self.assertNotIn("Items方式に切り替えます", out)
+        self.assertIn("失敗フォルダ 1個", out)
+        self.assertEqual(f._items.filters, [])
+
 
 
 if __name__ == "__main__":
