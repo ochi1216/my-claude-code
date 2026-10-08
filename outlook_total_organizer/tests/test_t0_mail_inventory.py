@@ -712,6 +712,40 @@ class TestFakeCom(unittest.TestCase):
         self.assertEqual(holder["stores"], [])          # 全ストア記録が解放済み
         self.assertEqual((py.inits, py.uninits), (1, 1))
 
+    def test_root_direct_mail_is_counted(self):
+        root = FakeFolder("root", dts(2026, 9, [14, 15, 16]), children=[])
+        root.Folders = root
+        code, _c, text, _p = run_fake([FakeStore("PST2024", root, "P1", exch=0, path="C:\\x\\a.pst")])
+        self.assertEqual(code, 0)
+        self.assertIn("(ルート直下)  [3件]", text)
+        self.assertRegex(text, r"\\\(ルート直下\) \| 総3件 \| 月別: 2026-09=3")
+        self.assertNotIn(SECRET_SUBJECT, text)
+
+    def test_root_zero_not_listed(self):
+        root = FakeFolder("root", [], children=[FakeFolder("受信トレイ", dts(2026, 9, [1]))])
+        code, _c, text, _p = run_fake([FakeStore("現行", root, "S1")])
+        self.assertEqual(code, 0)
+        self.assertNotIn("(ルート直下)  [", text)
+        self.assertIn("メールフォルダ 1個", text)
+
+    def test_root_items_exception_continues(self):
+        class BadRoot(FakeFolder):
+            @property
+            def Items(self):
+                raise FakeComError(-1, SECRET_ERRMSG, None, None)
+        root = BadRoot("root", children=[FakeFolder("受信トレイ", dts(2026, 9, [1]))])
+        code, _c, text, _p = run_fake([FakeStore("S", root, "S1")])
+        self.assertEqual(code, 0)
+        self.assertIn("受信トレイ", text)
+        self.assertNotIn(SECRET_ERRMSG, text)
+
+    def test_root_label_masked_with_mask_names(self):
+        root = FakeFolder("root", dts(2026, 9, [14]), children=[])
+        root.Folders = root
+        code, _c, text, _p = run_fake([FakeStore("S", root, "S1")], ["--mask-names"])
+        self.assertNotIn("ルート直下)  [", text)
+        self.assertIn("Folder-001", text)
+
     def test_mask_names(self):
         code, _c, text, _p = run_fake(self._basic_stores(), ["--mask-names"])
         self.assertNotIn("受信トレイ", text)

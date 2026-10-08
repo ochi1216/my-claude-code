@@ -9,11 +9,14 @@
 	**出力する情報**: 件名・本文・送信者・宛先アドレスは出力も保存もしない。出すのは件数・所要時間・エラー種別・フォルダ名・ストア名・PSTファイル名。**フォルダ名・ストア名・PSTファイル名は出力されるので、共有前に内容を確認すること**。パスのユーザー名は`<USER>`、メールアドレス形式は`<MAIL>`に置換(ストア名・フォルダ名にも適用)。`--mask-names`で全ストア名・フォルダ名・PSTファイル名を連番(Store-01 / Folder-001)に置換できる。
 	**注記**: 件数には会話履歴・同期の問題・下書き・送信トレイ等のフォルダも含まれる。本体処理を別関数に切り出し、関数を抜けて全フォルダ・全ストアのCOM参照(`com`)を外してから`gc.collect()`→`CoUninitialize`する。日付書式の試験フォルダは「全期間の件数>0」のものから選び、基準(ISO)が全窓0件のときは「判別できません(要確認)」とする。月別取得がエラーで止まったフォルダは合計から除外して注記する。退避時のコンソール表示パスもマスクする。
 
+	**ルート直下のメール**: 実機で、PST(2023_Q4/2024_Q2/2024_Q3)はサブフォルダではなくストアのルート直下に直接メールが入っていると判明したため、各ストアのルート自身も`Items.Count>0`なら「(ルート直下)」という擬似フォルダとして集計に加えた(DefaultItemTypeは問わない。0件・取得不可は対象外なので、現行・アーカイブでは通常出ない)。`--mask-names`の対象。
+	**版の扱い**: 実機で一度使用済みのため、スクリプトの版を`_02`にした。旧`_01`は`tools/old/`へ移動(削除はしていない)。
+
 ### 変更関数
 	なし(本体`app/`は未変更)。新規スクリプトの主な純粋関数: `parse_ym` / `month_range` / `month_bounds` / `overlap_bounds` / `build_range_filter` / `build_month_filter_variants` / `build_probe_windows` / `compare_date_formats` / `build_dasl_filters` / `mask_user_path` / `mask_display_name` / `NameMasker` / `archive_evidence` / `archive_verdict` / `classify_folder_name` / `build_zero_warning` / `latest_nonzero_index` / `select_test_folders` / `judge_index_result` / `error_kind` / `resolve_output_path`。
 
 ### 新規追加：
-	`tools/diagnose_mail_inventory_20261008_01.py` / `tests/test_t0_mail_inventory.py`(純粋関数 + COMのフェイクで、秘密文字列が出力に出ないこと・1フォルダの例外で続行・Ctrl+Cでの保存・試験対象のストア単位選定・保存先の退避を確認)
+	`tools/diagnose_mail_inventory_20261008_02.py`(旧`_01`は`tools/old/`) / `tests/test_t0_mail_inventory.py`(純粋関数 + COMのフェイクで、秘密文字列が出力に出ないこと・1フォルダの例外で続行・Ctrl+Cでの保存・試験対象のストア単位選定・保存先の退避を確認)
 
 変更ファイル：
 	`CHANGELOG.md`(このエントリの追記のみ)
@@ -22,8 +25,8 @@
 	`app/`配下の本体・既存テスト・既存の診断スクリプト・`.gitignore`・`json/`の実データ。Outlookのアイテムの変更・移動・削除・既読化、AddStore等のプロファイル変更は一切しない。
 
 ### 動作確認(Linux側)
-	全テスト合格(成功1747・失敗0・エラー0。スキップ109はtkinter無しのGUIテスト)。COM部分はフェイクでの確認のみで、実機は未検証。
-	**実機で確認してほしいこと**: ①Outlook起動状態で`python tools\diagnose_mail_inventory_20261008_01.py`を実行し、txtが`mail_reports\`にできること ②PST接続後に再実行し、PSTがストア一覧に出ること ③出力に件名・アドレスが含まれないこと(フォルダ名・ストア名は出る) ④ISO書式のRestrictが通るか、ExchangeStoreTypeの生の値と各ストアの対応 ⑤txtを確認してから共有。
+	全テスト合格(成功1751・失敗0・エラー0。スキップ109はtkinter無しのGUIテスト)。COM部分はフェイクでの確認のみで、実機は未検証。
+	**実機で確認してほしいこと**: ①Outlook起動状態で`python tools\diagnose_mail_inventory_20261008_02.py`を実行し、txtが`mail_reports\`にできること ②PST接続後に再実行し、PSTがストア一覧に出ること ③出力に件名・アドレスが含まれないこと(フォルダ名・ストア名は出る) ④ISO書式のRestrictが通るか、ExchangeStoreTypeの生の値と各ストアの対応 ⑤txtを確認してから共有。
 
 ## VERSION 20261004_16
 
