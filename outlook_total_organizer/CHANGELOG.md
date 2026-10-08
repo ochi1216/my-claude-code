@@ -1,5 +1,33 @@
 # CHANGELOG — outlook_total_organizer
 
+## VERSION 20261004_16
+
+### 追加・修正
+	**フォルダの構成を整理した(機能は変えていない)**: 最初の階層をシンプルにするため、コードを`app/`に集めた。
+	```
+	outlook_total_organizer/
+	├─ run_outlook_total_organizer.bat   ← 起動はこれだけ(従来どおり。ランチャーの設定も変更なし)
+	├─ CHANGELOG.md
+	├─ app/        最新のコード1本(outlook_total_organizer_YYYYMMDD_NN.py)
+	│   └─ old/    過去の版(70本。git mvで移したので履歴は残る)
+	├─ docs/       AGENT_PLAN_draft.md, AXIS.md
+	├─ tools/      diagnose_action_decisions.py, diagnose_archive.py
+	├─ tests/
+	└─ json/       設定・キャッシュ(PC上だけ。Gitには入れない。場所は従来のまま)
+	```
+	**運用ルール**: 新しい版を作ったら、直前の版を`app/old/`へ移す(`app/`には最新の1本だけ)。バッチは`app\`の中でファイル名が最後のものを自動で選ぶので、バッチの書き換えは不要。
+	**`run_outlook_total_organizer.bat`**: `app\`の最新を探して起動するようにした。作業フォルダは従来どおりバッチのあるフォルダ(`json\`などの相対パスが変わらないため、設定・キャッシュはそのまま使える)。文字化けで`cmd`が誤解釈する問題(OneNote要約ツールで経験済み)を避けるため、ASCIIのみで書き直した(表示メッセージは英語になる)。
+	**本体(`_16`)**: 変更は1箇所だけ。`gemini_client`の置き場所(`common`)の探し先を、`app/`から2つ上(リポジトリ直下)に直した。旧配置(1つ上)で動かされた場合にも見つかるよう、両方を探す。`GEMINI_COMMON_DIR`があればそれを優先(従来どおり)。
+	**テスト**: `_loader`が`app/`と`app/old/`の両方からリビジョンを探す(`list_revisions`・`rev_path`を追加)。各テストの`os.path.join(_loader.TOOL_DIR, 名前)`は`_loader.rev_path(名前)`にした(対象・基準の選び方は従来どおり名前順)。
+	**診断スクリプト**: `tools/diagnose_action_decisions.py`は、本体を`app/`から、データ(`json/`)をツールのフォルダから読む。`diagnose_archive.py`は本体に依存しないので変更なし。
+
+### 変更関数
+	モジュール直下の`_COMMON_DIR`の決定(1箇所)。それ以外の本体のコードは`_15`と同一。
+
+### 動作確認(Linux側)
+	全テスト合格(成功1680・失敗0・エラー0。スキップ109はtkinter無しのGUIテスト)。
+	**実機で確認してほしいこと**: ①`git pull`後、ツールランチャーまたはバッチから起動し、コンソールの1行目が`Starting version: outlook_total_organizer_20261004_16.py`になること ②AIが動くこと(Geminiの呼び出しが従来どおり成功すること。`common`の探し先を変えたため) ③設定・キャッシュ(`json/`)が従来どおり読めること。
+
 ## VERSION 20261004_15
 
 ### 追加・修正

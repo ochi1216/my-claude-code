@@ -793,7 +793,7 @@ class TestSearchReportScript(TmpDirClassMixin, unittest.TestCase):
     def test_display_is_the_same_as_rev14_for_non_injecting_text(self):
         """(node で実行) 注入にならない翻訳結果 (<URL>・"URL"・& や &lt; の文字・長い URL・ふつうのセーフリンク) の表示
         (文字・リンクの文字・href・要素) は、A10b 前の _14 と同じ (表示の文字は変えない)。"""
-        old = os.path.join(_loader.TOOL_DIR, OLD_REV)
+        old = _loader.rev_path(OLD_REV)
         if not os.path.isfile(old):
             self.skipTest(f"{OLD_REV} が無い")
         with tempdir_cwd() as tmp, contextlib.redirect_stdout(io.StringIO()):
@@ -1587,8 +1587,8 @@ def short_diff(a, b, limit=30):
 
 
 def rev_paths():
-    old = os.path.join(_loader.TOOL_DIR, OLD_REV)
-    new = os.path.join(_loader.TOOL_DIR, NEW_REV)
+    old = _loader.rev_path(OLD_REV)
+    new = _loader.rev_path(NEW_REV)
     if not (os.path.isfile(old) and os.path.isfile(new)):
         raise unittest.SkipTest(f"A10b のリビジョン対 ({OLD_REV} / {NEW_REV}) が無い")
     return old, new
@@ -1645,7 +1645,7 @@ class TestScopeGuardA10b(unittest.TestCase):
 @functools.lru_cache(maxsize=None)
 def load_rev(fname):
     """tool フォルダの指定リビジョンを別名で読み込む (出力の比較用)。"""
-    path = os.path.join(_loader.TOOL_DIR, fname)
+    path = _loader.rev_path(fname)
     oto()                                                  # 先に最小スタブを入れておく
     mod_name = "oto_a10b_" + re.sub(r"\W", "_", fname[:-3])
     spec = importlib.util.spec_from_file_location(mod_name, path)

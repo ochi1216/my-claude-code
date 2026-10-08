@@ -430,7 +430,7 @@ def one_with(test, segments, tag):
 @functools.lru_cache(maxsize=None)
 def load_revision(filename):
     """tool フォルダのリビジョンをファイル名で指定して、別名のモジュールとして読み込む (無ければ None)。"""
-    path = os.path.join(_loader.TOOL_DIR, filename)
+    path = _loader.rev_path(filename)
     if not os.path.isfile(path):
         return None
     oto()                                                  # 先に最小スタブを入れておく
@@ -890,8 +890,8 @@ def short_diff(a, b, limit=30):
 class TestScopeGuardA7d(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.baseline = os.path.join(_loader.TOOL_DIR, OLD_REV)
-        cls.target = os.path.join(_loader.TOOL_DIR, NEW_REV)
+        cls.baseline = _loader.rev_path(OLD_REV)
+        cls.target = _loader.rev_path(NEW_REV)
         if not (os.path.isfile(cls.baseline) and os.path.isfile(cls.target)):
             raise unittest.SkipTest("A7d のリビジョン対 (20261004_10 / 20261004_11) が無い")
         cls.old = _index_source(cls.baseline)

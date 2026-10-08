@@ -1183,8 +1183,8 @@ def old_notebook_block(old_body):
 class TestScopeGuardA6(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.target = os.path.join(_loader.TOOL_DIR, NEW_REV)
-        cls.baseline = os.path.join(_loader.TOOL_DIR, OLD_REV)
+        cls.target = _loader.rev_path(NEW_REV)
+        cls.baseline = _loader.rev_path(OLD_REV)
         if not (os.path.isfile(cls.target) and os.path.isfile(cls.baseline)):
             raise unittest.SkipTest(f"A6のリビジョン対({OLD_REV} / {NEW_REV})が無い")
         cls.old = _index_source(cls.baseline)
@@ -1327,8 +1327,8 @@ class TestScopeGuardA6(unittest.TestCase):
 class TestSpecGapScopeGuardA6(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        old_p = os.path.join(_loader.TOOL_DIR, OLD_REV)
-        new_p = os.path.join(_loader.TOOL_DIR, NEW_REV)
+        old_p = _loader.rev_path(OLD_REV)
+        new_p = _loader.rev_path(NEW_REV)
         if not (os.path.isfile(old_p) and os.path.isfile(new_p)):
             raise unittest.SkipTest(f"A6のリビジョン対({OLD_REV} / {NEW_REV})が無い")
         cls.old = _index_source(old_p)

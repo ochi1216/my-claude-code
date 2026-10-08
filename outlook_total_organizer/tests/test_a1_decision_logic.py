@@ -2004,8 +2004,8 @@ class TestScopeGuardExistingCodeUnchanged(unittest.TestCase):
     def setUpClass(cls):
         # A1の「既存コードは変更しない」宣誓は、A1のリビジョン対(20260821_02 → 20261004_01)に対して検証する。
         # (後続のリビジョン[A2以降]は、それぞれのテストで自分の変更範囲を検証する)
-        cls.target = os.path.join(_loader.TOOL_DIR, "outlook_total_organizer_20261004_01.py")
-        cls.baseline = os.path.join(_loader.TOOL_DIR, "outlook_total_organizer_20260821_02.py")
+        cls.target = _loader.rev_path("outlook_total_organizer_20261004_01.py")
+        cls.baseline = _loader.rev_path("outlook_total_organizer_20260821_02.py")
         if not (os.path.isfile(cls.target) and os.path.isfile(cls.baseline)):
             raise unittest.SkipTest("A1のリビジョン対(20260821_02 / 20261004_01)が無い")
         cls.old = _index_source(cls.baseline)

@@ -1160,8 +1160,8 @@ MUST_STAY_UNCHANGED = ["MailManagerGUI._refresh_cockpit", "MailSummarizer.genera
 class TestScopeGuardA7c(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.target = os.path.join(_loader.TOOL_DIR, NEW_REV)
-        cls.baseline = os.path.join(_loader.TOOL_DIR, OLD_REV)
+        cls.target = _loader.rev_path(NEW_REV)
+        cls.baseline = _loader.rev_path(OLD_REV)
         if not (os.path.isfile(cls.target) and os.path.isfile(cls.baseline)):
             raise unittest.SkipTest(f"A7c のリビジョン対({OLD_REV} / {NEW_REV})が無い")
         cls.old = a7a._index_source(cls.baseline)

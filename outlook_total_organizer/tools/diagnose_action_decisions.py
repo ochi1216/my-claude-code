@@ -6,7 +6,7 @@ r"""
 「多すぎ/少なすぎ」にならないかを数秒で確かめる。Outlook・AI・ネットワークには触れない。
 本体(outlook_total_organizer_*.py の名前順で最後)の関数をそのまま呼び、判定ロジックは複製しない。
 
-使い方(本体と同じフォルダに置いて実行):
+使い方(tools フォルダのまま実行。本体は ../app、データは ../ を見る):
     python diagnose_action_decisions.py
     python diagnose_action_decisions.py --samples 5
         判断待ち上位5件の依頼者・依頼内容(先頭40文字)・期限・受信日も出す(既定オフ。内容が出るので共有前に確認)
@@ -37,6 +37,9 @@ from collections import Counter
 from datetime import datetime
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# このスクリプトは <ツールのフォルダ>/tools/ にある。データ(json/ など)はツールのフォルダ、本体は app/ にある
+TOOL_DIR = os.path.dirname(SCRIPT_DIR)
+APP_DIR = os.path.join(TOOL_DIR, "app")
 MAX_LINES = 60          # 既定出力の行数上限(--samples の追加行は含めない)
 TOP_TARGETS = 30        # 宛先の内訳に出す上位件数
 SAMPLE_CHARS = 40       # --samples で出す依頼内容の文字数
@@ -195,12 +198,13 @@ def install_readonly_guard():
 
 
 def load_latest_revision():
-    """同じフォルダの outlook_total_organizer_<日付>*.py を名前順で最後のものにして import する。"""
-    names = sorted(n for n in os.listdir(SCRIPT_DIR) if re.match(r"outlook_total_organizer_\d{8}.*\.py$", n))
+    """app/ の outlook_total_organizer_<日付>*.py を名前順で最後のものにして import する。"""
+    names = sorted(n for n in (os.listdir(APP_DIR) if os.path.isdir(APP_DIR) else [])
+                   if re.match(r"outlook_total_organizer_\d{8}.*\.py$", n))
     if not names:
         return None, None
     name = names[-1][:-3]
-    spec = importlib.util.spec_from_file_location(name, os.path.join(SCRIPT_DIR, names[-1]))
+    spec = importlib.util.spec_from_file_location(name, os.path.join(APP_DIR, names[-1]))
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod
     spec.loader.exec_module(mod)
@@ -428,7 +432,7 @@ def parse_args(argv=None):
 
 def run(args, out, samples):
     now = datetime.now()
-    data_dir = os.path.abspath(args.dir) if args.dir else SCRIPT_DIR
+    data_dir = os.path.abspath(args.dir) if args.dir else TOOL_DIR
     out.append("🩺 判断待ちの診断（読み取り専用）  実行 " + now.strftime("%Y-%m-%d %H:%M"))
     if not os.path.isdir(data_dir):
         out.append("⚠️ --dir のフォルダが見つかりません: " + data_dir)
@@ -444,8 +448,8 @@ def run(args, out, samples):
         out.append(f"⚠️ 本体の読み込みに失敗: {type(e).__name__}: {clip(one_line(e), 120)}")
         return
     if mod is None:
-        out += ["⚠️ 本体 outlook_total_organizer_<日付>*.py が見つかりません（探した場所: " + SCRIPT_DIR + "）",
-                "   このスクリプトを本体と同じフォルダに置いて実行してください。"]
+        out += ["⚠️ 本体 outlook_total_organizer_<日付>*.py が見つかりません（探した場所: " + APP_DIR + "）",
+                "   このスクリプトは tools フォルダ(app フォルダと同じ階層)に置いて実行してください。"]
         return
     out[0] += "  本体=" + rev
     missing = [n for n in REQUIRED if not hasattr(mod, n)]
