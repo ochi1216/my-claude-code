@@ -1,5 +1,32 @@
 # CHANGELOG — outlook_total_organizer
 
+## VERSION 20261009_04（過去スレッド台帳 S1.7: 診断プローブの作り直しと速度の切り分け）
+
+### 追加・修正
+	**実機の`--probe-table`(オンラインモード、現行メールボックス\アーカイブ 総39504件、2024-11)の結果を受けた変更。`tools/thread_ledger_scan_20261009_04.py`を新版とし、旧`_03`は`tools/old/`へ移動(`git mv`)。本体`app/`は未変更。**
+	**実機の事実**: Table方式は94件(メール以外6件)を32.7秒(327ms/行)、OR式は通り形状500×11も正常。ただしGetArray(500)で500行取得して100行しか使わないため実効は約65ms/行。Items方式はオンラインで1通約1.8秒(確定)。比較は「Items 30件 / Table 94件 / 共通0件」で、Itemsの取得順(未ソート/降順)とTable(昇順)が違い別の集合を見ていたため、確認したかった日時差(UTCか)と会話ID一致が判定できなかった(プローブの比較設計の不備)。
+	**1. `--probe-table` / `--probe-conversation-id`の作り直し**: Tableの先頭N行(既定100、会話ID診断は5。最大500)を取り、各EntryIDについて`GetItemFromID(entry_id, store_id)`(`call_by_id`)で同じメールのItemを開いて比較する(`compare_probe(table_records, item_infos)`)。比較項目: (a)受信日時(`Item.ReceivedTime`とTableの日時の差を時間単位で集計: 最頻値と内訳。0以外で±14時間以内なら「Table日時はUTC疑い」)、(b)Table日時の生の値の型(tz付き/tzなしの件数、tz付きならutcoffset、日時の例。件名等は出さない)、(c)会話ID(Item側PR_CONVERSATION_ID 16進とTable側16進の一致/不一致/空、`Item.ConversationID`との関係=同一/先頭一致/不一致/比較不可)、(d)Itemが取れなかった件数、(e)Items経由の1通あたり時間。Tableは「使用行基準」と「実取得行基準」の1行あたり時間を併記(チャンクが使用行数より大きい無駄が見える)。件名・氏名・アドレスは出さない。読み取りのみ・キャッシュは作らない。`--stores`未指定なら全ストアを順に試して該当月にメールのある最初のストアを使い、0件なら`--from`の指定を案内。
+	**2. `--probe-speed`(新規)**: 同一フォルダ・同一期間の先頭K行(`--probe-limit`、既定100)を、最小列(EntryID, Subject, ReceivedTime)/全列(11列)× チャンク(50, 100, 500)、さらに最小列に1列ずつ足して(chunk=100)測り、準備時間・取得時間・実取得行数/使用行数・1行あたりミリ秒・K行を得る総時間を表示する。1列足したときの増加が閾値(5msかつ基準の50%以上)を超えた列を「遅い列の候補」として表示し、全列でK行を得る総時間が最短のチャンクを`--table-chunk`の推奨として示す。実験が個別に失敗しても続行する(エラー種別のみ表示)。結果の見方も出力。読み取りのみ、件名等は出さない、キャッシュは作らない。
+	**3. `--table-chunk N`(新規、既定500、10〜5000)**: 本走査と`--probe-table`のTable方式の`GetArray`1回あたりの行数。
+	**差分確認での修正**: ①ストア選択の「該当月にメールがあるか」の確認を1行から50行(チャンク50)に広げ、判定を「メールが1件以上」にした(先頭が会議出席依頼などメール以外でもメールのあるストアをスキップしない)。 ②`--probe-speed`の推奨チャンクを「K行を得る総時間」ではなく、全列の「1行あたり時間(実取得行基準)」が最小のチャンクにした(K<チャンクだと大きいチャンクが必ず不利になり誤推奨するため)。測定行数Kの既定を500(`--probe-limit`で変更、最大5000)にし、候補チャンクに1000・2000を追加。 ③各条件を2回測って速い方を採用。`--probe-table`のhelpを「Table先頭N行＋同EntryIDのItemで比較」に更新し、送信済みフォルダではTableの日時が`ReceivedTime`/`SentOn`のどちらかで差が出うる旨をhelpと結果の見方に注記。
+	**変更しないこと**: 読み取り専用、件名等をコンソールに出さない、`--open`/`--open-url`の厳密検証、CSV対策、判定の保護などの既存仕様は変更していない。
+
+### 追加・変更関数
+	`compare_probe`(Item比較に作り直し) / `describe_raw_times` / `read_item_probe` / `_probe_month` / `_probe_select` / `_probe_core`(作り直し) / `time_table_fetch` / `summarize_speed` / `_probe_speed_core` / `_chunk_arg` / `scan_folder_table`(`chunk`・実取得行数・生の日時の診断記録)。
+
+### 新規追加：
+	`tools/thread_ledger_scan_20261009_04.py`(旧`_03`は`tools/old/`)
+
+変更ファイル：
+	`tests/test_thread_ledger_scan.py`(読み込み対象が`_04`になる。同一EntryID比較、tz付き/なしの診断表示、会話ID一致/不一致/空、Item取得失敗、速度プローブの列別集計・遅い列の特定・実験の個別失敗、`--table-chunk`のテストを追加) / `CHANGELOG.md`(このエントリの追記のみ)
+
+変更しないこと（宣誓）：
+	`app/`配下の本体・既存の診断スクリプト・`.gitignore`・`json/`の実データ。Outlookのアイテムの変更・移動・削除・既読化は一切しない。コミット・Pushはしていない。
+
+### 動作確認(Linux側)
+	全テスト合格(成功2095・失敗0・エラー0。うち`test_thread_ledger_scan.py`は285件。スキップ109はtkinter無しのGUIテスト、想定内の失敗3は既知の記録)。COM・Table/GetItemFromIDの実挙動は実機未検証(フェイクのみ)。
+	**実機で最初に流すこと**: ①`python tools\thread_ledger_scan_20261009_04.py --probe-table --stores taizo.ochi --skip-stores "オンライン アーカイブ" --from 2024-11 --to 2024-11`(`--stores`は現行メールボックス名のうちアドレスの@の前の部分。日時差が0時間か・会話IDが全件一致か・Itemが取れない件数を確認。±数時間なら`--table-time utc`で再実行) ②`python tools\thread_ledger_scan_20261009_04.py --probe-speed --stores taizo.ochi --skip-stores "オンライン アーカイブ" --from 2024-11 --to 2024-11`(どの列・どのチャンクが遅いか、推奨チャンクを確認) ③推奨に従い`--table-chunk`を付けて全体実行。
+
 ## VERSION 20261009_03（過去スレッド台帳 S1.6: Exchange系ストアの高速化・会話ID統一・レジリエンス）
 
 ### 追加・修正

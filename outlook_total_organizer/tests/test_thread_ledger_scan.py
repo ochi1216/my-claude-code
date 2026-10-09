@@ -2283,7 +2283,7 @@ class TestOptionalImprovements(unittest.TestCase):
         words = ["中" + "井", "梶" + "川", "佐" + "治", "Na" + "kai", "Kaji" + "kawa", "Sa" + "ji", "nexp" + "eria",
                  "dhl" + r"\.com", "trade" + "win"]
         pat = re.compile("|".join(words), re.IGNORECASE)
-        targets = [os.path.join(TOOLS_DIR, f) for f in ("thread_ledger_scan_20261009_03.py",
+        targets = [os.path.join(TOOLS_DIR, f) for f in ("thread_ledger_scan_20261009_04.py",
                    "thread_ledger_theme.example.json", "calibration_subjects.example.txt")] + [os.path.abspath(__file__)]
         for t in targets:
             self.assertIsNone(pat.search(_rd(t)), t)
@@ -3597,42 +3597,98 @@ class TestSchemaMigration(TableBase):
 
 
 class TestProbe(TableBase):
-    def probe_ns(self):
-        items = [mk_item(f"E{i}", SECRET + str(i), dt(4, 1 + i), "Zed", "Owner Taro", cid=f"OLD{i}",
-                         PropertyAccessor=FakePA({T.PR_CONVERSATION_ID_URL: CONV_A})) for i in range(4)]
-        rows = [trow(f"E{i}", SECRET + str(i), dt(4, 1 + i), conv=CONV_A) for i in range(4)]
-        f = FakeFolder("Big", items, table_rows=rows)
-        small = FakeFolder("Small", [mk_item("S1", "s", dt(4, 1))], table_rows=[trow("S1", "s", dt(4, 1))])
-        return FakeNamespace([FakeStore("MB", FakeFolder("root", [], subfolders=[small, f]))]), f
+    SID = "SID-MB"
 
-    def run_probe(self, *extra):
-        ns, f = self.probe_ns()
+    def probe_ns(self, n=4, item_fn=None, conv_table=CONV_A, table_time_fn=None):
+        """Table の n 行と、同じ EntryID の Item を GetItemFromID で引ける名前空間。"""
+        items, rows, by_id = [], [], {}
+        for i in range(n):
+            t = dt(4, 1 + i)
+            it = (item_fn(i, t) if item_fn else
+                  mk_item(f"E{i}", SECRET + str(i), t, "Zed", "Owner Taro", cid=f"OLD{i}",
+                          PropertyAccessor=FakePA({T.PR_CONVERSATION_ID_URL: CONV_A})))
+            if it is not None:
+                by_id[(f"E{i}", self.SID)] = it
+            items.append(mk_item(f"E{i}", "x", t))
+            rows.append(trow(f"E{i}", SECRET + str(i), table_time_fn(t) if table_time_fn else t, conv=conv_table))
+        f = FakeFolder("Big", items, table_rows=rows, table_opts={"fail_any_filter": True} if table_time_fn else None)
+        small = FakeFolder("Small", [mk_item("S1", "s", dt(4, 1))], table_rows=[trow("S1", "s", dt(4, 1))])
+        ns = FakeNamespace([FakeStore("MB", FakeFolder("root", [], subfolders=[small, f]), sid=self.SID)], by_id)
+        return ns, f
+
+    def run_probe(self, *extra, ns=None):
+        ns = ns or self.probe_ns()[0]
         return run_main(["--data-dir", self.data, "--output-dir", self.out, "--from", "2024-04", "--to", "2024-04", *extra],
                         fake_com(ns)[0])
 
-    def test_probe_table_compares_both_modes_without_subjects(self):
+    def test_probe_table_compares_same_entry_ids_without_subjects(self):
         code, out = self.run_probe("--probe-table")
         self.assertEqual(code, 0)
         self.assertNotIn(SECRET, out)
         self.assertIn("table:", out)
-        self.assertIn("items:", out)
-        self.assertIn("共通 4件", out)
-        self.assertIn("一致 4", out)
-        self.assertIn("1行あたり", out)
+        self.assertIn("items(GetItemFromID): 取得 4件 / 取れず 0件", out)
+        self.assertIn("同一メールとして比較できた 4件", out)
+        self.assertIn("一致 4 / 不一致 0", out)
+        self.assertIn("最頻 +0時間", out)
+        self.assertIn("使用行基準 1行あたり", out)
+        self.assertIn("形状(行×列)=4×11", out)
         self.assertIn("Big", out)                       # 件数最大のフォルダを選ぶ
+        self.assertIn("結果の見方", out)
         self.assertEqual(self.caches(), [])             # 診断はキャッシュを作らない
 
-    def test_probe_conversation_id_lists_rows(self):
-        code, out = self.run_probe("--probe-conversation-id")
-        self.assertEqual(code, 0)
-        self.assertNotIn(SECRET, out)
+    def test_item_fetch_failure_is_counted(self):
+        ns, _f = self.probe_ns(item_fn=lambda i, t: None if i in (1, 3) else mk_item(
+            f"E{i}", "s", t, cid="o", PropertyAccessor=FakePA({T.PR_CONVERSATION_ID_URL: CONV_A})))
+        code, out = self.run_probe("--probe-table", ns=ns)
+        self.assertIn("取得 2件 / 取れず 2件", out)
+        self.assertIn("Itemが取れなかった 2件", out)
+        self.assertNotIn(SECRET_ERR, out)
+
+    def test_conversation_id_match_mismatch_and_empty(self):
+        other = bytes(range(101, 117))
+
+        def item_fn(i, t):
+            if i == 0:
+                return mk_item("E0", "s", t, cid="x", PropertyAccessor=FakePA({T.PR_CONVERSATION_ID_URL: CONV_A}))      # 一致
+            if i == 1:
+                return mk_item("E1", "s", t, cid="x", PropertyAccessor=FakePA({T.PR_CONVERSATION_ID_URL: other}))       # 不一致
+            return mk_item(f"E{i}", "s", t, cid="x")                                                                       # Item側が空
+        ns, _f = self.probe_ns(n=3, item_fn=item_fn)
+        code, out = self.run_probe("--probe-conversation-id", ns=ns)
+        self.assertIn("一致 1 / 不一致 1 / 空(Item) 1 / 空(Table) 0", out)
         self.assertIn("#1:", out)
         self.assertIn("PRどうし=一致", out)
-        self.assertIn("ConversationID対PR=不一致", out)
+        self.assertIn("PRどうし=不一致/空", out)
+        self.assertNotIn(SECRET, out)
+        ns2, _f = self.probe_ns(n=2, conv_table=None)
+        code, out = self.run_probe("--probe-table", ns=ns2)
+        self.assertIn("空(Table) 2", out)
+
+    def test_time_type_diagnosis_tz_aware_and_naive(self):
+        from datetime import timedelta
+        with tokyo_tz():
+            # tz付き(UTC)。Itemの受信日時は +9h（ローカル）。auto ならローカルに直して差0
+            ns, _f = self.probe_ns(table_time_fn=lambda t: (t - timedelta(hours=9)).replace(tzinfo=UTC))
+            code, out = self.run_probe("--probe-table", ns=ns)
+            self.assertIn("tz付き 4 / tzなし 0 / utcoffset: +00:00=4", out)
+            self.assertIn("例: 2024-04-01T00:", out)
+            self.assertIn("最頻 +0時間", out)
+            self.assertNotIn("UTC疑い", out)
+            # tzなし。UTC値がそのまま入っている環境: 差 -9 -> UTC疑い。--table-time utc で解消
+            ns2, _f = self.probe_ns(table_time_fn=lambda t: t - timedelta(hours=9))
+            code, out = self.run_probe("--probe-table", ns=ns2)
+            self.assertIn("tz付き 0 / tzなし 4", out)
+            self.assertIn("-9時間", out)
+            self.assertIn("UTC疑い", out)
+            self.assertIn("--table-time utc", out)
+            code, out = self.run_probe("--probe-table", "--table-time", "utc", ns=ns2)
+            self.assertIn("最頻 +0時間", out)
+            self.assertNotIn("UTC疑い", out)
 
     def test_probe_limit_folder_filter_and_errors(self):
         code, out = self.run_probe("--probe-table", "--probe-limit", "2")
-        self.assertIn("Items 2件 / Table 2件", out)
+        self.assertIn("取得 2件 / 取れず 0件", out)
+        self.assertIn("Table 2行", out)
         code, out = self.run_probe("--probe-table", "--probe-folder", "small")
         self.assertIn("Small", out)
         code, out = self.run_probe("--probe-table", "--probe-folder", "nothing-matches")
@@ -3650,20 +3706,147 @@ class TestProbe(TableBase):
         self.assertIn("table: 利用できません", out)
         self.assertNotIn(SECRET_ERR, out)
 
-    def test_compare_probe_and_conv_relation(self):
-        a = [{"e": "1", "c": "AA"}, {"e": "2", "c": ""}, {"e": "3", "c": "BB"}]
-        b = [{"e": "1", "c": "AA"}, {"e": "2", "c": "CC"}, {"e": "3", "c": "DD"}, {"e": "4", "c": "EE"}]
-        r = T.compare_probe(a, b)
-        self.assertEqual((r["common"], r["only_items"], r["only_table"]), (3, 0, 1))
-        self.assertEqual((r["conv_match"], r["conv_mismatch"], r["conv_empty_items"]), (1, 1, 1))
+    def test_compare_probe_unit(self):
+        table = [{"e": "1", "c": "AA", "t": "2024-04-01T01:00:00"}, {"e": "2", "c": "", "t": "2024-04-02T01:00:00"},
+                 {"e": "3", "c": "BB", "t": "2024-04-03T01:00:00"}, {"e": "4", "c": "EE", "t": "2024-04-04T01:00:00"}]
+        items = {"1": {"c": "AA", "c2": "aa", "t": "2024-04-01T10:00:00"}, "2": {"c": "CC", "c2": "zz", "t": "2024-04-02T10:00:00"},
+                 "3": {"c": "", "c2": "", "t": "2024-04-03T10:00:00"}}
+        r = T.compare_probe(table, items)
+        self.assertEqual((r["n_table"], r["n_items_ok"], r["n_items_fail"]), (4, 3, 1))
+        self.assertEqual((r["conv_match"], r["conv_mismatch"], r["conv_empty_item"], r["conv_empty_table"]), (1, 0, 1, 1))
+        self.assertEqual((r["c2_same"], r["c2_diff"], r["c2_na"]), (1, 1, 1))
+        self.assertEqual((r["time_diff_mode"], r["time_diff_n"], r["utc_suspect"]), (-9, 3, True))
+        self.assertEqual(r["time_diff_counts"], {-9: 3})
+        r0 = T.compare_probe(table[:1], {"1": {"c": "AA", "c2": "", "t": "2024-04-01T01:00:00"}})
+        self.assertEqual((r0["time_diff_mode"], r0["utc_suspect"]), (0, False))
+        far = T.compare_probe(table[:1], {"1": {"c": "", "c2": "", "t": "2024-05-01T01:00:00"}})
+        self.assertFalse(far["utc_suspect"])                                  # 差が大きすぎる（数時間でない）
+        self.assertIsNone(T.compare_probe([], {})["time_diff_mode"])
         self.assertEqual(T.conv_relation("abcd", "ABCD"), "同一")
         self.assertEqual(T.conv_relation("abcdef", "ABCD"), "先頭一致")
         self.assertEqual(T.conv_relation("zz", "ABCD"), "不一致")
         self.assertEqual(T.conv_relation("", "ABCD"), "比較不可")
 
+    def test_describe_raw_times(self):
+        from datetime import timedelta, timezone
+        jst = timezone(timedelta(hours=9))
+        d = T.describe_raw_times([("a", datetime(2024, 4, 1, tzinfo=UTC), None), ("b", None, datetime(2024, 4, 2, tzinfo=jst)),
+                                  ("c", datetime(2024, 4, 3), None), ("d", None, None), ("e", "x", 5)])
+        self.assertEqual((d["aware"], d["naive"]), (2, 1))
+        self.assertEqual(d["offsets"], {"+00:00": 1, "+09:00": 1})
+        self.assertEqual(len(d["samples"]), 3)
+
+    def test_read_item_probe(self):
+        ns = FakeNamespace([], {("E", "S" * 20): mk_item("E", "s", dt(4, 1), cid="OLD", PropertyAccessor=FakePA({T.PR_CONVERSATION_ID_URL: CONV_A}))})
+        got = T.read_item_probe(ns, "E", "S" * 20)
+        self.assertEqual(got, {"t": "2024-04-01T09:00:00", "c": CONV_A_HEX, "c2": "OLD"})
+        self.assertIsNone(T.read_item_probe(ns, "missing", "S" * 20))
+
     def test_probe_does_not_need_theme(self):
         code, out = self.run_probe("--probe-table")
         self.assertEqual(code, 0)
+
+
+class TestProbeSpeed(TableBase):
+    def ns(self, n=8):
+        rows = [trow(f"E{i}", SECRET + str(i), dt(4, 1 + i), conv=CONV_A, cc="c", to="t") for i in range(n)]
+        f = FakeFolder("Big", [mk_item("x", "s", dt(4, 1))], table_rows=rows)
+        return FakeNamespace([FakeStore("MB", FakeFolder("root", [], subfolders=[f]), sid="SID-MB")]), f
+
+    def probe(self, ns, *extra):
+        return run_main(["--data-dir", self.data, "--output-dir", self.out, "--from", "2024-04", "--probe-speed", *extra],
+                        fake_com(ns)[0])
+
+    def test_runs_all_experiments_without_subjects_or_cache(self):
+        ns, f = self.ns()
+        code, out = self.probe(ns, "--probe-limit", "5")
+        self.assertEqual(code, 0)
+        self.assertNotIn(SECRET, out)
+        for chunk in (50, 100, 500, 1000, 2000):
+            self.assertIn(f"最小列(3)", out)
+            self.assertIn(f"chunk={chunk}", out)
+        self.assertIn("全列(11)", out)
+        for key in ("sent", "sender", "smtp", "semail", "to", "cc", "conv", "cls"):
+            self.assertIn(f"+{key}", out)
+        self.assertIn("結果の見方", out)
+        self.assertIn("--table-chunk", out)
+        self.assertEqual(self.caches(), [])
+        self.assertEqual(f._items.filters, [])                               # アイテムは開かない
+
+    def test_time_table_fetch_counts_rows_by_chunk(self):
+        ns, f = self.ns(8)
+        r = T.time_table_fetch(f, datetime(2024, 4, 1), datetime(2024, 5, 1), T.SPEED_BASE, 3, 5)
+        self.assertEqual((r["fetched"], r["used"], r["filter"]), (6, 5, "or"))      # チャンク3で2回 = 6行取得、5行使用
+        r2 = T.time_table_fetch(f, datetime(2024, 4, 1), datetime(2024, 5, 1), [k for k, _n in T.TABLE_COLUMNS], 500, 5)
+        self.assertEqual((r2["fetched"], r2["used"]), (8, 5))                        # 500行チャンクでも実際にある8行まで
+        self.assertGreaterEqual(r["setup"], 0)
+
+    def test_slow_column_is_identified(self):
+        import unittest.mock as mock
+        ns, _f = self.ns()
+
+        def fake_fetch(folder, s, e, keys, chunk, k):
+            per_row = 0.001 + (0.060 if "to" in keys else 0) + (0.004 if "cc" in keys else 0)
+            return {"setup": 0.01, "fetch": per_row * k, "fetched": k, "used": k, "filter": "or"}
+        with mock.patch.object(T, "time_table_fetch", fake_fetch):
+            code, out = self.probe(ns)
+        self.assertIn("遅い列の候補: to(+60ms/行)", out)
+        self.assertNotIn("cc(+", out)                                               # +4ms は閾値未満
+        self.assertEqual(T.summarize_speed(10.0, 12.0), (2.0, False))
+        self.assertEqual(T.summarize_speed(10.0, 40.0)[1], True)
+        self.assertEqual(T.summarize_speed(100.0, 140.0)[1], False)                 # 基準が大きいときは比率も必要
+
+    def test_errors_in_an_experiment_do_not_stop_the_probe(self):
+        import unittest.mock as mock
+        ns, _f = self.ns()
+        calls = {"n": 0}
+        real = T.time_table_fetch
+
+        def flaky(folder, s, e, keys, chunk, k):
+            calls["n"] += 1
+            if calls["n"] == 3:
+                raise FakeComError(SECRET_ERR)
+            return real(folder, s, e, keys, chunk, k)
+        with mock.patch.object(T, "time_table_fetch", flaky):
+            code, out = self.probe(ns)
+        self.assertEqual(code, 0)
+        self.assertIn("エラー FakeComError", out)
+        self.assertNotIn(SECRET_ERR, out)
+        self.assertIn("結果の見方", out)
+
+    def test_zero_rows_and_theme_not_required(self):
+        ns, _f = self.ns()
+        code, out = run_main(["--data-dir", self.data, "--output-dir", self.out, "--probe-speed"], fake_com(ns)[0])
+        self.assertEqual(code, 2)
+        self.assertIn("0件でした。--from YYYY-MM を指定してください", out)
+
+
+class TestTableChunkOption(TableBase):
+    def test_table_chunk_changes_getarray_size(self):
+        f = FakeFolder("F", table_rows=[trow(f"R{i}", "s", dt(4, 1 + i % 25)) for i in range(25)])
+        code, out = run_main(self.argv_t("--table-chunk", "10"), fake_com(self.one_store(f))[0])
+        self.assertEqual(code, 0)
+        self.assertEqual(f.array_calls, 3)                 # 10+10+5 行
+        self.assertEqual(len(self.caches()[0]["records"]), 25)
+        g = FakeFolder("F", table_rows=self.mails_for(7))
+        run_main(self.argv_t("--table-chunk", "500", "--rescan"), fake_com(self.one_store(g))[0])
+        self.assertEqual(g.array_calls, 1)
+
+    def test_default_and_validation(self):
+        self.assertEqual(T.parse_args([]).table_chunk, 0)
+        self.assertEqual(T.parse_args(["--table-chunk", "100"]).table_chunk, 100)
+        for bad in ("5", "6000", "abc"):
+            with contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    T.parse_args(["--table-chunk", bad])
+
+    def test_probe_table_uses_table_chunk(self):
+        ns, f = TestProbe.probe_ns(TestProbe("test_probe_does_not_need_theme"), n=25)
+        code, out = run_main(["--data-dir", self.data, "--output-dir", self.out, "--from", "2024-04", "--probe-table",
+                              "--table-chunk", "10", "--probe-limit", "15"], fake_com(ns)[0])
+        self.assertIn("チャンク 10", out)
+        self.assertIn("実取得 20行基準", out)
+
 
 
 class TestRegressionKeepsReadOnly(TableBase):
@@ -3760,16 +3943,16 @@ class TestTableTimezone(TableBase):
         self.assertEqual(self.caches()[0]["records"][0]["t"], "2024-04-01T01:00:00")
 
     def test_compare_probe_time_difference_and_warning(self):
-        a = [{"e": str(i), "c": "X", "t": "2024-04-01T10:00:00"} for i in range(5)]
-        b = [{"e": str(i), "c": "X", "t": "2024-04-01T01:00:00"} for i in range(4)] + [{"e": "4", "c": "X", "t": "2024-04-01T10:00:00"}]
-        r = T.compare_probe(a, b)
+        table = [{"e": str(i), "c": "X", "t": "2024-04-01T01:00:00"} for i in range(4)] + [{"e": "4", "c": "X", "t": "2024-04-01T10:00:00"}]
+        items = {str(i): {"c": "X", "c2": "", "t": "2024-04-01T10:00:00"} for i in range(5)}
+        r = T.compare_probe(table, items)
         self.assertEqual((r["time_diff_mode"], r["time_diff_n"], r["utc_suspect"]), (-9, 5, True))
         self.assertEqual(r["time_diff_counts"], {-9: 4, 0: 1})
-        r0 = T.compare_probe(a, a)
+        r0 = T.compare_probe(table[4:], {"4": items["4"]})
         self.assertEqual((r0["time_diff_mode"], r0["utc_suspect"]), (0, False))
-        far = [{"e": "0", "c": "", "t": "2024-05-01T10:00:00"}]
-        self.assertFalse(T.compare_probe(a[:1], far)["utc_suspect"])            # 差が大きすぎる（数時間でない）ときは疑わない
-        self.assertIsNone(T.compare_probe([], [])["time_diff_mode"])
+        far = T.compare_probe([{"e": "0", "c": "", "t": "2024-05-01T10:00:00"}], {"0": items["0"]})
+        self.assertFalse(far["utc_suspect"])            # 差が大きすぎる（数時間でない）ときは疑わない
+        self.assertIsNone(T.compare_probe([], {})["time_diff_mode"])
 
 
 class TestConnectionErrors(TableBase):
@@ -3925,7 +4108,8 @@ class TestProbeDefaults(TableBase):
         full = FakeFolder("Full", full_items, table_rows=[trow(f"E{i}", "s", dt(4, 1 + i), conv=CONV_A) for i in range(3)])
         a = FakeStore("StoreA", FakeFolder("root", [], subfolders=[full if first_has_mail else empty]), sid="SA")
         b = FakeStore("StoreB", FakeFolder("root", [], subfolders=[empty if first_has_mail else full]), sid="SB")
-        return FakeNamespace([a, b])
+        sid = "SA" if first_has_mail else "SB"
+        return FakeNamespace([a, b], {(it.EntryID, sid): it for it in full_items})
 
     def probe(self, ns, *extra):
         return run_main(["--data-dir", self.data, "--output-dir", self.out, *extra], fake_com(ns)[0])
@@ -3951,7 +4135,7 @@ class TestProbeDefaults(TableBase):
         code, out = self.probe(self.two_stores(True), "--probe-table", "--from", "2024-04")
         self.assertIn("結果の見方", out)
         self.assertIn("形状(行×列)=3×", out)
-        self.assertIn("日時差", out)
+        self.assertIn("受信日時差", out)
         self.assertNotIn("UTC疑い", out)
         # Table が -9 時間ずれて返る（UTC）環境を再現: 行の時刻を 9 時間引く
         ns = self.two_stores(True)
@@ -4100,6 +4284,97 @@ class TestAmbiguousDispatchError(TableBase):
         self.assertNotIn("Items方式に切り替えます", out)
         self.assertIn("失敗フォルダ 1個", out)
         self.assertEqual(f._items.filters, [])
+
+
+
+class TestProbeReviewFixes(TableBase):
+    def ns_first_row_non_mail(self):
+        # 対象月の先頭の行が会議出席依頼（メール以外）。メールはその後ろにある
+        rows = [trow("M0", "x", dt(4, 1), cls="IPM.Schedule.Meeting.Request"), trow("M1", "x", dt(4, 2), cls="IPM.Appointment")] + \
+               [trow(f"E{i}", "s", dt(4, 3 + i), conv=CONV_A) for i in range(3)]
+        items = {(f"E{i}", "SB"): mk_item(f"E{i}", "s", dt(4, 3 + i), cid="o",
+                                         PropertyAccessor=FakePA({T.PR_CONVERSATION_ID_URL: CONV_A})) for i in range(3)}
+        empty = FakeFolder("E", [mk_item("X", "s", datetime(2023, 1, 1))], table_rows=[trow("X", "s", datetime(2023, 1, 1))])
+        full = FakeFolder("Full", [mk_item("x", "s", dt(4, 1))], table_rows=rows)
+        a = FakeStore("StoreA", FakeFolder("root", [], subfolders=[empty]), sid="SA")
+        b = FakeStore("StoreB", FakeFolder("root", [], subfolders=[full]), sid="SB")
+        return FakeNamespace([a, b], items)
+
+    def test_store_with_non_mail_first_rows_is_not_skipped(self):
+        code, out = run_main(["--data-dir", self.data, "--output-dir", self.out, "--from", "2024-04", "--probe-table"],
+                             fake_com(self.ns_first_row_non_mail())[0])
+        self.assertEqual(code, 0)
+        self.assertIn("StoreA: 2024-04 に該当メールなし", out)       # 空のストアはスキップ
+        self.assertNotIn("StoreB: 2024-04 に該当メールなし", out)    # 先頭がメール以外でもメールのあるストアはスキップしない
+        self.assertIn("ストア: StoreB", out)
+        self.assertIn("同一メールとして比較できた 3件", out)
+
+    def test_selection_check_uses_small_chunk_and_up_to_50_rows(self):
+        import unittest.mock as mock
+        seen = []
+        real = T.scan_folder_table
+
+        def spy(folder, s_, e_, state, **kw):
+            seen.append(kw.get("max_rows"))
+            seen.append(kw.get("chunk"))
+            return real(folder, s_, e_, state, **kw)
+        with mock.patch.object(T, "scan_folder_table", spy):
+            run_main(["--data-dir", self.data, "--output-dir", self.out, "--from", "2024-04", "--probe-table"],
+                     fake_com(self.ns_first_row_non_mail())[0])
+        self.assertEqual(seen[:2], [50, 50])
+
+    def test_recommended_chunk_is_the_one_with_min_per_row_time(self):
+        import unittest.mock as mock
+        rows = [trow(f"E{i}", "s", dt(4, 1 + i % 25)) for i in range(30)]
+        f = FakeFolder("Big", [mk_item("x", "s", dt(4, 1))], table_rows=rows)
+        ns = FakeNamespace([FakeStore("MB", FakeFolder("root", [], subfolders=[f]), sid="SID-MB")])
+        per_row = {50: 0.003, 100: 0.002, 500: 0.001, 1000: 0.0015, 2000: 0.004}      # 秒/行
+        seen_k = []
+
+        def fake_fetch(folder, s_, e_, keys, chunk, k):
+            seen_k.append(k)
+            fetched = max(chunk, k)             # K(500)<チャンク(1000,2000)なら、チャンク分だけ取得する
+            return {"setup": 0.01, "fetch": per_row[chunk] * fetched, "fetched": fetched, "used": k, "filter": "or"}
+        with mock.patch.object(T, "time_table_fetch", fake_fetch):
+            code, out = run_main(["--data-dir", self.data, "--output-dir", self.out, "--from", "2024-04", "--probe-speed"],
+                                 fake_com(ns)[0])
+        self.assertEqual(code, 0)
+        self.assertIn("--table-chunk 500", out)                    # 総時間（K行を得る時間）ではなく1行あたり時間が最小のチャンク
+        self.assertIn("1.0ms/行", out)
+        self.assertEqual(set(seen_k), {500})                       # 既定 K=500
+        self.assertEqual(T.SPEED_CHUNKS, (50, 100, 500, 1000, 2000))
+        with mock.patch.object(T, "time_table_fetch", fake_fetch):
+            run_main(["--data-dir", self.data, "--output-dir", self.out, "--from", "2024-04", "--probe-speed", "--probe-limit", "800"],
+                     fake_com(ns)[0])
+        self.assertIn(800, seen_k)
+
+    def test_each_condition_is_measured_twice_and_the_faster_is_used(self):
+        import unittest.mock as mock
+        ns, _f = TestProbeSpeed.ns(TestProbeSpeed("test_zero_rows_and_theme_not_required"))
+        calls = []
+
+        def fake_fetch(folder, s_, e_, keys, chunk, k):
+            calls.append((len(keys), chunk))
+            n = calls.count((len(keys), chunk))
+            return {"setup": 0.0, "fetch": 0.5 if n == 1 else 0.05, "fetched": 100, "used": 100, "filter": "or"}
+        with mock.patch.object(T, "time_table_fetch", fake_fetch):
+            code, out = run_main(["--data-dir", self.data, "--output-dir", self.out, "--from", "2024-04", "--probe-speed"],
+                                 fake_com(ns)[0])
+        self.assertEqual(code, 0)
+        self.assertEqual(calls.count((11, 500)), 2)
+        self.assertIn("1行あたり    0.5ms", out)                   # 0.05秒/100行 = 0.5ms（遅い方の5msではない）
+
+    def test_help_and_notes(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            with self.assertRaises(SystemExit):
+                T.parse_args(["--help"])
+        text = "".join(buf.getvalue().split())          # ヘルプは折り返されるので空白を除いて照合する
+        self.assertIn("同じEntryIDのItem", text)
+        self.assertIn("送信済みフォルダ", text)
+        code, out = run_main(["--data-dir", self.data, "--output-dir", self.out, "--from", "2024-04", "--probe-table"],
+                             fake_com(self.ns_first_row_non_mail())[0])
+        self.assertIn("送信済みフォルダでは", out)
 
 
 
