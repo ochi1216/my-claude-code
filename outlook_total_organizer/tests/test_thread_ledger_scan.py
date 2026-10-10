@@ -2468,7 +2468,7 @@ class TestOptionalImprovements(unittest.TestCase):
         words = ["中" + "井", "梶" + "川", "佐" + "治", "Na" + "kai", "Kaji" + "kawa", "Sa" + "ji", "nexp" + "eria",
                  "dhl" + r"\.com", "trade" + "win"]
         pat = re.compile("|".join(words), re.IGNORECASE)
-        targets = [os.path.join(TOOLS_DIR, f) for f in ("thread_ledger_scan_20261010_05.py",
+        targets = [os.path.join(TOOLS_DIR, f) for f in ("thread_ledger_scan_20261010_06.py",
                    "thread_ledger_theme.example.json", "calibration_subjects.example.txt")] + [os.path.abspath(__file__)]
         for t in targets:
             self.assertIsNone(pat.search(_rd(t)), t)
@@ -4561,6 +4561,163 @@ class TestProbeReviewFixes(TableBase):
                              fake_com(self.ns_first_row_non_mail())[0])
         self.assertIn("送信済みフォルダでは", out)
 
+
+
+class _NoStoreList:
+    """ストア列挙が呼ばれたら失敗するフェイク（--skip-scan は走査用の接続をしない）"""
+    stores = []
+
+    @property
+    def Count(self):
+        raise AssertionError("ストア列挙が呼ばれた")
+
+    def Item(self, i):
+        raise AssertionError("ストア列挙が呼ばれた")
+
+
+class TestSkipScan(LedgerFlowBase):
+    SCAN_FUNCS = ("run_scan", "_scan_core", "scan_folder_items", "scan_folder_table", "scan_folder",
+                  "enumerate_mail_folders", "open_table")
+
+    def guarded_namespace(self):
+        ns = Stage2Helper.namespace()
+        ns.Stores = _NoStoreList()
+
+        def no_folder(*a, **k):
+            raise AssertionError("フォルダ列挙/取得が呼ばれた")
+        ns.GetFolderFromID = no_folder
+        ns.GetStoreFromID = no_folder
+        return ns
+
+    def forbid_scan(self):
+        saved = {n: getattr(T, n) for n in self.SCAN_FUNCS}
+
+        def boom(*a, **k):
+            raise AssertionError("走査関数が呼ばれた")
+        for n in self.SCAN_FUNCS:
+            setattr(T, n, boom)
+
+        def restore():
+            for n, f in saved.items():
+                setattr(T, n, f)
+        self.addCleanup(restore)
+
+    def stage2_lines(self, out):
+        return [ln for ln in out.splitlines() if "第2段の対象:" in ln]
+
+    def test_skip_scan_never_calls_scan_functions(self):
+        self.scan_first()
+        self.forbid_scan()
+        com, pc = fake_com(self.guarded_namespace())
+        code, out = run_main(self.argv("--skip-scan", "--scan-mode", "table"), com)
+        self.assertEqual(code, 0, out)
+        self.assertIn("--skip-scan", out)
+        self.assertIn("GetItemFromID", out)
+        self.assertEqual(len(_rj(self.paths()["stage2_cache"])), 3)    # 第2段は実行された
+        self.assertEqual((pc.init, pc.uninit), (1, 1))
+        self.assertTrue(glob.glob(os.path.join(self.out, "thread_ledger_*.csv")))
+
+    def test_skip_scan_opens_only_by_id(self):
+        self.scan_first()
+        self.forbid_scan()
+        ns = self.guarded_namespace()
+        code, out = run_main(self.argv("--skip-scan"), fake_com(ns)[0])
+        self.assertEqual(code, 0, out)
+        self.assertEqual(sorted(ns.opened), sorted([("E1", "SID-user@example.com"), ("E2", "SID-user@example.com"),
+                                                    ("P2", "SID-2024_Q2")]))
+
+    def test_no_cache_aborts_nonzero(self):
+        self.forbid_scan()
+        com, pc = fake_com(self.guarded_namespace())
+        code, out = run_main(self.argv("--skip-scan"), com)
+        self.assertNotEqual(code, 0)
+        self.assertIn("走査キャッシュがありません。--skip-scan を外して走査してください", out)
+        self.assertEqual(pc.init, 0)
+
+    def test_exclusive_with_evaluate_only_and_rescan(self):
+        self.scan_first()
+        self.forbid_scan()
+        for other in ("--evaluate-only", "--rescan"):
+            code, out = run_main(self.argv("--skip-scan", other), None)
+            self.assertEqual(code, 2, other)
+            self.assertIn("--skip-scan", out)
+            self.assertIn(other, out)
+            self.assertIn("同時に指定できません", out)
+        code, out = run_main(self.argv("--skip-scan", "--evaluate-only", "--rescan"), None)
+        self.assertEqual(code, 2)
+        self.assertIn("--evaluate-only / --rescan", out)
+
+    def test_no_stage2_is_evaluate_only_equivalent_and_logged(self):
+        self.scan_first()
+        self.forbid_scan()
+        com, pc = fake_com(self.guarded_namespace())
+        code, out = run_main(self.argv("--skip-scan", "--no-stage2"), com)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(pc.init, 0)                      # COMを使わない
+        self.assertIn("--evaluate-only 相当", out)
+        self.assertTrue(glob.glob(os.path.join(self.out, "thread_ledger_*.csv")))
+
+    def test_stage2_targets_and_estimate_same_as_normal_run(self):
+        self.scan_first()
+        _, normal = run_main(self.argv("--stage2-max", "1"), fake_com(Stage2Helper.namespace())[0])
+        self.forbid_scan()
+        code, skip = run_main(self.argv("--skip-scan", "--stage2-max", "1"), fake_com(self.guarded_namespace())[0])
+        self.assertEqual(code, 3)                                      # 既存の --stage2-max ガードがそのまま効く
+        self.assertTrue(self.stage2_lines(normal))
+        self.assertEqual(self.stage2_lines(normal), self.stage2_lines(skip))
+        self.assertIn("1通0.8秒", skip)
+        self.assertIn("--stage2-max (1通)", skip)
+        # --yes で上限を超えても実行できる
+        code, out = run_main(self.argv("--skip-scan", "--stage2-max", "1", "--yes"), fake_com(self.guarded_namespace())[0])
+        self.assertEqual(code, 0, out)
+
+    def test_stage2_max_zero_safely_stops_before_opening_mail(self):
+        self.scan_first()
+        self.forbid_scan()
+        ns = self.guarded_namespace()
+        com, pc = fake_com(ns)
+        code, out = run_main(self.argv("--skip-scan", "--stage2-max", "0"), com)
+        self.assertEqual(code, 3)
+        self.assertEqual(ns.opened, [])                    # 見積りだけ表示して何も開かない
+        self.assertEqual(pc.init, 0)
+        self.assertIn("第2段の対象:", out)
+        self.assertIn("対話の確認はありません", out)
+
+    def test_no_subject_or_address_in_console_and_log(self):
+        self.scan_first()
+        self.forbid_scan()
+        code, out = run_main(self.argv("--skip-scan"), fake_com(self.guarded_namespace())[0])
+        self.assertEqual(code, 0, out)
+        logs = glob.glob(os.path.join(self.out, "thread_ledger_scan_*.log"))
+        text = out + "".join(_rd(p) for p in logs)
+        for bad in (SECRET, "pm@example.com", "owner@example.com", "Owner Taro", "Sato Pm", "Tanaka Partner"):
+            self.assertNotIn(bad, text)
+        self.assertEqual(ACCESSED, [])
+
+    def test_reads_caches_even_if_cache_file_numbers_changed(self):
+        self.scan_first()
+        before = sorted(self.caches(), key=lambda c: c.get("folder_path", "") + str(c.get("store")))
+        scan_dir = self.paths()["scan_cache"]
+        for f in glob.glob(os.path.join(scan_dir, "*.json")):
+            d, b = os.path.split(f)
+            os.rename(f, os.path.join(d, "%02d_%s" % (int(b[:2]) + 40, b[3:])))     # ストア番号が変わった状態
+        self.forbid_scan()
+        code, out = run_main(self.argv("--skip-scan", "--no-stage2"), None)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(len(self.caches()), len(before))
+        self.assertNotIn("新規", out)
+        self.assertTrue(glob.glob(os.path.join(self.out, "thread_ledger_*.csv")))
+
+    def test_help_and_docstring_mention_skip_scan(self):
+        self.assertIn("--skip-scan", T.__doc__)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            with self.assertRaises(SystemExit):
+                T.parse_args(["--help"])
+        text = "".join(buf.getvalue().split())
+        self.assertIn("--skip-scan", text)
+        self.assertIn("併用不可", text)
+        self.assertEqual(T.SCRIPT_VERSION, "20261010_06")
 
 
 if __name__ == "__main__":
