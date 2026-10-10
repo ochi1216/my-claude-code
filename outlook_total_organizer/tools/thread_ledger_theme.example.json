@@ -1,5 +1,5 @@
 {
-  "_comment": "過去スレッド台帳 S1 のテーマ例。実名・実アドレスは入れず placeholder にしてある。コピーして json/thread_ledger/themes/trade_import.json に置き、自分用に編集する（実データはGitに入れない）。キーが _ で始まる項目は無視される。氏名の別名(name_aliases)の書き方: ASCII表記(Taro Sato)と日本語表記(佐藤)は別々の別名として両方書く。ASCIIは語の境界で照合する(Ono は Onozuka に当たらない)。日本語は姓だけでも、スペース有り(佐藤 太郎)・無し(佐藤太郎)の表示名に一致する(姓の後ろが4文字までなら一致。後ろが続く別姓には当たりうる)。",
+  "_comment": "過去スレッド台帳 S1 のテーマ例。実名・実アドレスは入れず placeholder にしてある。コピーして json/thread_ledger/themes/trade_import.json に置き、自分用に編集する（実データはGitに入れない）。キーが _ で始まる項目は無視される。anchor_exception_categories: アンカー(anchors)が関与していなくても、ここに列挙したカテゴリ(keywords/patternsのカテゴリ名と一致させる。未知の名前はエラー)のstrongの語が「件名」に当たれば候補にする(B∧Cは必須。本文・添付名では不可)。未指定または空配列なら従来どおり。氏名の別名(name_aliases)の書き方: ASCII表記(Taro Sato)と日本語表記(佐藤)は別々の別名として両方書く。ASCIIは語の境界で照合する(Ono は Onozuka に当たらない)。日本語は姓だけでも、スペース有り(佐藤 太郎)・無し(佐藤太郎)の表示名に一致する(姓の後ろが4文字までなら一致。後ろが続く別姓には当たりうる)。",
   "theme_version": "example_1",
   "owner": {
     "name_aliases": ["Owner Person", "owner.person"],
@@ -46,6 +46,7 @@
       "weak": ["遅延", "delay", "delayed", "urgent", "至急", "差し戻し", "修正", "corrective action", "クレーム", "再発", "不足", "missing", "訂正", "amend"]
     }
   },
+  "anchor_exception_categories": ["該非・輸出管理"],
   "patterns": [
     {"category": "関税・費用", "regex": "\\b\\d{4}\\.\\d{2}(\\.\\d{2,4})?\\b", "strong": false},
     {"category": "物流・配送", "regex": "#\\s?\\d{10}", "strong": true}

@@ -569,6 +569,191 @@ class TestCandidate(unittest.TestCase):
         self.assertEqual((n("candidate"), n("ab"), n("either")), (1, 2, 3))
 
 
+class TestAnchorException(unittest.TestCase):
+    """案②: 候補 = B ∧ C ∧ (A ∨ アンカー例外)。例外は anchor_exception_categories の strong 語が『件名』に当たるときだけ。"""
+    EXC = ["通関"]
+
+    def test_exception_makes_candidate_without_anchor(self):
+        th = make_theme(anchor_exception_categories=self.EXC)
+        _, e = one_thread([rec("E1", "RE: 通関の件", "2024-04-10T09:00:00", "Zed", "Owner Taro")], th)
+        self.assertFalse(e["A"])
+        self.assertTrue(e["anchor_exception"])
+        self.assertTrue(e["candidate"])
+        self.assertEqual(T.failed_conditions(e), [])
+        self.assertIn(T.ANCHOR_EXCEPTION_LABEL, T.cond_text(e))
+
+    def test_exception_marked_in_ledger_row_without_changing_columns(self):
+        th = make_theme(anchor_exception_categories=self.EXC)
+        res, _ = build([cache("S", 1, "\\Inbox", [
+            rec("E1", "通関の件", "2024-04-10T09:00:00", "Zed", "Owner Taro", cid="a"),
+            rec("E2", "通関の件2", "2024-04-10T09:00:01", "Sato Pm", "Owner Taro", cid="b")])], th)
+        rows = T.build_ledger_rows(res["threads"], res["evals"], {}, th)
+        self.assertEqual(len(rows), 2)
+        for r in rows:
+            self.assertEqual(len(r), len(T.LEDGER_COLUMNS))
+        idx = T.LEDGER_COLUMNS.index("条件A/B/C内訳")
+        marked = [r for r in rows if T.ANCHOR_EXCEPTION_LABEL in r[idx]]
+        self.assertEqual(len(marked), 1)
+        self.assertIn("A:×", marked[0][idx])
+        # アンカー有りの行には付かない
+        s = T.summarize_conditions(res["evals"])
+        self.assertEqual((s["candidate"], s["anchor_exception"]), (2, 1))
+
+    def test_exception_is_subject_only_not_body(self):
+        th = make_theme(anchor_exception_categories=self.EXC)
+        recs = [rec("E1", "Hello", "2024-04-10T09:00:00", "Zed", "Owner Taro; Tanaka Partner")]
+        res, _ = build([cache("S", 1, "\\Inbox", recs)], th)
+        m = res["mails"][0]
+        k = T.stage2_key(m["locs"][0]["sid"], m["locs"][0]["eid"])
+        st2 = {k: {"bh": th["dict_hash"], "hits": {"通関": 3}}}
+        res2, _ = build([cache("S", 1, "\\Inbox", recs)], th, st2)
+        e = ev_of(res2)
+        self.assertTrue(e["C"])                # 本文の強い語でCは成立するが…
+        self.assertFalse(e["anchor_exception"])  # 例外は認めない
+        self.assertFalse(e["candidate"])
+        self.assertEqual(T.failed_conditions(e), ["A"])
+
+    def test_exception_not_for_other_category(self):
+        th = make_theme(anchor_exception_categories=self.EXC)
+        # 「物流」カテゴリの strong パターンは例外カテゴリ外
+        _, e = one_thread([rec("E1", "Parcel #1234567890", "2024-04-10T09:00:00", "Zed", "Owner Taro")], th)
+        self.assertTrue(e["C_ii"])
+        self.assertFalse(e["anchor_exception"])
+        self.assertFalse(e["candidate"])
+        # 例外カテゴリでも weak 語は例外にならない
+        th2 = make_theme(anchor_exception_categories=["通関"])
+        _, e2 = one_thread([rec("E1", "hold", "2024-04-10T09:00:00", "Zed", "Owner Taro; Tanaka Partner")], th2)
+        self.assertFalse(e2["anchor_exception"])
+        self.assertFalse(e2["candidate"])
+
+    def test_empty_or_missing_keeps_legacy_behavior(self):
+        for th in (make_theme(), make_theme(anchor_exception_categories=[])):
+            self.assertEqual(th["anchor_exception_categories"], [])
+            _, e = one_thread([rec("E1", "通関", "2024-04-10T09:00:00", "Zed", "Owner Taro")], th)
+            self.assertFalse(e["anchor_exception"])
+            self.assertFalse(e["candidate"])
+            self.assertEqual(T.failed_conditions(e), ["A"])
+
+    def test_b_or_c_missing_still_fails(self):
+        th = make_theme(anchor_exception_categories=self.EXC)
+        _, e = one_thread([rec("E1", "通関", "2024-04-10T09:00:00", "Zed", "Someone")], th)   # B不成立
+        self.assertFalse(e["B"])
+        self.assertFalse(e["candidate"])
+        self.assertEqual(T.failed_conditions(e), ["B"])
+        # C不成立 = 件名に語が無い以上、例外も成立しない
+        _, e2 = one_thread([rec("E1", "Lunch", "2024-04-10T09:00:00", "Zed", "Owner Taro")], th)
+        self.assertFalse(e2["candidate"])
+        self.assertFalse(e2["anchor_exception"])
+        self.assertEqual(T.failed_conditions(e2), ["A", "C"])
+
+    def test_reference_thread_excludes_exception_candidates(self):
+        th = make_theme(anchor_exception_categories=self.EXC)
+        _, e = one_thread([rec("E1", "通関", "2024-04-10T09:00:00", "Zed", "Owner Taro")], th)
+        self.assertFalse(T.is_reference_thread(e))
+        _, e2 = one_thread([rec("E1", "customs delay", "2024-04-10T09:00:00", "Zed", "Owner Taro")], th)
+        self.assertFalse(T.is_reference_thread(e2))   # weak2語でC成立。例外ではない → 参考候補
+
+    def test_check_subjects_follows_new_rule(self):
+        th = make_theme(anchor_exception_categories=self.EXC)
+        res, _ = build([cache("S", 1, "\\Inbox", [
+            rec("E1", "通関 exception thread", "2024-04-10T09:00:00", "Zed", "Owner Taro", cid="a"),
+            rec("E2", "通関 no owner thread", "2024-04-10T09:00:01", "Zed", "Someone", cid="b")])], th)
+        r = T.classify_check_subjects(["通関 exception thread"], res["threads"], res["evals"])[0]
+        self.assertEqual(r["status"], "found")
+        self.assertTrue(r["matches"][0]["anchor_exception"])
+        self.assertTrue(any(T.ANCHOR_EXCEPTION_LABEL in ln for ln in T.format_check_result(1, 1, r)))
+        r2 = T.classify_check_subjects(["通関 no owner thread"], res["threads"], res["evals"])[0]
+        self.assertEqual(r2["status"], "found_not_candidate")
+        self.assertEqual(r2["matches"][0]["failed"], ["B"])
+
+    def test_schema_validation(self):
+        with self.assertRaises(T.ThemeError):
+            make_theme(anchor_exception_categories="通関")            # 配列でない
+        with self.assertRaises(T.ThemeError):
+            make_theme(anchor_exception_categories=[1])               # 文字列でない
+        with self.assertRaises(T.ThemeError):
+            make_theme(anchor_exception_categories=[""])              # 空文字
+        with self.assertRaises(T.ThemeError):
+            make_theme(anchor_exception_categories=["存在しないカテゴリ"])   # 未知カテゴリ名
+        th = make_theme(anchor_exception_categories=["通関", "通関", "物流"])   # patterns のカテゴリも可・重複は除く
+        self.assertEqual(th["anchor_exception_categories"], ["通関", "物流"])
+
+    def test_no_label_when_b_or_c_fails(self):
+        th = make_theme(anchor_exception_categories=self.EXC)
+        res, _ = build([cache("S", 1, "\\Inbox", [
+            rec("E1", "通関 noB", "2024-04-10T09:00:00", "Zed", "Someone", cid="a"),
+            rec("E2", "Lunch noC", "2024-04-10T09:00:01", "Zed", "Owner Taro", cid="b")])], th)
+        for e in res["evals"]:
+            self.assertFalse(e["candidate"])
+            self.assertFalse(e["anchor_exception"])
+            self.assertNotIn(T.ANCHOR_EXCEPTION_LABEL, T.cond_text(e))
+        for q in ("通関 noB", "Lunch noC"):
+            r = T.classify_check_subjects([q], res["threads"], res["evals"])[0]
+            self.assertFalse(r["matches"][0]["anchor_exception"])
+            self.assertFalse(any(T.ANCHOR_EXCEPTION_LABEL in ln or "で候補" in ln for ln in T.format_check_result(1, 1, r)))
+
+    def test_attachment_name_only_does_not_make_exception(self):
+        th = make_theme(anchor_exception_categories=self.EXC)
+        recs = [rec("E1", "Hello", "2024-04-10T09:00:00", "Zed", "Owner Taro; Tanaka Partner")]
+        res, _ = build([cache("S", 1, "\\Inbox", recs)], th)
+        m = res["mails"][0]
+        k = T.stage2_key(m["locs"][0]["sid"], m["locs"][0]["eid"])
+        st2 = {k: {"bh": th["dict_hash"], "hits": {}, "att": ["通関 customs clearance.pdf"]}}
+        res2, _ = build([cache("S", 1, "\\Inbox", recs)], th, st2)
+        e = ev_of(res2)
+        self.assertFalse(e["anchor_exception"])
+        self.assertFalse(e["candidate"])
+
+    def test_anchor_thread_is_not_marked_exception(self):
+        th = make_theme(anchor_exception_categories=self.EXC)
+        _, e = one_thread([rec("E1", "通関", "2024-04-10T09:00:00", "Sato Pm", "Owner Taro")], th)
+        self.assertTrue(e["A"] and e["candidate"])
+        self.assertFalse(e["anchor_exception"])
+        self.assertNotIn(T.ANCHOR_EXCEPTION_LABEL, T.cond_text(e))
+
+    def test_strong_pattern_category_exception(self):
+        th = make_theme(anchor_exception_categories=["物流"])
+        _, e = one_thread([rec("E1", "Parcel #1234567890", "2024-04-10T09:00:00", "Zed", "Owner Taro")], th)
+        self.assertTrue(e["anchor_exception"])
+        self.assertTrue(e["candidate"])
+
+    def test_category_must_have_strong_terms(self):
+        # トラブル語 = weak のみ、関税 = weak パターンのみ、空カテゴリ、dict でない spec
+        kw = {"通関": {"weight": 3, "strong": ["通関"], "weak": []},
+              "トラブル語": {"weight": 2, "strong": [], "weak": ["delay"]},
+              "空": {"weight": 1, "strong": [], "weak": []},
+              "壊れ": "string-spec"}
+        for bad in ("トラブル語", "関税", "空", "壊れ"):
+            with self.assertRaises(T.ThemeError, msg=bad):
+                make_theme(keywords=kw, anchor_exception_categories=[bad])
+        with self.assertRaises(T.ThemeError):
+            make_theme(anchor_exception_categories=[" 通関"])   # 前後空白はエラー
+        self.assertEqual(make_theme(keywords=kw, anchor_exception_categories=["通関"])["anchor_exception_categories"], ["通関"])
+
+    def test_stage2_scope_ab_includes_exception_candidates(self):
+        th = make_theme(anchor_exception_categories=self.EXC)
+        res, _ = build([cache("S", 1, "\\Inbox", [
+            rec("E1", "通関", "2024-04-10T09:00:00", "Zed", "Owner Taro", cid="a"),
+            rec("E2", "Lunch", "2024-04-10T09:00:01", "Zed", "Owner Taro", cid="b")])], th)
+        n = lambda scope: len(T.select_stage2_targets(res["threads"], res["evals"], scope))
+        self.assertEqual((n("ab"), n("candidate"), n("either")), (1, 1, 2))
+
+    def test_dict_hash_and_evaluate_only_unaffected(self):
+        # 例外設定は辞書ハッシュ(第2段の本文ヒットの有効性)を変えない。キャッシュschemaも不変 = 再評価のみで反映できる
+        self.assertEqual(make_theme()["dict_hash"], make_theme(anchor_exception_categories=self.EXC)["dict_hash"])
+        self.assertEqual(T.SCHEMA_VERSION, 2)
+        recs = [rec("E1", "通関", "2024-04-10T09:00:00", "Zed", "Owner Taro")]
+        c = cache("S", 1, "\\Inbox", recs)
+        r_old, _ = build([c], make_theme())
+        r_new, _ = build([c], make_theme(anchor_exception_categories=self.EXC))
+        self.assertFalse(ev_of(r_old)["candidate"])
+        self.assertTrue(ev_of(r_new)["candidate"])
+
+    def test_example_theme_has_exception_key_with_known_category(self):
+        th = T.load_theme(os.path.join(TOOLS_DIR, "thread_ledger_theme.example.json"))
+        self.assertTrue(th["anchor_exception_categories"])
+
+
 # ============================================================
 # スコア
 # ============================================================
@@ -1708,7 +1893,7 @@ class TestStage2AndModes(ComTestBase):
         self.theme_data["owner"] = {"name_aliases": ["Nobody Here"]}
         _wj(self.theme_path, self.theme_data)
         code, out = run_main(self.argv("--evaluate-only"))
-        self.assertIn("候補スレッド(A∧B∧C): 0件", out)
+        self.assertIn("候補スレッド(B∧C∧(A∨アンカー例外)): 0件", out)
 
     def test_check_subjects_command_prints_subjects_only_on_console_and_no_scan(self):
         self.scan_first()
@@ -2283,7 +2468,7 @@ class TestOptionalImprovements(unittest.TestCase):
         words = ["中" + "井", "梶" + "川", "佐" + "治", "Na" + "kai", "Kaji" + "kawa", "Sa" + "ji", "nexp" + "eria",
                  "dhl" + r"\.com", "trade" + "win"]
         pat = re.compile("|".join(words), re.IGNORECASE)
-        targets = [os.path.join(TOOLS_DIR, f) for f in ("thread_ledger_scan_20261009_04.py",
+        targets = [os.path.join(TOOLS_DIR, f) for f in ("thread_ledger_scan_20261010_05.py",
                    "thread_ledger_theme.example.json", "calibration_subjects.example.txt")] + [os.path.abspath(__file__)]
         for t in targets:
             self.assertIsNone(pat.search(_rd(t)), t)

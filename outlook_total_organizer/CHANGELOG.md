@@ -1,5 +1,37 @@
 # CHANGELOG — outlook_total_organizer
 
+## VERSION 20261010_05（過去スレッド台帳 S1.8: アンカー例外ルール（案②）の追加）
+
+### 追加・修正
+	**越智さん承認済みの案②。`tools/thread_ledger_scan_20261010_05.py`を新版とし、旧`_04`は`tools/old/`へ移動(`git mv`、削除なし)。本体`app/`は未変更。**
+	**1. 候補条件の変更**: 「A∧B∧C」→「**B ∧ C ∧ (A ∨ アンカー例外)**」。A=アンカー関与、B=本人がFrom/To/CC、C=輸出入の語(関係者 or キーワード信号)。アンカー例外=件名に『該非・輸出管理』系カテゴリの strong の語が当たること。
+	**2. テーマJSONの新キー `anchor_exception_categories`**(カテゴリ名の配列)。例外を認めるのは、この配列に列挙したカテゴリの strong の語(strong パターン含む)が『件名』に当たった場合のみ(本文・添付名では不可)。未指定または空配列なら従来動作(後方互換)。検証: 配列でない/要素が文字列でない/空文字/keywords・patterns に無い未知のカテゴリ名は`ThemeError`(タイプミスで例外が黙って無効になるのを防ぐため警告でなくエラー)。重複は除く。
+	**3. 出力**: 例外で候補になった行は、台帳の既存列「条件A/B/C内訳」の A の表示に『アンカー例外(件名)』が付く(例: `A:×(アンカー例外(件名)) B:○ ...`)。列構造は変更なし。参考列(アンカー無し)には例外候補を含めない。評価サマリに「うちアンカー例外 N件」を表示。
+	**4. `--check-subjects`**: 不成立の条件の判定を新ルールに追従(例外が成立すればAは不成立扱いにしない)。例外で候補の件名には『アンカー例外(件名)で候補』を表示。
+	**5. キャッシュ**: スキーマ版は2のまま(走査キャッシュ・第2段キャッシュとも互換)。辞書ハッシュも変えない。評価は走査キャッシュから毎回計算するため、テーマJSONを編集して`--evaluate-only`を再実行するだけで反映される(再スキャン不要)。
+	**6. 敵対的レビューの反映**: (a) `anchor_exception`(ラベル・「ℹ️ …で候補」の表示)は「例外の語が件名に当たり、A不成立で、B∧Cが成立=実際に候補になった」ときだけ真。B/C不成立の行には出さない(内部の`exc_hit`は不成立条件の表示用で、B不成立のみなら不成立の条件は従来どおり`B`だけ)。 (b) **既定の`--stage2-scope ab`でも例外候補を第2段の対象に含める**(`select_stage2_targets`を最小変更。件数増は開始前の見積りに出る。candidate/eitherは従来どおり)。 (c) 検証強化: `anchor_exception_categories`に使えるのはstrongの語(または strong パターン)を持つカテゴリのみ。weakのみ・語なし・specがdictでないカテゴリは`ThemeError`。前後の空白付きの名前も未知カテゴリとしてエラー。
+	**既知の制約**: 同じ strong 語が複数カテゴリに重複して登録されている場合、辞書上は先に定義したカテゴリだけが strong を持つ扱いになる。後のカテゴリを`anchor_exception_categories`に指定すると、エラー(安全側)になることがある。現行の example テーマでは発生しない。
+	**変更しないこと**: 読み取り専用、件名等をコンソールに出さない、`--open`/`--open-url`の厳密検証、CSV対策、判定の保護などの既存仕様。
+
+### 追加・変更関数
+	`normalize_theme`(`anchor_exception_categories`の検証) / `evaluate_thread`(`anchor_exception`・候補条件) / `cond_text` / `failed_conditions` / `summarize_conditions` / `is_reference_thread` / `classify_check_subjects` / `format_check_result` / `log_evaluation_summary` / 定数`ANCHOR_EXCEPTION_LABEL`。
+
+### 新規追加：
+	`tools/thread_ledger_scan_20261010_05.py`(旧`_04`は`tools/old/`)
+
+変更ファイル：
+	`tools/thread_ledger_theme.example.json`(`anchor_exception_categories`を追加。プレースホルダのカテゴリ名のみ) / `tests/test_thread_ledger_scan.py`(読み込み対象が`_05`になる。例外が効く/件名のみ(本文・添付名では効かない)/strong patternsカテゴリで効く/Aが成立するスレッドではラベルなし/B・C不成立でラベルが出ない/strong語を持たないカテゴリは検証エラー/ab第2段に例外候補を含む/対象カテゴリ外・weak語は効かない/空配列・未指定で従来動作/B・C未成立なら不成立/参考候補から除外/--check-subjects追従/スキーマ検証/辞書ハッシュ不変のテストを追加) / `CHANGELOG.md`(このエントリの追記のみ)
+
+### 利用者への注意（版更新後）
+	**`--register-protocol`(ledger:プロトコル)が登録するスクリプトのパスは版(ファイル名)に依存する。版を更新したら`python tools\thread_ledger_scan_20261010_05.py --register-protocol`を再実行すること**(旧`_04`のままだと、Excelの件名リンクが`tools/old/`移動後に開けなくなる)。
+	テーマJSONの`anchor_exception_categories`は、自分のテーマ(`json/thread_ledger/themes/*.json`)に手元で追記する(例は`tools/thread_ledger_theme.example.json`)。追記後は`python tools\thread_ledger_scan_20261010_05.py --evaluate-only`で再評価する。
+
+### 追記漏れの補完：`tools/diagnose_search_folders_20261009_01.py`
+	（20261009_01、Outlook S08で追加済み・本エントリで記載を補う）検索フォルダー診断(読み取り専用)。「未(ToMe)」「未(WithMe)」「未(CcMe)」等の検索フォルダーが常に0件になる不具合の切り分け用。各ストアの`GetSearchFolders()`から、名前・親ストア種別・DefaultItemType・Filter(メールアドレスと引用値はマスク)・Scope・SearchSubFolders・IsSynchronous・Items.Count・未読件数・キャッシュモード状態を一覧する。任意の`--verify-restrict`で同条件を範囲フォルダーの`Items.Restrict`でスキャンした件数を出し、「検索フォルダー=0なのにRestrict>0」なら条件は正しく評価が止まっていると判断できる(`--verify-max-folders`/`--verify-timeout`/`--verify-max-items`/`--only-names`/`--show-filter-raw`/`--mask-names`/`--output`)。件名・本文・送信者・宛先アドレスは出力せず、Delete/Move/Save/MarkAsRead等は一切しない。結果は`mail_reports/`に保存。
+
+### 動作確認(Linux側)
+	全テスト合格(成功2112・失敗0・エラー0。うち`test_thread_ledger_scan.py`は302件。スキップ109はtkinter無しのGUIテスト、想定内の失敗3は既知の記録)。COM・Outlook実機は未検証(フェイクのみ)。
+
 ## VERSION 20261009_04（過去スレッド台帳 S1.7: 診断プローブの作り直しと速度の切り分け）
 
 ### 追加・修正
