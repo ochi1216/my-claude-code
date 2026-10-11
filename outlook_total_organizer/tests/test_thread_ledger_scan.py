@@ -2468,7 +2468,7 @@ class TestOptionalImprovements(unittest.TestCase):
         words = ["中" + "井", "梶" + "川", "佐" + "治", "Na" + "kai", "Kaji" + "kawa", "Sa" + "ji", "nexp" + "eria",
                  "dhl" + r"\.com", "trade" + "win"]
         pat = re.compile("|".join(words), re.IGNORECASE)
-        targets = [os.path.join(TOOLS_DIR, f) for f in ("thread_ledger_scan_20261010_06.py",
+        targets = [os.path.join(TOOLS_DIR, f) for f in ("thread_ledger_scan_20261010_07.py",
                    "thread_ledger_theme.example.json", "calibration_subjects.example.txt")] + [os.path.abspath(__file__)]
         for t in targets:
             self.assertIsNone(pat.search(_rd(t)), t)
@@ -4717,7 +4717,929 @@ class TestSkipScan(LedgerFlowBase):
         text = "".join(buf.getvalue().split())
         self.assertIn("--skip-scan", text)
         self.assertIn("併用不可", text)
-        self.assertEqual(T.SCRIPT_VERSION, "20261010_06")
+        self.assertEqual(T.SCRIPT_VERSION, "20261010_07")
+
+
+
+# ============================================================
+# 20261010_07: 保存済みIDが無効なときの予備の解決（EntryIDのみ → 日時＋件名で特定）
+# ============================================================
+class ResolveNS(FakeNamespace):
+    """StoreID 省略(eid のみ)の GetItemFromID に対応したフェイク。呼び出しを記録する。"""
+
+    def __init__(self, stores, by_id=None, eid_only=None):
+        FakeNamespace.__init__(self, stores, by_id)
+        self.eid_only = eid_only or {}
+        self.calls = []
+
+    def GetItemFromID(self, eid, sid=None):
+        self.calls.append((eid, sid))
+        if sid is None:
+            if eid in self.eid_only:
+                return self.eid_only[eid]
+            raise FakeComError(SECRET_ERR)
+        return FakeNamespace.GetItemFromID(self, eid, sid)
+
+
+class Tick:
+    """進めた分だけ進む偽の時計"""
+
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self):
+        return self.t
+
+
+def hexid(n):
+    return ("%02X" % n) * 16
+
+
+MB_SID, PST_SID = "SID-NEW-MB", "SID-NEW-PST"
+
+
+class ResolveBase(LedgerFlowBase):
+    def setUp(self):
+        import unittest.mock as mock
+        LedgerFlowBase.setUp(self)
+        p = mock.patch.object(T, "HEX_ID_RE", re.compile(r".+"))      # フェイクのIDは16進でないので検証を緩める
+        p.start()
+        self.addCleanup(p.stop)
+        self.shown = []
+
+    def light(self, eid, subj, t, sender="", cid=None, **extra):
+        f = {"Class": 43, "EntryID": eid, "Subject": subj, "ReceivedTime": t, "SenderName": sender,
+             "Parent": FakeParentFolder()}
+        if cid:
+            f["PropertyAccessor"] = FakePA({T.PR_CONVERSATION_ID_URL: cid})
+        f.update(extra)
+        return FakeItem(f, display_log=self.shown)
+
+    def world(self, extra_inbox=(), skip=(), eid_only=None, mb_sid=MB_SID):
+        """スキャン時と別のID・別のStoreIDを持つ『現在のOutlook』。メールの中身はスキャン時と同じ。"""
+        items = {
+            "N1": self.light(hexid(1), f"{SECRET} 通関", dt(4, 10), "Sato Pm"),
+            "N2": self.light(hexid(2), f"RE: {SECRET} 通関", dt(4, 11), "Owner Taro"),
+            "N3": self.light(hexid(3), "PST only 通関", dt(4, 20), "Sato Pm"),
+        }
+        decoys = [self.light(hexid(10), "Other topic", dt(4, 11), "Zed"),
+                  self.light(hexid(11), f"RE: {SECRET} 通関", dt(4, 12), "Owner Taro")]      # 同件名だが翌日
+        inbox_items = [v for k, v in items.items() if k in ("N1", "N2") and k not in skip] + decoys + list(extra_inbox)
+        inbox = FakeFolder("Inbox", inbox_items)
+        mb = FakeStore("user@example.com", inbox_root(inbox), sid=mb_sid)
+        pst = FakeStore("2024_Q2", FakeFolder("root", [] if "N3" in skip else [items["N3"]]), sid=PST_SID,
+                        path="C:\\x\\2024_Q2.pst")
+        by_id = {}
+        for k, it in items.items():
+            by_id[(it.EntryID, PST_SID if k == "N3" else mb_sid)] = it
+        ns = ResolveNS([mb, pst], by_id, eid_only)
+        self.items = items
+        return ns
+
+    def thread_id(self):
+        self.scan_first()
+        run_main(self.argv("--evaluate-only"))
+        rows = [r for r in _rdict(self.latest("thread_ledger_theme_", ".csv")) if r["最新メールEntryID"] == "E2"]
+        self.assertEqual(len(rows), 1)
+        return rows[0]["thread_id"]
+
+    def resolved_file(self):
+        return os.path.join(self.data, "resolved_ids_theme.json")
+
+    def all_text(self, out):
+        return out + "".join(_rd(p) for p in glob.glob(os.path.join(self.out, "*.log")))
+
+    def assert_no_secrets(self, text):
+        for bad in (SECRET, "pm@example.com", "owner@example.com", "Owner Taro", "Sato Pm", "Tanaka Partner"):
+            self.assertNotIn(bad, text)
+
+
+class TestResolveOpen(ResolveBase):
+    def test_eid_only_succeeds_without_enumerating_stores(self):
+        tid = self.thread_id()
+        ns = ResolveNS([], {}, eid_only={"E2": self.light("E2", "RE: x", dt(4, 11), "Owner Taro")})
+        ns.Stores = _NoStoreList()                                    # ストア列挙が呼ばれたら失敗
+        ex = FakeExplorer()
+        code, out = run_main(self.argv("--open", tid), fake_com(ns, ex)[0])
+        self.assertEqual(code, 0, out)
+        self.assertEqual(ns.calls, [("E2", "SID-user@example.com"), ("E2", None)])     # 従来のID → StoreID省略
+        self.assertEqual(len(ex.queries), 1)
+        self.assertIn("StoreIDを省略", out)
+        rec = _rj(self.resolved_file())["ids"][T.mail_resolve_key("SID-user@example.com", "E2")]
+        self.assertEqual(rec, {"eid": "E2", "sid": ""})
+        self.assertEqual(ACCESSED, [])
+
+    def test_search_by_time_and_subject_finds_mail_and_records_ids(self):
+        tid = self.thread_id()
+        cache_before = {f: _rb(f) for f in glob.glob(os.path.join(self.paths()["scan_cache"], "*.json"))}
+        ns = self.world()
+        ex = FakeExplorer()
+        code, out = run_main(self.argv("--open", tid), fake_com(ns, ex)[0])
+        self.assertEqual(code, 0, out)
+        self.assertIn("日時と件名から現在のストアで特定して", out)
+        self.assertEqual(ex.selected, [self.items["N2"]])               # 翌日の同件名・別件名ではなく本物を選択
+        ids = _rj(self.resolved_file())["ids"]
+        self.assertEqual(ids[T.mail_resolve_key("SID-user@example.com", "E2")], {"eid": hexid(2), "sid": MB_SID})
+        self.assertEqual(list(ids), [T.mail_resolve_key("SID-user@example.com", "E2")])     # メール単位のキーのみ（t: は使わない）
+        self.assertEqual(cache_before, {f: _rb(f) for f in cache_before})      # 元の scan_cache は書き換えない
+        self.assert_no_secrets(self.all_text(out))
+        self.assertEqual(ACCESSED, [])
+
+    def test_next_open_tries_recorded_ids_first_without_enumeration(self):
+        tid = self.thread_id()
+        ns = self.world()
+        run_main(self.argv("--open", tid), fake_com(ns, FakeExplorer())[0])
+        ns2 = self.world()
+        ns2.Stores = _NoStoreList()
+        code, out = run_main(self.argv("--open", tid), fake_com(ns2, FakeExplorer())[0])
+        self.assertEqual(code, 0, out)
+        self.assertEqual(ns2.calls[0], (hexid(2), MB_SID))              # 最初に試すのは記録済みID
+        self.assertEqual(len(ns2.calls), 1)
+
+    def test_not_found_fails_with_guidance_and_opens_subject_search(self):
+        tid = self.thread_id()
+        ns = self.world(skip=("N2",))
+        ex = FakeExplorer()
+        code, out = run_main(self.argv("--open", tid), fake_com(ns, ex)[0])
+        self.assertEqual(code, 2)
+        self.assertIn("メールを開けません", out)
+        self.assertIn("特定できませんでした", out)
+        self.assertIn("検索", out)
+        self.assertEqual(len(ex.queries), 1)                            # 件名で検索を絞り込む（Outlook画面側）
+        self.assertEqual(ex.queries[0][1], T.SEARCH_SCOPE_ALL_FOLDERS)
+        self.assertEqual(ex.selected, [])
+        self.assertEqual(self.shown, [])                                # 誤ったメールは開かない
+        self.assertFalse(os.path.exists(self.resolved_file()))
+        self.assert_no_secrets(self.all_text(out))
+        self.assertEqual(ACCESSED, [])
+
+    def test_ambiguous_match_is_not_opened(self):
+        tid = self.thread_id()
+        # 受信日時が±1秒で件名が同じメールが2通（送信者名が空で絞り込めない）
+        dup_a = self.light(hexid(20), f"RE: {SECRET} 通関", dt(4, 11, 9, 0, 1), "")
+        dup_b = self.light(hexid(21), f"RE: {SECRET} 通関", dt(4, 11, 8, 59, 59), "")
+        ns = self.world(extra_inbox=[dup_a, dup_b], skip=("N2",))
+        ex = FakeExplorer()
+        code, out = run_main(self.argv("--open", tid), fake_com(ns, ex)[0])
+        self.assertEqual(code, 2, out)
+        self.assertIn("複数", out)
+        self.assertEqual(self.shown, [])
+        self.assertEqual(ex.selected, [])
+        self.assertFalse(os.path.exists(self.resolved_file()))
+
+    def test_open_url_failure_message_box_has_no_subject(self):
+        import unittest.mock as mock
+        tid = self.thread_id()
+        ns = self.world(skip=("N2",))
+        orig = T.make_paths
+        boxes = []
+        with mock.patch.object(T, "make_paths", lambda d=None, o=None: orig(self.data, self.out)), \
+                mock.patch.object(T, "show_message_box", lambda *a, **k: boxes.append(a)):
+            code, out = run_main(["--open-url", "ledger:" + tid], fake_com(ns, FakeExplorer())[0])
+        self.assertEqual(code, 2)
+        self.assertEqual(len(boxes), 1)
+        self.assertIn("検索", boxes[0][0])                                # 案内は出す
+        self.assert_no_secrets(boxes[0][0])
+        self.assert_no_secrets(self.all_text(out))
+
+    def test_open_survives_corrupt_or_empty_resolved_file(self):
+        tid = self.thread_id()
+        for content in ("", "{broken", "[1,2,3]", '{"schema": 1, "ids": 5}',
+                        '{"schema": 1, "ids": {"t:x": "bad", "m:y": {"eid": 5}}}'):
+            _wr(self.resolved_file(), content)
+            ns = self.world()
+            code, out = run_main(self.argv("--open", tid), fake_com(ns, FakeExplorer())[0])
+            self.assertEqual(code, 0, (content, out))
+            self.assertEqual(_rj(self.resolved_file())["ids"][T.mail_resolve_key("SID-user@example.com", "E2")]["eid"],
+                             hexid(2))   # 正常に書き直される
+
+    def test_open_with_entry_id_uses_eid_only_fallback(self):
+        ns = ResolveNS([], {}, eid_only={"AB" * 10: self.light("AB" * 10, "Topic long subject", dt(4, 1))})
+        ex = FakeExplorer()
+        code, out = run_main(["--entry-id", "AB" * 10, "--store-id", "CD" * 10, "--data-dir", self.data,
+                              "--output-dir", self.out], fake_com(ns, ex)[0])
+        self.assertEqual(code, 0, out)
+        self.assertEqual(ns.calls, [("AB" * 10, "CD" * 10), ("AB" * 10, None)])
+
+    def test_existing_valid_ids_unchanged_and_no_enumeration(self):
+        tid = self.thread_id()
+        item = self.light("E2", "RE: x", dt(4, 11), "Owner Taro")
+        ns = ResolveNS([], {("E2", "SID-user@example.com"): item})
+        ns.Stores = _NoStoreList()
+        code, out = run_main(self.argv("--open", tid), fake_com(ns, FakeExplorer())[0])
+        self.assertEqual(code, 0, out)
+        self.assertEqual(ns.calls, [("E2", "SID-user@example.com")])
+        self.assertFalse(os.path.exists(self.resolved_file()))
+
+
+class TestResolveSafetyMisc(ResolveBase):
+    # --- S1: 台帳とキャッシュで最新メールが食い違っても、別メールを開かない/記録しない ---
+    def add_newer_mail_to_cache(self):
+        for f in glob.glob(os.path.join(self.paths()["scan_cache"], "*.json")):
+            c = _rj(f)
+            if any(r.get("e") == "E2" for r in c["records"]):
+                c["records"].append(rec("E9", "RE: " + SECRET + " 通関", "2024-04-15T09:00:00", "Owner Taro"))
+                _wj(f, c)
+                return
+        self.fail("cache with E2 not found")
+
+    def newer_world(self, with_old):
+        newer = self.light(hexid(9), f"RE: {SECRET} 通関", dt(4, 15), "Owner Taro")
+        ns = self.world(extra_inbox=[newer], skip=() if with_old else ("N2",))
+        ns.by_id[(hexid(9), MB_SID)] = newer
+        return ns, newer
+
+    def test_ledger_older_than_cache_does_not_open_or_record_the_newer_mail(self):
+        tid = self.thread_id()                      # 台帳の最新メールは E2
+        self.add_newer_mail_to_cache()              # その後キャッシュに同スレッドの新着 E9
+        ns, newer = self.newer_world(with_old=False)
+        ex = FakeExplorer()
+        code, out = run_main(self.argv("--open", tid), fake_com(ns, ex)[0])
+        self.assertEqual(code, 2, out)               # E2 は現在のOutlookに無い。E9 を代わりに開いてはいけない
+        self.assertEqual(self.shown, [])
+        self.assertNotIn(newer, ex.selected)
+        self.assertFalse(os.path.exists(self.resolved_file()))
+
+    def test_ledger_older_than_cache_opens_the_same_mail_and_records_its_own_key(self):
+        tid = self.thread_id()
+        self.add_newer_mail_to_cache()
+        ns, newer = self.newer_world(with_old=True)
+        ex = FakeExplorer()
+        code, out = run_main(self.argv("--open", tid), fake_com(ns, ex)[0])
+        self.assertEqual(code, 0, out)
+        self.assertEqual(ex.selected, [self.items["N2"]])
+        ids = _rj(self.resolved_file())["ids"]
+        self.assertEqual(ids, {T.mail_resolve_key("SID-user@example.com", "E2"): {"eid": hexid(2), "sid": MB_SID}})
+        # 次回は記録済みIDが E2 用として使われ、E9 用のキーは作られない
+        self.assertNotIn(T.mail_resolve_key("SID-user@example.com", "E9"), ids)
+
+    def test_cache_only_uses_cache_latest_mail_for_both_keys_and_meta(self):
+        tid = self.thread_id()
+        self.add_newer_mail_to_cache()
+        for f in glob.glob(os.path.join(self.out, "thread_ledger_*.csv")) + glob.glob(os.path.join(self.out, "thread_ledger_*.xlsx")):
+            os.remove(f)
+        ns, newer = self.newer_world(with_old=True)
+        ex = FakeExplorer()
+        code, out = run_main(self.argv("--open", tid), fake_com(ns, ex)[0])
+        self.assertEqual(code, 0, out)
+        self.assertEqual(ex.selected, [newer])                          # 最新メール E9 のIDと meta が揃っている
+        ids = _rj(self.resolved_file())["ids"]
+        self.assertEqual(list(ids), [T.mail_resolve_key("SID-user@example.com", "E9")])
+        self.assertEqual(ids[list(ids)[0]]["eid"], hexid(9))
+
+    def test_ledger_only_without_cache_uses_ledger_row_of_same_mail(self):
+        tid = self.thread_id()
+        for f in glob.glob(os.path.join(self.paths()["scan_cache"], "*.json")):
+            os.remove(f)
+        ns, newer = self.newer_world(with_old=True)
+        ex = FakeExplorer()
+        code, out = run_main(self.argv("--open", tid), fake_com(ns, ex)[0])
+        self.assertEqual(code, 0, out)
+        self.assertEqual(ex.selected, [self.items["N2"]])
+        self.assertEqual(list(_rj(self.resolved_file())["ids"]), [T.mail_resolve_key("SID-user@example.com", "E2")])
+
+    def test_meta_requires_same_mail(self):
+        tid = self.thread_id()
+        paths = self.paths()
+        self.assertIsNotNone(T.find_thread_meta(paths, tid, (2024, 1), (2024, 12), "E2", "SID-user@example.com"))
+        self.assertIsNone(T.find_thread_meta(paths, tid, (2024, 1), (2024, 12), "E-OTHER", "SID-user@example.com"))
+        self.assertIsNone(T.find_thread_meta(paths, tid, (2024, 1), (2024, 12), "E2", "SID-other"))
+
+    def test_unexpected_exception_in_fallback_does_not_stop_stage2(self):
+        import unittest.mock as mock
+        self.scan_first()
+        ns = TestResolveStage2.stage2_world(self)
+        with mock.patch.object(T.IdFallback, "fetch", side_effect=RuntimeError(SECRET_ERR)):
+            code, out = run_main(self.argv("--skip-scan", "--resolve-ids"), fake_com(ns)[0])
+        self.assertEqual(code, 0, out)
+        self.assertIn("開けず 3通", out)
+        self.assertNotIn(SECRET_ERR, self.all_text(out))
+
+    def test_defaults_are_pinned(self):
+        self.assertEqual(T.RESOLVE_STORE_SEC, 60.0)
+        self.assertEqual(T.RESOLVE_OPEN_TOTAL_SEC, 120.0)
+        self.assertEqual(T.RESOLVE_TOTAL_SEC_DEFAULT, 1800.0)
+        self.assertEqual(T.RESOLVE_STORE_STRIKES, 2)
+        self.assertEqual(T.RESOLVE_EXACT_SEC, 2)
+        a = T.parse_args([])
+        self.assertEqual((a.resolve_store_sec, a.resolve_total_sec), (60.0, 1800.0))
+
+    def test_resolved_ids_file_has_no_subject_or_names(self):
+        tid = self.thread_id()
+        run_main(self.argv("--open", tid), fake_com(self.world(), FakeExplorer())[0])
+        text = _rd(self.resolved_file())
+        self.assert_no_secrets(text)
+        self.assertNotIn("通関", text)
+        d = json.loads(text)
+        self.assertEqual(sorted(d), ["ids", "saved_at", "schema"])
+        for k, v in d["ids"].items():
+            self.assertTrue(k.startswith("m:"))
+            self.assertEqual(sorted(v), ["eid", "sid"])
+
+    def test_thread_keyed_entries_are_ignored_and_not_written(self):
+        tid = self.thread_id()
+        _wj(self.resolved_file(), {"schema": 1, "ids": {"t:" + tid: {"eid": hexid(77), "sid": hexid(78)}}})
+        item = self.light("E2", "RE: x", dt(4, 11), "Owner Taro")
+        ns = ResolveNS([], {("E2", "SID-user@example.com"): item})
+        code, out = run_main(self.argv("--open", tid), fake_com(ns, FakeExplorer())[0])
+        self.assertEqual(code, 0, out)
+        self.assertEqual(ns.calls, [("E2", "SID-user@example.com")])     # 古い t: の記録は使わない
+        self.assertFalse(hasattr(T, "thread_resolve_key"))
+
+    def test_record_is_per_mail_so_a_newer_latest_mail_is_not_served_a_stale_id(self):
+        # 同じスレッドでも最新メールが変われば別の m: キー。古いメールの記録では開かれない
+        k_old = T.mail_resolve_key("SID-user@example.com", "E2")
+        k_new = T.mail_resolve_key("SID-user@example.com", "E9")
+        self.assertNotEqual(k_old, k_new)
+        tid = self.thread_id()
+        _wj(self.resolved_file(), {"schema": 1, "ids": {k_new: {"eid": hexid(77), "sid": ""}}})
+        item = self.light("E2", "RE: x", dt(4, 11), "Owner Taro")
+        ns = ResolveNS([], {("E2", "SID-user@example.com"): item})
+        run_main(self.argv("--open", tid), fake_com(ns, FakeExplorer())[0])
+        self.assertNotIn((hexid(77), None), ns.calls)
+
+    def test_open_respects_total_limit_and_stage2_total_limit_disables_fallback(self):
+        import unittest.mock as mock
+        self.scan_first()
+        ns = TestResolveStage2.stage2_world(self)
+        code, out = run_main(self.argv("--skip-scan", "--resolve-ids", "--resolve-total-sec", "0.000001"), fake_com(ns)[0])
+        self.assertEqual(code, 0, out)
+        self.assertIn("総時間上限", out)
+        self.assertIn("開けず 3通", out)
+        self.assertIn("探索せず 3通", out)
+        self.assertFalse(os.path.exists(self.resolved_file()))
+
+    def test_schema_mismatch_or_dropped_entries_are_backed_up(self):
+        d = os.path.dirname(self.resolved_file())
+        os.makedirs(d, exist_ok=True)
+        for content in ('{"schema": 99, "ids": {"m:a": {"eid": "%s"}}}' % hexid(1),
+                        '{"schema": 1, "ids": {"m:a": {"eid": "%s"}, "m:bad": {"eid": 5}}}' % hexid(1)):
+            for f in os.listdir(d):
+                os.remove(os.path.join(d, f))
+            _wr(self.resolved_file(), content)
+            T.save_resolved_ids(self.resolved_file(), {"m:new": {"eid": hexid(2), "sid": ""}})
+            self.assertEqual(len([f for f in os.listdir(d) if ".bak_" in f]), 1, content)
+        for f in os.listdir(d):
+            os.remove(os.path.join(d, f))
+        T.save_resolved_ids(self.resolved_file(), {"m:a": {"eid": hexid(1), "sid": ""}})
+        T.save_resolved_ids(self.resolved_file(), {"m:b": {"eid": hexid(2), "sid": ""}})
+        self.assertEqual([f for f in os.listdir(d) if ".bak_" in f], [])          # 正常なら退避しない
+
+
+class TestResolvedIdsFile(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = os.path.join(self.tmp.name, "d", "resolved_ids_x.json")
+
+    def test_roundtrip_merge_and_atomic(self):
+        T.save_resolved_ids(self.path, {"t:a": {"eid": hexid(1), "sid": hexid(2)}})
+        T.save_resolved_ids(self.path, {"m:b": {"eid": hexid(3), "sid": ""}})
+        got = T.load_resolved_ids(self.path)
+        self.assertEqual(sorted(got), ["m:b", "t:a"])
+        self.assertEqual(got["t:a"], {"eid": hexid(1), "sid": hexid(2)})
+        self.assertEqual([f for f in os.listdir(os.path.dirname(self.path)) if f.endswith(".tmp")], [])
+        self.assertEqual(_rj(self.path)["schema"], T.RESOLVED_SCHEMA)
+
+    def test_missing_empty_broken_are_empty(self):
+        self.assertEqual(T.load_resolved_ids(self.path), {})
+        os.makedirs(os.path.dirname(self.path))
+        for content in ("", "   ", "{broken", "[]", "null",
+                        '{"schema": 99, "ids": {"t:a": {"eid": "%s"}}}' % hexid(1)):
+            _wr(self.path, content)
+            self.assertEqual(T.load_resolved_ids(self.path), {}, content)
+
+    def test_invalid_entries_skipped_valid_kept(self):
+        os.makedirs(os.path.dirname(self.path))
+        T.write_json_atomic(self.path, {"schema": 1, "ids": {
+            "t:ok": {"eid": hexid(1), "sid": hexid(2)}, "t:nosid": {"eid": hexid(3)}, "t:bad": {"eid": "zz!"},
+            "t:num": {"eid": 5}, "t:str": "x", "t:sidbad": {"eid": hexid(1), "sid": "not hex!"}}})
+        self.assertEqual(sorted(T.load_resolved_ids(self.path)), ["t:nosid", "t:ok"])
+
+    def test_save_over_broken_file_backs_up_nonempty_only(self):
+        os.makedirs(os.path.dirname(self.path))
+        _wr(self.path, "{broken")
+        T.save_resolved_ids(self.path, {"t:a": {"eid": hexid(1), "sid": ""}})
+        baks = [f for f in os.listdir(os.path.dirname(self.path)) if ".bak_" in f]
+        self.assertEqual(len(baks), 1)
+        self.assertEqual(sorted(T.load_resolved_ids(self.path)), ["t:a"])
+        _wr(self.path, "")
+        before = len(os.listdir(os.path.dirname(self.path)))
+        T.save_resolved_ids(self.path, {"t:b": {"eid": hexid(1), "sid": ""}})
+        self.assertEqual(len(os.listdir(os.path.dirname(self.path))), before)       # 空ファイルは退避しない
+
+    def test_path_is_under_data_dir(self):
+        paths = T.make_paths("/x/json/thread_ledger", "/y")
+        self.assertEqual(T.resolved_ids_path(paths, "trade_import"),
+                         os.path.join("/x/json/thread_ledger", "resolved_ids_trade_import.json"))
+        self.assertNotIn("/", os.path.basename(T.resolved_ids_path(paths, "../evil")))
+
+
+class TestPickCandidate(unittest.TestCase):
+    T0 = datetime(2024, 4, 11, 9, 0, 0)
+    SUBJ = "topic about shipment"
+
+    def c(self, eid, dtv=None, subj=None, n="", cid="", sid="S1"):
+        return {"e": eid, "sid": sid, "t": dtv or self.T0, "nsubj": T.normalize_subject(subj or self.SUBJ), "n": n.lower(), "cid": cid}
+
+    def meta(self, **kw):
+        m = {"t": self.T0, "nsubj": self.SUBJ, "sender": "", "cid": "", "precision": "sec"}
+        m.update(kw)
+        return m
+
+    def at(self, sec):
+        from datetime import timedelta
+        return self.T0 + timedelta(seconds=sec)
+
+    def test_unique_exact_match(self):
+        st, c = T.pick_candidate([self.c("a"), self.c("b", subj="other topic here")], self.meta())
+        self.assertEqual((st, c["e"]), ("found", "a"))
+
+    def test_single_candidate_is_bounded_by_exact_seconds(self):
+        m = self.meta(sender="sato")
+        self.assertEqual(T.pick_candidate([self.c("a", self.at(2), n="sato")], m)[0], "found")
+        self.assertEqual(T.pick_candidate([self.c("a", self.at(3), n="sato")], m)[0], "notfound")
+        self.assertEqual(T.pick_candidate([self.c("a", self.at(90), n="sato")], m)[0], "notfound")    # 単独でも90秒差は開かない
+        self.assertEqual(T.pick_candidate([self.c("a", self.at(-90), n="sato")], m)[0], "notfound")
+
+    def test_meta_without_sender_needs_exact_time_even_if_candidate_sender_known(self):
+        m = self.meta(sender="")
+        self.assertEqual(T.pick_candidate([self.c("a", self.at(0), n="sato")], m)[0], "found")
+        self.assertEqual(T.pick_candidate([self.c("a", self.at(1), n="sato")], m)[0], "notfound")
+        self.assertEqual(T.pick_candidate([self.c("a", self.at(2), n="sato")], m)[0], "notfound")
+
+    def test_group_key_includes_sender_same_second_different_senders_ambiguous(self):
+        a, b = self.c("a", self.at(0), n="sato"), self.c("b", self.at(0), n="zed")
+        self.assertEqual(T.pick_candidate([a, b], self.meta(sender=""))[0], "ambiguous")
+
+    def test_other_day_same_subject_not_accepted(self):
+        st, _ = T.pick_candidate([self.c("a", datetime(2024, 4, 12, 9, 0, 0))], self.meta())
+        self.assertEqual(st, "notfound")
+
+    def test_ledger_minute_precision_is_one_sided_0_to_60(self):
+        m = self.meta(precision="minute")
+        self.assertEqual(T.pick_candidate([self.c("a", self.at(0))], m)[0], "found")
+        self.assertEqual(T.pick_candidate([self.c("a", self.at(59))], m)[0], "found")
+        self.assertEqual(T.pick_candidate([self.c("a", self.at(60))], m)[0], "notfound")
+        self.assertEqual(T.pick_candidate([self.c("a", self.at(-1))], m)[0], "notfound")
+
+    def test_ledger_other_sender_100s_off_not_opened(self):
+        m = self.meta(precision="minute")
+        self.assertEqual(T.pick_candidate([self.c("a", self.at(100), n="zed")], m)[0], "notfound")
+
+    def test_sender_mismatch_excluded_and_conversation_narrow(self):
+        a, b = self.c("a", n="Sato"), self.c("b", n="Zed")
+        self.assertEqual(T.pick_candidate([a, b], self.meta(sender="sato"))[1]["e"], "a")
+        self.assertEqual(T.pick_candidate([b], self.meta(sender="sato"))[0], "notfound")
+        a, b = self.c("a", cid="C1"), self.c("b", cid="C2")
+        self.assertEqual(T.pick_candidate([a, b], self.meta(cid="C2"))[1]["e"], "b")
+
+    def test_empty_sender_candidate_is_unknown_needs_exact_time(self):
+        m = self.meta(sender="sato")
+        self.assertEqual(T.pick_candidate([self.c("a", self.at(0), n="")], m)[0], "found")       # 単独かつ厳密一致のみ可
+        self.assertEqual(T.pick_candidate([self.c("a", self.at(1), n="")], m)[0], "notfound")
+        # 送信者が分かる候補と空の候補が並ぶときは曖昧
+        self.assertEqual(T.pick_candidate([self.c("a", self.at(0), n="sato"), self.c("b", self.at(1), n="")], m)[0], "ambiguous")
+
+    def test_multiple_distinct_mails_are_ambiguous_even_if_one_is_closer(self):
+        a = self.c("a", self.at(0), n="x")
+        b = self.c("b", self.at(1), n="y")
+        self.assertEqual(T.pick_candidate([a, b], self.meta())[0], "ambiguous")
+
+    def test_copies_across_stores_are_one_mail(self):
+        a, b = self.c("a", sid="S1"), self.c("b", sid="S2")
+        st, c = T.pick_candidate([a, b], self.meta())
+        self.assertEqual((st, c["e"]), ("found", "a"))
+
+    def test_generic_empty_subject_or_no_time_not_searched(self):
+        self.assertEqual(T.pick_candidate([self.c("a", subj="hello")], self.meta(nsubj="hello"))[0], "notfound")
+        self.assertEqual(T.pick_candidate([self.c("a", subj="short")], self.meta(nsubj="short"))[0], "notfound")
+        self.assertEqual(T.pick_candidate([self.c("a")], self.meta(nsubj=""))[0], "notfound")
+        self.assertEqual(T.pick_candidate([self.c("a")], self.meta(t=None))[0], "notfound")
+
+
+class TestMailResolver(ResolveBase):
+    def meta(self, subj="RE: " + SECRET + " 通関", t=None, sender="Owner Taro", folders=()):
+        return {"t": t or dt(4, 11), "nsubj": T.normalize_subject(subj), "sender": sender, "cid": "", "subject": subj,
+                "folders": list(folders)}
+
+    def slow_world(self, clock):
+        slow = FakeFolder("Inbox", [self.light(hexid(40), "unrelated", dt(4, 11), "Zed")])
+        orig = slow._items.Restrict
+
+        def slow_restrict(flt):
+            clock.t += 100.0                  # このストアは1回のRestrictで上限を超える
+            return orig(flt)
+        slow._items.Restrict = slow_restrict
+        slow_store = FakeStore("online-archive", inbox_root(slow), sid="SID-SLOW")
+        ns = self.world()
+        ns.Stores = FakeStores([slow_store] + ns.Stores.stores)
+        return ns
+
+    def test_store_time_limit_never_yields_found_while_a_store_timed_out(self):
+        clock = Tick()
+        ns = self.slow_world(clock)
+        rep = T.Reporter(None)
+        r = T.MailResolver(ns, rep, store_sec=10, total_sec=None, clock=clock)
+        st, ids = r.search(self.meta())
+        # 他のストアに本物があっても、時間切れのストアがあれば（見落としの可能性があるので）特定しない
+        self.assertEqual((st, ids), ("notfound", None))
+        self.assertEqual(r.stats["timeouts"], 1)
+        self.assertEqual(r.strikes, {1: 1})
+        self.assertEqual(r.stats["found"], 0)
+        log = "\n".join(rep.lines)
+        self.assertIn("ストア#1", log)
+        self.assertIn("時間上限", log)
+        self.assert_no_secrets(log)
+        # 2回目の時間切れでそのストアは以降の探索から外れ、3回目は完全な探索になり特定できる
+        r.search(self.meta(t=dt(4, 10), subj=SECRET + " 通関", sender="Sato Pm"))
+        self.assertEqual(r.strikes[1], 2)
+        self.assertNotIn(1, [s["idx"] for s in r.usable_stores()])
+        st, ids = r.search(self.meta(t=dt(4, 20), subj="PST only 通関", sender="Sato Pm"))
+        self.assertEqual((st, ids["eid"]), ("found", hexid(3)))
+        self.assertEqual(r.stats["timeouts"], 2)
+
+    def test_timed_out_search_is_not_recorded_by_open(self):
+        tid = self.thread_id()
+        ns = self.world()
+        # --open: 全体の上限が極小なら、本物があっても特定せず、resolved_ids にも書かない
+        import unittest.mock as mock
+        with mock.patch.object(T, "RESOLVE_OPEN_TOTAL_SEC", 1e-9):
+            code, out = run_main(self.argv("--open", tid), fake_com(ns, FakeExplorer())[0])
+        self.assertEqual(code, 2, out)
+        self.assertEqual(self.shown, [])
+        self.assertFalse(os.path.exists(self.resolved_file()))
+
+    def test_bucket_cap_is_incomplete_not_memoized_and_not_found(self):
+        import unittest.mock as mock
+        ns = self.world()
+        with mock.patch.object(T, "RESOLVE_BUCKET_MAX_ITEMS", 1):
+            r = T.MailResolver(ns, T.Reporter(None))
+            st, ids = r.search(self.meta())
+            self.assertEqual((st, ids), ("notfound", None))
+            self.assertGreater(r.stats["capped"], 0)
+            n1 = r.stats["restricts"]
+            r.search(self.meta())
+            self.assertGreater(r.stats["restricts"], n1)               # 打ち切られた日はメモ化されず再探索される
+        r2 = T.MailResolver(ns, T.Reporter(None))                       # 上限が十分なら特定できる
+        self.assertEqual(r2.search(self.meta())[0], "found")
+
+    def test_restrict_failure_is_incomplete(self):
+        ns = self.world()
+        for st in ns.Stores.stores:
+            def walk(f):
+                f._items.items_raise = FakeComError(SECRET_ERR)
+                for sub in f.Folders.folders:
+                    walk(sub)
+            walk(st._root)
+        r = T.MailResolver(ns, T.Reporter(None))
+        self.assertEqual(r.search(self.meta())[0], "notfound")
+        n = r.stats["restricts"]
+        r.search(self.meta())
+        self.assertGreater(r.stats["restricts"], n)                     # 失敗した日をメモ化して「空」と扱わない
+
+    def test_generic_subject_not_searched(self):
+        ns = self.world()
+        ns.Stores = _NoStoreList()
+        r = T.MailResolver(ns, T.Reporter(None))
+        self.assertEqual(r.search(self.meta(subj="hello"))[0], "notfound")      # 列挙もしない
+
+    # --- 不完全な探索は、他ストアに本物があっても found にしない（M1/M2）---
+    def broken_store_ns(self, folder_or_root, sid="SID-BROKEN"):
+        ns = self.world()
+        ns.Stores = FakeStores([FakeStore("broken", folder_or_root, sid=sid)] + ns.Stores.stores)
+        return ns
+
+    def assert_incomplete_not_found(self, ns, clock=None):
+        r = T.MailResolver(ns, T.Reporter(None), **({"clock": clock, "store_sec": 10} if clock else {}))
+        st, ids = r.search(self.meta())
+        self.assertEqual((st, ids), ("notfound", None))
+        self.assertEqual(r.stats["found"], 0)
+        return r
+
+    def test_restrict_failure_in_one_folder_blocks_found_and_is_not_memoized(self):
+        f = FakeFolder("Inbox", [self.light(hexid(60), "x", dt(4, 11), "Zed")], items_raise=FakeComError(SECRET_ERR))
+        r = self.assert_incomplete_not_found(self.broken_store_ns(inbox_root(f)))
+        n = r.stats["restricts"]
+        r.search(self.meta())
+        self.assertGreater(r.stats["restricts"], n)
+
+    def test_getfirst_failure_blocks_found_and_is_not_memoized(self):
+        f = FakeFolder("Inbox", [self.light(hexid(60), "x", dt(4, 11), "Zed")])
+        orig = f._items.Restrict
+
+        def bad(flt):
+            r = orig(flt)
+
+            def boom():
+                raise FakeComError(SECRET_ERR)
+            r.GetFirst = boom
+            return r
+        f._items.Restrict = bad
+        r = self.assert_incomplete_not_found(self.broken_store_ns(inbox_root(f)))
+        n = r.stats["restricts"]
+        r.search(self.meta())
+        self.assertGreater(r.stats["restricts"], n)
+
+    def test_getnext_failure_blocks_found_and_is_not_memoized(self):
+        f = FakeFolder("Inbox", [self.light(hexid(60), "x", dt(4, 11), "Zed"), self.light(hexid(61), "y", dt(4, 11), "Zed")],
+                       next_raises=(1, FakeComError(SECRET_ERR)))
+        r = self.assert_incomplete_not_found(self.broken_store_ns(inbox_root(f)))
+        n = r.stats["restricts"]
+        r.search(self.meta())
+        self.assertGreater(r.stats["restricts"], n)
+
+    def test_unreadable_item_blocks_found_and_is_not_memoized(self):
+        for raises in ({"Class": FakeComError(SECRET_ERR)}, {"Subject": FakeComError(SECRET_ERR)}):
+            bad = FakeItem({"Class": 43, "EntryID": hexid(62), "Subject": "x", "ReceivedTime": dt(4, 11),
+                            "SentOn": dt(4, 11), "SenderName": "Zed"}, raises=raises)
+            r = self.assert_incomplete_not_found(self.broken_store_ns(inbox_root(FakeFolder("Inbox", [bad]))))
+            n = r.stats["restricts"]
+            r.search(self.meta())
+            self.assertGreater(r.stats["restricts"], n, raises)
+
+    def test_read_time_timeout_blocks_found(self):
+        clock = Tick()
+        f = FakeFolder("Inbox", [self.light(hexid(60), "x", dt(4, 11), "Zed")])
+        orig = f._items.Restrict
+
+        def slow(flt):
+            clock.t += 100.0
+            return orig(flt)
+        f._items.Restrict = slow
+        self.assert_incomplete_not_found(self.broken_store_ns(inbox_root(f)), clock)
+
+    def test_truncated_folder_enumeration_blocks_found(self):
+        clock = Tick()
+        a, b = FakeFolder("A", []), FakeFolder("B", [])
+
+        class SlowFolders(FakeFolders):
+            def Item(self, i):
+                clock.t += 100.0
+                return FakeFolders.Item(self, i)
+        root = FakeFolder("root", [], subfolders=[a, b])
+        root.Folders = SlowFolders([a, b])
+        r = self.assert_incomplete_not_found(self.broken_store_ns(root), clock)
+        self.assertNotIn(1, r._folder_memo)                               # 途中打切りの一覧は完全として保存しない
+
+    def test_enumeration_failures_block_found_and_are_not_memoized(self):
+        class BadCount(FakeFolders):
+            @property
+            def Count(self):
+                raise FakeComError(SECRET_ERR)
+
+        class BadItem(FakeFolders):
+            def Item(self, i):
+                raise FakeComError(SECRET_ERR)
+
+        class BadRoot(FakeStore):
+            def GetRootFolder(self):
+                raise FakeComError(SECRET_ERR)
+
+        class FlakyStores(FakeStores):
+            def Item(self, i):
+                if i == 1:
+                    raise FakeComError(SECRET_ERR)
+                return FakeStores.Item(self, i)
+        r1 = FakeFolder("root", []); r1.Folders = BadCount([])
+        r2 = FakeFolder("root", [], subfolders=[FakeFolder("A", [])]); r2.Folders = BadItem([FakeFolder("A", [])])
+        for root in (r1, r2):
+            r = self.assert_incomplete_not_found(self.broken_store_ns(root))
+            self.assertNotIn(1, r._folder_memo)
+        ns = self.world()
+        ns.Stores = FakeStores([BadRoot("x", FakeFolder("root", []), sid="SID-X")] + ns.Stores.stores)
+        r = self.assert_incomplete_not_found(ns)
+        self.assertNotIn(1, r._folder_memo)
+        ns = self.world()
+        ns.Stores = FlakyStores([FakeStore("x", FakeFolder("root", []), sid="SID-X")] + ns.Stores.stores)
+        r = self.assert_incomplete_not_found(ns)
+        self.assertTrue(r.enum_incomplete)
+
+    def test_store_time_limit_counts_cumulative_time_across_tiers(self):
+        clock = Tick()
+        hint = FakeFolder("Inbox", [], subfolders=[])
+        sub = FakeFolder("Sub", [self.light(hexid(2), f"RE: {SECRET} 通関", dt(4, 11), "Owner Taro")])
+        hint.Folders = FakeFolders([sub])
+        for f in (hint, sub):
+            o = f._items.Restrict
+            f._items.Restrict = (lambda o: lambda flt: (setattr(clock, "t", clock.t + 3.0), o(flt))[1])(o)
+        ns = ResolveNS([FakeStore("s", FakeFolder("root", [], subfolders=[hint]), sid="SID-ONLY")], {})
+        r = T.MailResolver(ns, T.Reporter(None), store_sec=10, clock=clock)
+        # tier1(Inbox) で 3日×3秒=9秒、tier2(Sub) で上限10秒を累積超過 → 時間切れで特定しない
+        st, _ = r.search(self.meta(folders=["\\Inbox"]))
+        self.assertEqual(st, "notfound")
+        self.assertEqual(r.stats["timeouts"], 1)
+
+    def test_tier1_found_does_not_search_other_folders(self):
+        hint = FakeFolder("Inbox", [self.light(hexid(2), f"RE: {SECRET} 通関", dt(4, 11), "Owner Taro")])
+        other = FakeFolder("Other", [])
+        hint.Folders = FakeFolders([other])
+        ns = ResolveNS([FakeStore("s", FakeFolder("root", [], subfolders=[hint]), sid="SID-ONLY")], {})
+        r = T.MailResolver(ns, T.Reporter(None))
+        self.assertEqual(r.search(self.meta(folders=["\\Inbox"]))[0], "found")
+        self.assertEqual(other.filters, [])                               # tier2 のフォルダは Restrict されない
+        self.assertEqual(len(hint.filters), 3)
+
+    def test_total_time_limit_expires(self):
+        clock = Tick()
+        r = T.MailResolver(self.world(), T.Reporter(None), store_sec=10, total_sec=5, clock=clock)
+        self.assertFalse(r.total_expired())
+        clock.t = 6
+        self.assertTrue(r.total_expired())
+        st, _ = r.search(self.meta())
+        self.assertEqual(st, "notfound")                                 # 時間切れなら探索は打ち切られ、誤って特定しない
+
+    def test_memoizes_folders_and_days(self):
+        ns = self.world()
+        r = T.MailResolver(ns, T.Reporter(None))
+        r.search(self.meta())
+        n1 = r.stats["restricts"]
+        self.assertGreater(n1, 0)
+        r.search(self.meta())                                             # 同じ日付・同じフォルダ: 再利用
+        self.assertEqual(r.stats["restricts"], n1)
+        r.search(self.meta(t=dt(4, 12), subj="x"))                        # 前後1日が重なる分は再利用
+        self.assertLess(r.stats["restricts"] - n1, n1)
+
+    def test_enumeration_only_when_searching(self):
+        ns = self.world()
+        real = ns.Stores
+        touched = []
+
+        class Spy:
+            @property
+            def Count(self):
+                touched.append("Count")
+                return real.Count
+
+            def Item(self, i):
+                touched.append("Item")
+                return real.Item(i)
+        ns.Stores = Spy()
+        r = T.MailResolver(ns, T.Reporter(None))                          # 生成しただけでは列挙しない
+        self.assertEqual(touched, [])
+        r.search(self.meta())
+        self.assertTrue(touched)
+
+    def test_excluded_folders_skipped(self):
+        deleted = FakeFolder("削除済みアイテム", [self.light(hexid(50), f"RE: {SECRET} 通関", dt(4, 11), "Owner Taro")])
+        inbox = FakeFolder("Inbox", [], subfolders=[deleted])
+        ns = ResolveNS([FakeStore("user@example.com", inbox_root(inbox), sid=MB_SID)], {})
+        r = T.MailResolver(ns, T.Reporter(None))
+        self.assertEqual(r.search(self.meta())[0], "notfound")           # 除外フォルダ（削除済み）の中は探さない
+
+    def test_read_only_only_restrict_and_reads(self):
+        ns = self.world()
+        T.MailResolver(ns, T.Reporter(None)).search(self.meta())
+        self.assertEqual(ACCESSED, [])
+        self.assertEqual(self.shown, [])                                  # Display もしない（特定するだけ）
+
+
+class TestIdFallbackGuards(unittest.TestCase):
+    class Stub:
+        strikes = {}
+        _store_list = None
+
+        def __init__(self):
+            self.n = 0
+
+        def total_expired(self):
+            return False
+
+        def usable_stores(self):
+            return [1]
+
+        def search(self, meta):
+            self.n += 1
+            return "notfound", None
+
+    def test_gives_up_after_consecutive_failures(self):
+        ns = ResolveNS([], {})
+        stub = self.Stub()
+        rep = T.Reporter(None)
+        fb = T.IdFallback(ns, rep, {}, stub)
+        meta = {"t": dt(4, 1), "nsubj": "x"}
+        for _ in range(T.RESOLVE_GIVEUP_AFTER):
+            with self.assertRaises(T.ItemUnresolved):
+                fb.fetch([("E", "S")], ["k"], meta)
+        self.assertEqual(stub.n, T.RESOLVE_GIVEUP_AFTER)
+        with self.assertRaises(T.ItemUnresolved) as cm:
+            fb.fetch([("E", "S")], ["k"], meta)
+        self.assertEqual(cm.exception.status, "skipped")
+        self.assertEqual(stub.n, T.RESOLVE_GIVEUP_AFTER)                  # 31回目は探索しない
+        self.assertIn("打ち切り", "\n".join(rep.lines))
+
+    def test_search_disabled_without_meta(self):
+        fb = T.IdFallback(ResolveNS([], {}), T.Reporter(None), {}, self.Stub())
+        with self.assertRaises(T.ItemUnresolved) as cm:
+            fb.fetch([("E", "S")], ["k"], None)
+        self.assertEqual(cm.exception.status, "skipped")
+
+
+class TestResolveStage2(ResolveBase):
+    def stage2_world(self):
+        """第2段で読める現在のOutlook。探索で見つかるアイテム自体が第2段の読み取りにも使えるよう、全項目を持たせる。"""
+        def mk(eid, subj, t, sender, addr, recips):
+            return FakeItem({"Class": 43, "EntryID": eid, "Subject": subj, "ReceivedTime": t, "SenderName": sender,
+                             "SenderEmailAddress": addr, "SenderEmailType": "SMTP",
+                             "PropertyAccessor": FakePA({T.PR_SENDER_SMTP: addr, T.PR_INTERNET_MESSAGE_ID: "<id@x>"}),
+                             "Recipients": FakeRecipients(recips), "Attachments": FakeAtts(["a.pdf"]),
+                             "Body": "please see 通関 and hold"}, stage1=False)
+        n1 = mk(hexid(1), f"{SECRET} 通関", dt(4, 10), "Sato Pm", "pm@example.com", [("Owner Taro", "owner@example.com", 1)])
+        n2 = mk(hexid(2), f"RE: {SECRET} 通関", dt(4, 11), "Owner Taro", "owner@example.com", [("Sato Pm", "pm@example.com", 1)])
+        n3 = mk(hexid(3), "PST only 通関", dt(4, 20), "Sato Pm", "pm@example.com", [("Owner Taro", "owner@example.com", 1)])
+        inbox = FakeFolder("Inbox", [n1, n2])
+        mb = FakeStore("user@example.com", inbox_root(inbox), sid=MB_SID)
+        pst = FakeStore("2024_Q2", FakeFolder("root", [n3]), sid=PST_SID, path="C:\\x\\2024_Q2.pst")
+        by_id = {(hexid(1), MB_SID): n1, (hexid(2), MB_SID): n2, (hexid(3), PST_SID): n3}
+        return ResolveNS([mb, pst], by_id)
+
+    def test_default_is_unchanged_old_ids_fail_and_no_enumeration(self):
+        self.scan_first()
+        ns = self.stage2_world()
+        ns.Stores = _NoStoreList()
+        code, out = run_main(self.argv("--skip-scan"), fake_com(ns)[0])
+        self.assertEqual(code, 0, out)
+        self.assertIn("開けず 3通", out)
+        s2 = self.paths()["stage2_cache"]
+        self.assertEqual(_rj(s2) if os.path.exists(s2) else {}, {})
+        self.assertTrue(all(sid is not None for _e, sid in ns.calls))      # EntryIDのみの呼び出しもしない（従来どおり）
+        self.assertFalse(os.path.exists(self.resolved_file()))
+
+    def test_resolve_ids_opt_in_resolves_all_and_records(self):
+        self.scan_first()
+        cache_before = {f: _rb(f) for f in glob.glob(os.path.join(self.paths()["scan_cache"], "*.json"))}
+        ns = self.stage2_world()
+        code, out = run_main(self.argv("--skip-scan", "--resolve-ids"), fake_com(ns)[0])
+        self.assertEqual(code, 0, out)
+        self.assertIn("取得 3通 / 開けず 0通", out)
+        self.assertEqual(len(_rj(self.paths()["stage2_cache"])), 3)
+        ids = _rj(self.resolved_file())["ids"]
+        self.assertEqual(sorted(k[:2] for k in ids), ["m:", "m:", "m:"])
+        self.assertEqual(sorted(v["eid"] for v in ids.values()), [hexid(1), hexid(2), hexid(3)])
+        self.assertEqual(cache_before, {f: _rb(f) for f in cache_before})
+        self.assertIn("日時＋件名で特定 3通", out)
+        self.assertIn("--resolve-ids", out)                                   # 見積りの表示
+        self.assert_no_secrets(self.all_text(out))
+        self.assertEqual(ACCESSED, [])
+
+    def test_resolve_ids_second_run_uses_recorded_ids_first(self):
+        self.scan_first()
+        run_main(self.argv("--skip-scan", "--resolve-ids"), fake_com(self.stage2_world())[0])
+        os.remove(self.paths()["stage2_cache"])
+        ns = self.stage2_world()
+        ns.Stores = _NoStoreList()                                            # 記録済みIDで取れるので探索（列挙）は不要
+        code, out = run_main(self.argv("--skip-scan", "--resolve-ids"), fake_com(ns)[0])
+        self.assertEqual(code, 0, out)
+        self.assertIn("記録済みIDで取得 3通", out)
+        self.assertEqual(len(ns.calls), 3)
+        self.assertEqual(len(_rj(self.paths()["stage2_cache"])), 3)
+
+    def test_resolve_ids_keeps_stage2_max_guard(self):
+        self.scan_first()
+        ns = self.stage2_world()
+        code, out = run_main(self.argv("--skip-scan", "--resolve-ids", "--stage2-max", "1"), fake_com(ns)[0])
+        self.assertEqual(code, 3)
+        self.assertEqual(ns.calls, [])
+        self.assertIn("--stage2-max (1通)", out)
+
+    def test_resolve_ids_unfindable_counts_failures_and_does_not_open_wrong_mail(self):
+        self.scan_first()
+        ns = self.stage2_world()
+        # 現在のOutlookに該当メールが無い（別の件名のメールだけ）
+        for st in ns.Stores.stores:
+            st._root = FakeFolder("root", [FakeItem({"Class": 43, "EntryID": hexid(90), "Subject": "other",
+                                                      "ReceivedTime": dt(4, 11), "SenderName": "Zed"})])
+        code, out = run_main(self.argv("--skip-scan", "--resolve-ids"), fake_com(ns)[0])
+        self.assertEqual(code, 0, out)
+        self.assertIn("開けず 3通", out)
+        self.assertIn("未発見 3通", out)
+        self.assertFalse(os.path.exists(self.resolved_file()))
+
+    def test_progress_log_is_counts_only(self):
+        self.scan_first()
+        old = T.RESOLVE_PROGRESS_EVERY
+        T.RESOLVE_PROGRESS_EVERY = 1
+        try:
+            code, out = run_main(self.argv("--skip-scan", "--resolve-ids"), fake_com(self.stage2_world())[0])
+        finally:
+            T.RESOLVE_PROGRESS_EVERY = old
+        self.assertEqual(code, 0, out)
+        self.assertIn("予備の解決 試行", out)
+        self.assert_no_secrets(self.all_text(out))
+
+    def test_help_and_docstring_mention_resolve_ids(self):
+        self.assertIn("--resolve-ids", T.__doc__)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            with self.assertRaises(SystemExit):
+                T.parse_args(["--help"])
+        text = "".join(buf.getvalue().split())
+        for w in ("--resolve-ids", "--resolve-store-sec", "--resolve-total-sec", "オプトイン"):
+            self.assertIn(w, text)
+        self.assertFalse(T.parse_args([]).resolve_ids)
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                T.parse_args(["--resolve-store-sec", "0"])
 
 
 if __name__ == "__main__":
