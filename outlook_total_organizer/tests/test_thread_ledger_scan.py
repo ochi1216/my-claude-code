@@ -2468,7 +2468,7 @@ class TestOptionalImprovements(unittest.TestCase):
         words = ["中" + "井", "梶" + "川", "佐" + "治", "Na" + "kai", "Kaji" + "kawa", "Sa" + "ji", "nexp" + "eria",
                  "dhl" + r"\.com", "trade" + "win"]
         pat = re.compile("|".join(words), re.IGNORECASE)
-        targets = [os.path.join(TOOLS_DIR, f) for f in ("thread_ledger_scan_20261010_07.py",
+        targets = [os.path.join(TOOLS_DIR, f) for f in (f"thread_ledger_scan_{T.SCRIPT_VERSION}.py",
                    "thread_ledger_theme.example.json", "calibration_subjects.example.txt")] + [os.path.abspath(__file__)]
         for t in targets:
             self.assertIsNone(pat.search(_rd(t)), t)
@@ -4717,7 +4717,8 @@ class TestSkipScan(LedgerFlowBase):
         text = "".join(buf.getvalue().split())
         self.assertIn("--skip-scan", text)
         self.assertIn("併用不可", text)
-        self.assertEqual(T.SCRIPT_VERSION, "20261010_07")
+        self.assertTrue(re.match(r"^\d{8}_\d{2}$", T.SCRIPT_VERSION))
+        self.assertTrue(T.__file__.endswith(f"thread_ledger_scan_{T.SCRIPT_VERSION}.py") if hasattr(T, "__file__") else True)
 
 
 
@@ -5640,6 +5641,985 @@ class TestResolveStage2(ResolveBase):
         with contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit):
                 T.parse_args(["--resolve-store-sec", "0"])
+
+
+
+# ============================================================
+# 20261010_08: --export-threads（指定スレッドの本文を書き出す。走査しない・読み取り専用）
+# ============================================================
+class KbdItem(FakeItem):
+    """Body を読むと Ctrl+C（KeyboardInterrupt）になるメール"""
+
+    @property
+    def Body(self):
+        raise KeyboardInterrupt()
+
+
+EXP_SID = "SIDA"
+EXP_BODY = "Hello team.\nPlease see the plan.\n"
+PADTXT = "pad line of text\n" * 40        # 640字。先頭600字は引用判定の対象外なので、引用除去のテストでは本文の前に置く
+
+
+def Z(body, forwarded=False):
+    """PADTXT の後ろに body を置いて strip_quoted し、body に当たる部分だけ返す"""
+    return T.strip_quoted(PADTXT + body, forwarded)[len(PADTXT.strip()):].strip()
+
+
+
+def exp_item(eid, subject, t, sender, body, to=(("Owner Taro", "owner@example.com", 1),), cc=(), atts=(), **extra):
+    recips = list(to) + list(cc)
+    f = {"Class": 43, "EntryID": eid, "Subject": subject, "ReceivedTime": t, "SenderName": sender, "Body": body,
+         "Recipients": FakeRecipients(recips), "Attachments": FakeAtts(list(atts)), "Parent": FakeParentFolder()}
+    f.update(extra)
+    return FakeItem(f, stage1=False, display_log=EXP_SHOWN)
+
+
+EXP_SHOWN = []
+
+
+class ExportBase(ResolveBase):
+    CIDS = {"one": "AAAA1111", "two": "BBBB2222", "three": "CCCC3333"}
+
+    def setUp(self):
+        ResolveBase.setUp(self)
+        del EXP_SHOWN[:]
+        self.tid = {k: T.thread_id_of("c:" + v) for k, v in self.CIDS.items()}
+        self.ids_path = os.path.join(self.tmp.name, "ids.txt")
+        self.text_dir = os.path.join(self.out, "thread_text")
+        self.write_caches()
+
+    # --- データ ---
+    def records(self):
+        sj = f"{SECRET} Topic one"
+        return [
+            rec("A1", f"RE: {sj}", "2024-04-12T09:00:00", "Sato Pm", "Owner Taro", cid=self.CIDS["one"]),   # 新しいメールを先に置く
+            rec("A2", sj, "2024-04-10T09:00:00", "Owner Taro", "Sato Pm", cid=self.CIDS["one"]),
+            rec("A3", f"RE: RE: {sj}", "2024-04-11T09:00:00", "Sato Pm", "Owner Taro", cid=self.CIDS["one"]),
+            rec("B1", "Second topic subject", "2024-05-01T10:00:00", "Zed Other", "Owner Taro", cid=self.CIDS["two"]),
+            rec("C1", "Third topic subject", "2024-06-01T10:00:00", "Sato Pm", "Owner Taro", cid=self.CIDS["three"]),
+            rec("C2", "RE: Third topic subject", "2024-06-02T10:00:00", "Owner Taro", "Sato Pm", cid=self.CIDS["three"]),
+        ]
+
+    def write_caches(self, records=None):
+        paths = self.paths()
+        os.makedirs(paths["scan_cache"], exist_ok=True)
+        _wj(T.folder_cache_path(paths, 1, "S1", "\\Inbox"),
+            cache("S1", 1, "\\Inbox", records if records is not None else self.records(), sid=EXP_SID))
+
+    def ids(self, *lines):
+        _wr(self.ids_path, "\n".join(lines) + "\n")
+
+    def world(self, **over):
+        """保存済みID(EntryID, SIDA)でそのまま開けるメール一式"""
+        its = {
+            "A1": exp_item("A1", f"RE: {SECRET} Topic one", dt(4, 12), "Sato Pm", PADTXT + "A1 body\nOn Mon, Apr 8, 2024 at 9:00 AM Zed wrote:\n> quoted line\n> second quoted\n> old old"),
+            "A2": exp_item("A2", f"{SECRET} Topic one", dt(4, 10), "Owner Taro", "A2 body first mail", cc=(("Tanaka Partner", "t@example.com", 2),),
+                           atts=("plan.pdf", "sheet.xlsx")),
+            "A3": exp_item("A3", f"RE: RE: {SECRET} Topic one", dt(4, 11), "Sato Pm", PADTXT + "A3 body\n\n-----Original Message-----\nFrom: x\nquoted"),
+            "B1": exp_item("B1", "Second topic subject", dt(5, 1, 10), "Zed Other", "B1 body"),
+            "C1": exp_item("C1", "Third topic subject", dt(6, 1, 10), "Sato Pm", "C1 body"),
+            "C2": exp_item("C2", "RE: Third topic subject", dt(6, 2, 10), "Owner Taro", "C2 body"),
+        }
+        its.update(over)
+        by_id = {(k, EXP_SID): v for k, v in its.items() if v is not None}
+        self.items = its
+        return ResolveNS([], by_id)
+
+    def go(self, ns, *extra):
+        com, pc = fake_com(ns)
+        code, out = run_main(self.argv("--export-threads", self.ids_path, *extra), com)
+        self.pc = pc
+        return code, out
+
+    def txt(self, key):
+        return _rd(os.path.join(self.text_dir, self.tid[key] + ".txt"))
+
+    def logs(self, out):
+        return out + "".join(_rd(p) for p in glob.glob(os.path.join(self.out, "*.log")))
+
+
+
+class TestExportThreads(ExportBase):
+    # --- 走査しない ---
+    def test_never_calls_scan_functions_and_enumerates_nothing(self):
+        import unittest.mock as mock
+
+        def boom(*a, **k):
+            raise AssertionError("走査関数が呼ばれた")
+        self.ids(self.tid["one"])
+        ns = self.world()
+        ns.Stores = _NoStoreList()
+        for extra in ((), ("--skip-scan",)):
+            with mock.patch.object(T, "run_scan", boom), mock.patch.object(T, "_scan_core", boom), \
+                    mock.patch.object(T, "scan_folder", boom), mock.patch.object(T, "run_pipeline", boom), \
+                    mock.patch.object(T, "run_stage2", boom), mock.patch.object(T, "enumerate_mail_folders", boom), \
+                    mock.patch.object(T, "open_task_folder", boom):
+                code, out = self.go(ns, *extra)
+            self.assertEqual(code, 0, out)
+            self.assertEqual(ns.folder_fetches, [])
+            self.assertEqual(ns.store_lookups, [])
+        self.assertIn("走査は行いません", out)
+        before = {f: _rb(f) for f in glob.glob(os.path.join(self.paths()["scan_cache"], "*.json"))}
+        self.go(ns)
+        self.assertEqual(before, {f: _rb(f) for f in before})            # 走査キャッシュは変更しない
+
+    def test_conflicts_with_rescan_and_evaluate_only_without_touching_com(self):
+        self.ids(self.tid["one"])
+        for opt in ("--rescan", "--evaluate-only", "--check-subjects"):
+            com, pc = fake_com(self.world())
+            code, out = run_main(self.argv("--export-threads", self.ids_path, opt), com)
+            self.assertEqual(code, 2, opt)
+            self.assertEqual(pc.init, 0)
+            self.assertIn("同時に指定できません", out)
+        self.assertFalse(os.path.exists(self.text_dir))
+
+    def test_no_cache_aborts_without_scan(self):
+        for f in glob.glob(os.path.join(self.paths()["scan_cache"], "*.json")):
+            os.remove(f)
+        self.ids(self.tid["one"])
+        code, out = self.go(self.world())
+        self.assertEqual(code, 2)
+        self.assertEqual(self.pc.init, 0)
+        self.assertIn("走査キャッシュがありません", out)
+
+    # --- 指定スレッドだけ・不正ID ---
+    def test_only_specified_threads_and_invalid_or_unknown_ids_skipped(self):
+        self.ids("# rank list", "", f"#1 {self.tid['one']}", self.tid["two"] + "   # コメント", "bad id!", "ab",
+                 "../../etc/passwd", "zzzzzzzzzzzz", self.tid["two"], "x" * 65)
+        code, out = self.go(self.world())
+        self.assertEqual(code, 0, out)
+        self.assertEqual(sorted(os.listdir(self.text_dir)), sorted([self.tid["two"] + ".txt"]))   # '#1 id' はコメント行
+        self.assertIn("有効 2件 / 形式が不正でスキップ 4件", out)
+        self.assertIn("スレッド 1件 / 見つからずスキップ 1件", out)
+        self.ids(f"{self.tid['one']}", f"{self.tid['three']}")
+        code, out = self.go(self.world())
+        self.assertEqual(sorted(os.listdir(self.text_dir)),
+                         sorted([self.tid["one"] + ".txt", self.tid["two"] + ".txt", self.tid["three"] + ".txt"]))
+
+    def test_no_valid_ids_or_no_found_ids_fails_without_com(self):
+        self.ids("# only comments", "bad id")
+        code, out = self.go(self.world())
+        self.assertEqual((code, self.pc.init), (2, 0))
+        self.ids("zzzzzzzzzzzz")
+        code, out = self.go(self.world())
+        self.assertEqual((code, self.pc.init), (2, 0))
+        code, out = run_main(self.argv("--export-threads", os.path.join(self.tmp.name, "nothing.txt")), fake_com(self.world())[0])
+        self.assertEqual(code, 2)
+
+    def test_ids_file_cp932_and_bom(self):
+        with open(self.ids_path, "wb") as fh:
+            fh.write(("﻿# 順位\\n" if False else "# 順位").encode("utf-8") + b"\n" + self.tid["two"].encode() + b"\n")
+        code, out = self.go(self.world())
+        self.assertEqual(code, 0, out)
+        with open(self.ids_path, "wb") as fh:
+            fh.write("# 重要度".encode("cp932") + b"\n" + self.tid["one"].encode() + b"\n")
+        code, out = self.go(self.world())
+        self.assertEqual(code, 0, out)
+        self.assertTrue(os.path.exists(os.path.join(self.text_dir, self.tid["one"] + ".txt")))
+
+    # --- 内容 ---
+    def test_thread_file_order_header_and_fields(self):
+        self.ids(self.tid["one"])
+        code, out = self.go(self.world())
+        self.assertEqual(code, 0, out)
+        text = self.txt("one")
+        self.assertEqual(text.count(f"{SECRET} Topic one"), 1)                  # 件名はヘッダに1回（RE:付きは書かない）
+        self.assertIn("メール数: 3通 / 取得できた通数: 3通 / 開けなかった通数: 0通", text)
+        i2, i3, i1 = text.index("A2 body"), text.index("A3 body"), text.index("A1 body")
+        self.assertTrue(i2 < i3 < i1)                                          # 日時の昇順（キャッシュの並びに依らない）
+        self.assertLess(text.index("日時: 2024-04-10 09:00:00"), text.index("日時: 2024-04-11 09:00:00"))
+        self.assertIn("送信者: Owner Taro", text)
+        self.assertIn("宛先(To): Owner Taro", text)
+        self.assertIn("CC: Tanaka Partner", text)
+        self.assertIn("添付: plan.pdf, sheet.xlsx", text)
+        self.assertNotIn("owner@example.com", text)                           # アドレスは出さない（表示名のみ）
+        self.assertNotIn("quoted", text)                                       # 引用は省く
+        self.assertNotIn("old old", text)
+        self.assertEqual(ACCESSED, [])
+        self.assertEqual(EXP_SHOWN, [])                                        # Display を呼ばない
+
+    def test_quote_stripping_patterns(self):
+        S = Z
+        self.assertEqual(S("new\n-----Original Message-----\nFrom: a\nold"), "new")
+        self.assertEqual(S("new\n\n-----元のメッセージ-----\nold"), "new")
+        self.assertEqual(S("new\nFrom: Zed <z@example.com>\nSent: x\nold"), "new")
+        self.assertEqual(S("new\nfrom: Zed\nDate: x\nold"), "new")
+        self.assertEqual(S("新しい\n差出人: 山田\n送信日時: x\n古い"), "新しい")
+        self.assertEqual(S("新しい\n送信者：山田\n宛先: 佐藤\n古い"), "新しい")
+        self.assertEqual(S("新しい\n差出人: 山田\n件名: x\n古い"), "新しい")
+        self.assertEqual(S("new\nOn Mon, Apr 8, 2024 at 9:00 AM Zed <z@example.com> wrote:\n> old"), "new")
+        self.assertEqual(S("new\nOn Mon, Apr 8, 2024 at 9:00 AM Zed <z@example.com>\nwrote:\n> old\n> older"), "new")
+        self.assertEqual(S("新しい\n2024年4月8日(月) 9:00 Zed <z@example.com>:\n> 古い"), "新しい")
+        self.assertEqual(S("新しい\n2024/04/08 9:00、山田さんが書きました:\n> 古い"), "新しい")
+        self.assertEqual(S("新しい\n2024/04/08 9:00 山田 <y@example.com> のメッセージ:\n> 古い"), "新しい")      # Mac Mail
+        self.assertEqual(S("line1\n> q1\n>> q2\n  > q3\nline2"), "line1\nline2")          # 連続する '>' はブロックごと除く
+        self.assertEqual(S("line1\n＞ q1\n＞ q2\nline2"), "line1\nline2")                  # 全角＞も
+        self.assertEqual(S("a\n\n\n\n\nb"), "a\n\nb")
+        self.assertEqual(S("a\n________________________________\nFrom: x\nSent: y\nold"), "a")
+        self.assertEqual(T.strip_quoted(None), "")
+        self.assertEqual(T.strip_quoted("a\x00b\x0bc"), "abc")
+
+    def test_head_600_chars_are_never_judged_as_quotes(self):
+        head_cases = [
+            "From: 田中\nTo: 佐藤\nSubject: 通知\nDate: 2024-04-01\n本文はここです。納期は10/20。",          # 先頭が From:+To: の通知メール
+            "-----Original Message-----\nFrom: a\nSent: x\nIMPORTANT-TEXT",
+            "> q1\n> q2\nIMPORTANT-TEXT",
+            "On Mon, Apr 8, 2024 at 9:00 AM Zed <z@example.com> wrote:\n> q\nIMPORTANT-TEXT",
+            "差出人: 田中\n送信日時: x\nIMPORTANT-TEXT",
+        ]
+        for b in head_cases:
+            self.assertEqual(T.strip_quoted_ex(b), (b.strip(), 0, False), b)               # 600字未満の本文は全文保持
+        long_head = "From: A\nSent: x\nTo: y\n" + "h" * 560 + "\nTAIL-AT-600"
+        self.assertEqual(T.strip_quoted(long_head), long_head.strip())
+        # 600字を過ぎた位置の同じヘッダは引用として省く
+        pad = "p" * 599 + "\n"
+        self.assertEqual(T.strip_quoted(pad + "From: A\nSent: x\nold"), "p" * 599)
+        self.assertEqual(T.strip_quoted_ex(pad + "-----Original Message-----\nold")[1] > 0, True)
+        # ちょうど境界: 行頭が599字目までなら保持、600字目以降なら判定対象
+        self.assertEqual(T.strip_quoted("p" * 598 + "\nFrom: A\nSent: x\nold"), "p" * 598 + "\nFrom: A\nSent: x\nold")
+        # 600字より後ろの > ブロックは省くが、先頭600字の > は残る
+        self.assertEqual(T.strip_quoted("> h1\n> h2\n" + "x" * 700 + "\n> t1\n> t2\nend"), "> h1\n> h2\n" + "x" * 700 + "\nend")
+
+    def test_quote_stripping_keeps_important_text(self):
+        keep = [
+            "Q1: ok?\nFrom: Tokyo to Osaka\nA: yes",                                  # Sent/Date 等が続かない From: は本文
+            "送信者: 山田商事です\nよろしくお願いします",
+            "メモに書きました。\n続き",
+            "Please reply on Monday. I wrote: nothing",
+            "As I wrote:\nthe plan is fixed",                                          # 日時・アドレスの無い wrote:
+            "On the other hand, as I wrote:\nkeep",
+            "山田さんが書きました：\n本文",                                              # 日時の無い 書きました:
+            "確認のメッセージ:\n本文",
+            "On Mon, Apr 8, 2024 at 9:00 AM Zed <z@example.com> wrote:\nNORMAL SENTENCE FOLLOWS",     # 日時入りでも > が続かない普通の文
+            "2024/04/08 9:00、山田さんが書きました:\nそのまま本文",
+            "a\n> single quoted line\nb",                                              # 孤立した1行の '>' は残す
+            "a\n＞ single\nb",
+            "From: A\nl1\nl2\nl3\nl4\nl5\nl6\nSent: far away",                      # 先読み範囲(6行)を超える
+            "From: " + "x" * 400 + "\nSent: t\nstill body",                          # 300字超の行は返信ヘッダ判定をしない
+            "On 2024/04/08 9:00 " + "x" * 400 + " wrote:\n> q\nstill body",
+            "text -----Original Message----- inline",                                   # 行全体が区切り線でない
+            "--- Original Message --- is quoted in this sentence",
+        ]
+        for k in keep:
+            self.assertEqual(Z(k), k.strip(), k)
+            self.assertEqual(T.strip_quoted(k), k.strip(), k)
+
+    def test_reply_header_lookahead_2_to_6_lines(self):
+        for gap in range(0, 6):                                # From: の 1〜6 行先に Sent: がある
+            body = "new\nFrom: A\n" + "x\n" * gap + "Sent: t\nold"
+            self.assertEqual(Z(body), "new", gap)
+        body = "new\nFrom: A\n" + "x\n" * 6 + "Sent: t\nold"      # 7 行先は対象外
+        self.assertEqual(Z(body), body.strip())
+
+    def test_inline_reply_answers_are_kept(self):
+        body = ("Hi,\nOn Mon, Apr 8, 2024 at 9:00 AM Zed <z@example.com>\nwrote:\n> Q1: when?\nANSWER-ONE tomorrow\n"
+                "> Q2: who?\n> (cont)\nANSWER-TWO Sato\nThanks")
+        text, dropped, only = T.strip_quoted_ex(PADTXT + body)
+        self.assertIn("ANSWER-ONE tomorrow", text)
+        self.assertIn("ANSWER-TWO Sato", text)
+        self.assertNotIn("Q1: when?", text)
+        self.assertNotIn("wrote", text)
+        self.assertGreater(dropped, 0)
+        self.assertFalse(only)
+
+    def test_forwarded_content_is_kept(self):
+        fwd = "FYI below\n---------- Forwarded message ---------\nFrom: A <a@example.com>\nSent: x\nTo: y\nSubject: s\nIMPORTANT-FWD-CONTENT"
+        self.assertEqual(Z(fwd), fwd)
+        self.assertIn("IMPORTANT-FWD-CONTENT", Z("転送します\n-------- 転送メッセージ --------\n差出人: A\n送信日時: x\nIMPORTANT-FWD-CONTENT"))
+        outlook_fwd = "see below\nFrom: A\nSent: x\nTo: y\nSubject: FW: s\nIMPORTANT-FWD-CONTENT"
+        self.assertNotIn("IMPORTANT", Z(outlook_fwd))                                # 件名の手がかりが無ければ返信とみなす
+        self.assertEqual(Z(outlook_fwd, True), outlook_fwd)                          # 件名が FW: なら残す
+
+    def test_dropped_count_and_quote_only_are_strict(self):
+        text, dropped, only = T.strip_quoted_ex(PADTXT + "new\nFrom: a\nSent: x\nold")
+        self.assertEqual((dropped, only), (len("From: a") + len("Sent: x") + len("old") + 3, False))
+        self.assertEqual(T.strip_quoted_ex("> a\n> b"), ("> a\n> b", 0, False))         # 先頭600字は保持（空にしない）
+        self.assertEqual(T.strip_quoted_ex(PADTXT + "> a\n> b")[2], False)
+        self.assertEqual(T.strip_quoted_ex("")[2], False)
+        self.assertEqual(T.strip_quoted_ex("   \n\n")[2], False)
+        self.assertGreater(len(T.strip_quoted_ex("> " + "q" * 50 + "\n" + ("> " + "q" * 50 + "\n") * 30)[0]), 590)    # 引用だらけでも先頭は残る
+        # 『(引用または返信ヘッダ形式のため省略)』は本文が空で省いた字数があるときだけ（表示側の確認）
+        t = T.format_export_mail(1, {"t": dt(4, 1), "sender": "S", "state": "ok", "body": "", "qdrop": 40, "qonly": True}, 100)[0]
+        self.assertIn("(引用または返信ヘッダ形式のため省略) …(引用 40字省略)", t)
+        t = T.format_export_mail(1, {"t": dt(4, 1), "sender": "S", "state": "ok", "body": "", "had_body": True}, 100)[0]
+        self.assertIn("(本文なし)", t)
+        self.assertNotIn("引用", t)
+
+    def test_quote_only_body_still_keeps_head_in_file(self):
+        w = self.world(A2=exp_item("A2", f"{SECRET} Topic one", dt(4, 10), "Owner Taro", "> only quoted\n> more"),
+                       A3=exp_item("A3", f"RE: RE: {SECRET} Topic one", dt(4, 11), "Sato Pm", ""))
+        self.ids(self.tid["one"])
+        self.go(w)
+        text = self.txt("one")
+        self.assertIn("> only quoted\n> more", text)
+        self.assertIn("(本文なし)", text)
+
+    def test_redos_long_lines_are_fast(self):
+        import time as _t
+        heads = [PADTXT + "-" * 100000, PADTXT + " " * 1000000, PADTXT + "-" * 100000 + " Original Message " + "-" * 100000,
+                 PADTXT + "On " + "a " * 50000 + "wrote:", PADTXT + "On x\n" + " " * 1000000 + "wrote:",
+                 PADTXT + "From: " + "x" * 100000 + "\nSent: y", PADTXT + ("> " * 50000), PADTXT + "\n".join(["-" * 80] * 3000),
+                 PADTXT + "On 2024/04/08 9:00 " + "<" * 50000 + "wrote:", PADTXT + "2024年" + "1" * 100000 + ":"]
+        for b in heads:
+            t0 = _t.perf_counter()
+            T.strip_quoted_ex(b)
+            self.assertLess(_t.perf_counter() - t0, 0.1, b[len(PADTXT):len(PADTXT) + 20])
+        self.assertEqual(T.strip_quoted(PADTXT + "-" * 100000 + "\nend").count("-"), 100000)      # 長い行は引用判定せず本文として残る
+
+    def test_quote_drop_is_marked_in_file_and_forwarded_subject_keeps_header(self):
+        w = self.world(A2=exp_item("A2", f"FW: {SECRET} Topic one", dt(4, 10), "Owner Taro",
+                                    PADTXT + "see below\nFrom: A\nSent: x\nTo: y\nFWD-INNER-TEXT"))
+        self.ids(self.tid["one"])
+        self.go(w)
+        text = self.txt("one")
+        self.assertIn("FWD-INNER-TEXT", text)                                       # FW: 件名のメールは返信ヘッダ以降も残す
+        self.assertRegex(text, r"A3 body\n…\(引用 \d+字省略\)")                       # 省いた字数を明記
+
+    def test_clip_text_and_limits(self):
+        self.assertEqual(T.clip_text("abc", 5), ("abc", 3))
+        s, used = T.clip_text("x" * 2050, 2000)
+        self.assertTrue(s.endswith("…(省略 50字)"))
+        self.assertEqual((s.count("x"), used), (2000, 2000))
+        self.assertEqual(T.clip_text("abc", 0)[0], "…(省略 3字)")
+
+    def test_per_mail_2000_and_thread_30000_limits_keep_date_and_sender(self):
+        recs, its = [], {}
+        for i in range(20):
+            eid = f"L{i:02d}"
+            recs.append(rec(eid, "Long thread subject", f"2024-07-{i + 1:02d}T09:00:00", f"Sender{i:02d}", "Owner Taro", cid="DDDD4444"))
+            its[eid] = exp_item(eid, "Long thread subject", datetime(2024, 7, i + 1, 9), f"Sender{i:02d}", "y" * 2600)
+        self.write_caches(self.records() + recs)
+        tid = T.thread_id_of("c:DDDD4444")
+        self.ids(tid)
+        self.go(self.world(**its))
+        text = _rd(os.path.join(self.text_dir, tid + ".txt"))
+        self.assertIn("…(省略 600字)", text)                                    # 1通2000字上限（2600-2000）
+        self.assertEqual(text.count("y"), 30000)                                # 1スレッド30000字上限（15通ぶん）
+        self.assertIn("…(省略 2600字)", text)                                   # 上限後のメールは本文全部が省略
+        for i in range(20):
+            self.assertIn(f"送信者: Sender{i:02d}", text)                       # 日時・送信者は必ず残る
+            self.assertIn(f"日時: 2024-07-{i + 1:02d} 09:00:00", text)
+
+    # --- 開けないメール・予備探索 ---
+    def test_unopenable_mail_is_recorded_and_run_continues(self):
+        self.ids(self.tid["one"], self.tid["two"])
+        code, out = self.go(self.world(A3=None))
+        self.assertEqual(code, 0, out)
+        text = self.txt("one")
+        self.assertIn("取得できた通数: 2通 / 開けなかった通数: 1通", text)
+        blk = text[text.index("日時: 2024-04-11 09:00:00"):]
+        self.assertIn("送信者: Sato Pm", blk)
+        self.assertIn(T.EXPORT_UNOPENED_TEXT, blk.split("[3]")[0])
+        self.assertNotIn("A3 body", text)
+        self.assertIn("B1 body", self.txt("two"))                              # 続行して次のスレッドも書く
+        self.assertIn("取得 3通 / 開けず 1通", out)
+
+    def test_wrong_subject_item_is_rejected(self):
+        wrong = exp_item("A3", "Completely different mail", dt(4, 11), "Sato Pm", "WRONG BODY")
+        self.ids(self.tid["one"])
+        code, out = self.go(self.world(A3=wrong))
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("WRONG BODY", self.txt("one"))
+        self.assertIn("開けなかった通数: 1通", self.txt("one"))
+
+    def fallback_world(self, extra=(), skip_ids=("A3",)):
+        """保存済みIDは全部無効。現在のOutlookには別のStoreIDで同じメールがある"""
+        def fm(eid, subj, t, sender, body):
+            return self.light(eid, subj, t, sender, Body=body, Recipients=FakeRecipients([("Owner Taro", "o@example.com", 1)]),
+                              Attachments=FakeAtts([]))
+        inbox = FakeFolder("Inbox", [
+            fm("N2", f"{SECRET} Topic one", dt(4, 10), "Owner Taro", "N2 real body"),
+            fm("N3", f"RE: RE: {SECRET} Topic one", dt(4, 11), "Sato Pm", "N3 real body"),
+            fm("N1", f"RE: {SECRET} Topic one", dt(4, 12), "Sato Pm", "N1 real body"),
+        ] + list(extra))
+        mb = FakeStore("user@example.com", inbox_root(inbox), sid="SID-NEW")
+        by_id = {(it.EntryID, "SID-NEW"): it for it in inbox._items.items}
+        return ResolveNS([mb], by_id)
+
+    def test_fallback_finds_by_date_and_subject_and_records_ids(self):
+        self.ids(self.tid["one"])
+        code, out = self.go(self.fallback_world())
+        self.assertEqual(code, 0, out)
+        text = self.txt("one")
+        for b in ("N1 real body", "N2 real body", "N3 real body"):
+            self.assertIn(b, text)
+        self.assertIn("日時＋件名で特定 3通", out)
+        self.assertEqual(len(_rj(self.resolved_file())["ids"]), 3)
+        self.assertEqual(ACCESSED, [])
+
+    def test_fallback_ambiguous_candidates_are_not_exported(self):
+        twin = self.light("N9", f"{SECRET} Topic one", dt(4, 10), "", Body="TWIN BODY",
+                          Recipients=FakeRecipients([]), Attachments=FakeAtts([]))
+        self.ids(self.tid["one"])
+        code, out = self.go(self.fallback_world(extra=[twin]))
+        self.assertEqual(code, 0, out)
+        text = self.txt("one")
+        self.assertNotIn("TWIN BODY", text)
+        self.assertNotIn("N2 real body", text)                                 # 曖昧なので本物のほうも書き出さない
+        self.assertIn("N3 real body", text)                                    # 曖昧でないメールは特定できる
+        self.assertIn("曖昧で特定せず 1通", out)
+        self.assertIn("開けなかった通数: 1通", text)
+
+    def test_fallback_wrong_day_or_wrong_sender_is_not_exported(self):
+        wrong_day = self.light("W1", f"{SECRET} Topic one", dt(4, 10) + __import__("datetime").timedelta(minutes=5), "Owner Taro",
+                               Body="WRONG DAY BODY", Recipients=FakeRecipients([]), Attachments=FakeAtts([]))
+        inbox = FakeFolder("Inbox", [wrong_day])
+        ns = ResolveNS([FakeStore("user@example.com", inbox_root(inbox), sid="SID-NEW")], {})
+        self.ids(self.tid["one"])
+        code, out = self.go(ns)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("WRONG DAY BODY", self.txt("one"))
+        self.assertIn("開けなかった通数: 3通", self.txt("one"))
+
+    def test_fallback_incomplete_search_does_not_export(self):
+        w = self.fallback_world()
+        w.Stores.stores[0]._root = FakeFolder("root", [], subfolders=[
+            FakeFolder("Inbox", [], items_raise=FakeComError(SECRET_ERR))])
+        self.ids(self.tid["one"])
+        code, out = self.go(w)
+        self.assertEqual(code, 0, out)
+        self.assertIn("開けなかった通数: 3通", self.txt("one"))
+
+    # --- 読み取り専用・秘匿 ---
+    def test_read_only_and_logs_have_no_subject_or_names(self):
+        self.ids(self.tid["one"], self.tid["two"], self.tid["three"])
+        code, out = self.go(self.world(A3=None))
+        self.assertEqual(code, 0, out)
+        text = self.logs(out)
+        for bad in (SECRET, "Sato Pm", "Owner Taro", "Zed Other", "Tanaka Partner", "owner@example.com", "plan.pdf",
+                    "Second topic", "A1 body", "Topic one"):
+            self.assertNotIn(bad, text)
+        self.assertIn("本文テキスト:", text)
+        self.assertIn("書き出し: 取得", text)
+        self.assertEqual(ACCESSED, [])
+        self.assertEqual(EXP_SHOWN, [])
+
+    def test_no_mutating_method_is_called(self):
+        calls = []
+
+        class Spy(FakeItem):
+            def __getattr__(self, name):
+                if name in ("Delete", "Move", "Save", "SaveAs", "Display", "Close", "Copy", "MarkAsTask", "UnRead", "Categories",
+                            "FlagStatus", "Send", "ShowCategoriesDialog", "GetInspector"):
+                    calls.append(name)
+                return FakeItem.__getattr__(self, name)
+        base = self.world()
+        its = {}
+        for k, it in base.by_id.items():
+            its[k] = Spy(dict(it._f), stage1=False)
+        base.by_id = its
+        self.ids(self.tid["one"])
+        code, out = self.go(base)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(calls, [])
+        self.assertEqual(ACCESSED, [])
+
+    # --- ファイル名・zip ---
+    def test_file_names_are_thread_id_only_and_zip_matches(self):
+        import zipfile
+        os.makedirs(self.text_dir, exist_ok=True)
+        _wr(os.path.join(self.text_dir, "STALE0001.txt"), "stale")                 # 過去の実行のファイルはzipに入れない（削除もしない）
+        self.ids(self.tid["one"], self.tid["two"])
+        code, out = self.go(self.world())
+        self.assertEqual(code, 0, out)
+        names = sorted(os.listdir(self.text_dir))
+        self.assertEqual(names, sorted(["STALE0001.txt", self.tid["one"] + ".txt", self.tid["two"] + ".txt"]))
+        for n in names:
+            self.assertRegex(n, r"^[A-Za-z0-9_-]{4,64}\.txt\Z")
+            self.assertNotIn("Topic", n)
+        zips = glob.glob(os.path.join(self.out, "thread_text_*.zip"))
+        self.assertEqual(len(zips), 1)
+        with zipfile.ZipFile(zips[0]) as zf:
+            self.assertEqual(sorted(zf.namelist()), sorted([self.tid["one"] + ".txt", self.tid["two"] + ".txt"]))
+            for n in zf.namelist():
+                self.assertEqual(zf.read(n).decode("utf-8"), _rd(os.path.join(self.text_dir, n)))
+        self.assertIn(zips[0], out)
+        self.assertEqual(_rd(os.path.join(self.text_dir, "STALE0001.txt")), "stale")
+
+    def test_files_are_utf8(self):
+        self.ids(self.tid["two"])
+        self.go(self.world(B1=exp_item("B1", "Second topic subject", dt(5, 1, 10), "山田 太郎", "日本語の本文です。")))
+        raw = _rb(os.path.join(self.text_dir, self.tid["two"] + ".txt"))
+        self.assertFalse(raw.startswith(b"\xef\xbb\xbf"))
+        self.assertIn("日本語の本文です。", raw.decode("utf-8"))
+
+    # --- 安全弁 ---
+    def test_export_max_guard_requires_yes(self):
+        self.ids(self.tid["one"], self.tid["three"])            # 5通
+        ns = self.world()
+        code, out = self.go(ns, "--export-max", "4")
+        self.assertEqual((code, self.pc.init), (3, 0))
+        self.assertEqual(ns.calls, [])
+        self.assertFalse(os.path.exists(self.text_dir))
+        self.assertFalse(glob.glob(os.path.join(self.out, "thread_text_*.zip")))
+        self.assertIn("--export-max (4通)", out)
+        self.assertIn("概算", out)
+        code, out = self.go(ns, "--export-max", "4", "--yes")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(len(os.listdir(self.text_dir)), 2)
+        code, out = self.go(ns, "--export-max", "5")             # ちょうど上限は実行される
+        self.assertEqual(code, 0, out)
+        self.assertEqual(T.EXPORT_MAX_DEFAULT, 1500)
+
+    def test_progress_is_counts_only(self):
+        import unittest.mock as mock
+        self.ids(self.tid["one"], self.tid["three"])
+        with mock.patch.object(T, "EXPORT_PROGRESS_EVERY", 2):
+            code, out = self.go(self.world())
+        self.assertIn("書き出し 2/5通", out)
+        self.assertIn("書き出し 4/5通", out)
+        self.assertEqual(code, 0)
+
+    def test_ctrl_c_saves_files_and_zip_so_far(self):
+        import zipfile
+        its = {"C2": KbdItem(dict(self.world().by_id[("C2", EXP_SID)]._f), stage1=False)}
+        self.ids(self.tid["two"], self.tid["three"], self.tid["one"])
+        code, out = self.go(self.world(**its))
+        self.assertEqual(code, 130, out)
+        self.assertIn("Ctrl+C", out)
+        names = sorted(os.listdir(self.text_dir))
+        self.assertEqual(names, sorted([self.tid["two"] + ".txt", self.tid["three"] + ".txt"]))      # 3つ目(one)は未着手
+        part = self.txt("three")
+        self.assertIn("C1 body", part)
+        self.assertIn(T.EXPORT_INTERRUPTED_TEXT, part)
+        self.assertIn("日時: 2024-06-02 10:00:00", part)                         # 未取得でも日時・送信者は残る
+        zips = glob.glob(os.path.join(self.out, "thread_text_*.zip"))
+        self.assertEqual(len(zips), 1)
+        with zipfile.ZipFile(zips[0]) as zf:
+            self.assertEqual(sorted(zf.namelist()), names)
+        self.assertEqual((self.pc.init, self.pc.uninit), (1, 1))
+
+    def test_theme_not_required(self):
+        self.ids(self.tid["two"])
+        argv = ["--theme", os.path.join(self.tmp.name, "nothing.json"), "--data-dir", self.data, "--output-dir", self.out,
+                "--export-threads", self.ids_path]
+        code, out = run_main(argv, fake_com(self.world())[0])
+        self.assertEqual(code, 0, out)
+        self.assertTrue(os.path.exists(os.path.join(self.text_dir, self.tid["two"] + ".txt")))
+
+    def test_help_docstring_and_version(self):
+        self.assertTrue(re.match(r"^\d{8}_\d{2}$", T.SCRIPT_VERSION))
+        self.assertTrue(T.__file__.endswith(f"thread_ledger_scan_{T.SCRIPT_VERSION}.py") if hasattr(T, "__file__") else True)
+        self.assertIn("--export-threads", T.__doc__)
+        self.assertIn("--export-max", T.__doc__)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            with self.assertRaises(SystemExit):
+                T.parse_args(["--help"])
+        text = "".join(buf.getvalue().split())
+        for w in ("--export-threads", "走査は一切しない", "--export-max", "1500"):
+            self.assertIn(w, text)
+        a = T.parse_args([])
+        self.assertEqual((a.export_threads, a.export_max), (None, 1500))
+
+    def test_old_versions_are_in_old_folder(self):
+        cur = sorted(glob.glob(os.path.join(TOOLS_DIR, "thread_ledger_scan_*.py")))
+        self.assertEqual([os.path.basename(x) for x in cur], [f"thread_ledger_scan_{T.SCRIPT_VERSION}.py"])
+        self.assertTrue(glob.glob(os.path.join(TOOLS_DIR, "old", "thread_ledger_scan_*.py")))
+
+
+class TestExportReview(ExportBase):
+    """敵対的レビューの反映: 誤同定・取りこぼし・上書き・永続化・エラー経路"""
+
+    def no_item(self, key):
+        """Subject が読めないメール（他の項目は正常）"""
+        f = dict(self.world().by_id[(key, EXP_SID)]._f)
+        f.pop("Subject")
+        return FakeItem(f, stage1=False)
+
+    def twin(self, key, **over):
+        f = dict(self.world().by_id[(key, EXP_SID)]._f)
+        f.update(over)
+        return FakeItem(f, stage1=False, display_log=EXP_SHOWN)
+
+    # --- 1: 空文字ガード ---
+    def test_empty_export_threads_is_argument_error(self):
+        self.assertIsNone(T.parse_args([]).export_threads)
+        for argv in (["--export-threads", ""], ["--export-threads="], ["--export-threads", "  "]):
+            com, pc = fake_com(self.world())
+            code, out = run_main(self.argv(*argv), com)
+            self.assertEqual((code, pc.init), (2, 0), argv)
+            self.assertIn("空文字は不可", out)
+        self.assertFalse(os.path.exists(self.text_dir))
+        self.assertFalse(glob.glob(os.path.join(self.out, "thread_text_*.zip")))
+
+    def test_empty_string_does_not_fall_through_to_a_scan(self):
+        import unittest.mock as mock
+
+        def boom(*a, **k):
+            raise AssertionError("走査/パイプラインが呼ばれた")
+        with mock.patch.object(T, "run_scan", boom), mock.patch.object(T, "run_pipeline", boom):
+            code, out = run_main(self.argv("--export-threads="), fake_com(self.world())[0])
+        self.assertEqual(code, 2)
+
+    # --- 併用 ---
+    def test_conflicting_options_are_argument_errors(self):
+        self.ids(self.tid["one"])
+        cases = [("--open", "abcd1234"), ("--entry-id", "AB"), ("--import-judgments", "x.xlsx"), ("--probe-table",),
+                 ("--probe-conversation-id",), ("--probe-speed",), ("--register-protocol",), ("--unregister-protocol",),
+                 ("--check-subjects",), ("--rescan",), ("--evaluate-only",)]
+        for extra in cases:
+            com, pc = fake_com(self.world())
+            code, out = run_main(self.argv("--export-threads", self.ids_path, *extra), com)
+            self.assertEqual((code, pc.init), (2, 0), extra)
+            self.assertIn("同時に指定できません", out)
+        self.assertFalse(os.path.exists(self.text_dir))
+
+    def test_ignored_options_do_not_change_behaviour(self):
+        self.ids(self.tid["one"])
+        for extra in (("--resolve-ids",), ("--suggest",), ("--suggest-terms",), ("--no-stage2",), ("--skip-scan",), ("--no-body",),
+                      ("--stage2-max", "1"), ("--stage2-scope", "candidate"), ("--include-no-anchor",)):
+            code, out = self.go(self.world(), *extra)
+            self.assertEqual(code, 0, extra)
+            self.assertIn("メール数: 3通 / 取得できた通数: 3通", self.txt("one"))
+        self.assertEqual(len(glob.glob(os.path.join(self.out, "thread_ledger_*.csv"))), 0)       # 台帳は出さない
+
+    # --- 3: 上書きの退避・zip名 ---
+    def test_existing_file_is_backed_up_not_overwritten(self):
+        os.makedirs(self.text_dir)
+        old = os.path.join(self.text_dir, self.tid["one"] + ".txt")
+        _wr(old, "OLD FULL VERSION")
+        self.ids(self.tid["one"])
+        code, out = self.go(self.world())
+        self.assertEqual(code, 0, out)
+        baks = glob.glob(old + ".bak_*")
+        self.assertEqual(len(baks), 1)
+        self.assertEqual(_rd(baks[0]), "OLD FULL VERSION")
+        self.assertIn("A2 body first mail", _rd(old))
+        self.assertEqual(glob.glob(os.path.join(self.text_dir, "*.tmp")), [])
+        code, out = self.go(self.world())                                         # もう一度（同じ秒でも .bak は衝突しない）
+        self.assertEqual(len(glob.glob(old + ".bak_*")), 2)
+        self.assertIn("OLD FULL VERSION", [_rd(b) for b in glob.glob(old + ".bak_*")])
+        import zipfile
+        with zipfile.ZipFile(glob.glob(os.path.join(self.out, "thread_text_*.zip"))[0]) as zf:
+            self.assertEqual(zf.namelist(), [self.tid["one"] + ".txt"])             # .bak は zip に入れない
+
+    def test_zip_names_never_collide(self):
+        self.ids(self.tid["one"])
+        for _ in range(3):
+            self.assertEqual(self.go(self.world())[0], 0)
+        zips = glob.glob(os.path.join(self.out, "thread_text_*.zip"))
+        self.assertEqual(len(zips), 3)
+
+    def test_ctrl_c_partial_does_not_break_existing_full_file(self):
+        import zipfile
+        os.makedirs(self.text_dir)
+        full = os.path.join(self.text_dir, self.tid["three"] + ".txt")
+        _wr(full, "OLD FULL THREE")
+        its = {"C2": KbdItem(dict(self.world().by_id[("C2", EXP_SID)]._f), stage1=False)}
+        self.ids(self.tid["three"])
+        code, out = self.go(self.world(**its))
+        self.assertEqual(code, 130, out)
+        self.assertEqual(_rd(full), "OLD FULL THREE")                              # 完全版はそのまま
+        part = os.path.join(self.text_dir, self.tid["three"] + ".partial.txt")
+        self.assertIn(T.EXPORT_INTERRUPTED_TEXT, _rd(part))
+        self.assertEqual(glob.glob(full + ".bak_*"), [])
+        with zipfile.ZipFile(glob.glob(os.path.join(self.out, "thread_text_*.zip"))[0]) as zf:
+            self.assertEqual(zf.namelist(), [self.tid["three"] + ".partial.txt"])
+
+    # --- 4,5: 取り違え防止（件名＋受信日時）と、不採用IDを永続化しない ---
+    def test_received_time_mismatch_is_rejected_on_saved_ids(self):
+        wrong = self.twin("A3", ReceivedTime=dt(4, 11, 9, 1))                      # 同じ件名・1分違い
+        near = self.twin("A2", ReceivedTime=dt(4, 10, 9, 0, 2))                    # 2秒差までは同一メール
+        self.ids(self.tid["one"])
+        code, out = self.go(self.world(A3=wrong, A2=near))
+        text = self.txt("one")
+        self.assertEqual(code, 0, out)
+        self.assertIn("取得できた通数: 2通 / 開けなかった通数: 1通", text)
+        self.assertNotIn("A3 body", text)
+        self.assertIn("A2 body first mail", text)
+        late = self.twin("A2", ReceivedTime=dt(4, 10, 9, 0, 3))
+        self.go(self.world(A2=late))
+        self.assertNotIn("A2 body first mail", self.txt("one"))                     # 3秒差は不採用
+
+    def test_unreadable_subject_or_time_accepted_only_for_saved_ids(self):
+        self.ids(self.tid["one"])
+        self.go(self.world(A3=self.no_item("A3")))
+        self.assertIn("A3 body", self.txt("one"))                                  # 保存済みID(元のID)なら許す
+        f = dict(self.world().by_id[("A3", EXP_SID)]._f)
+        f.pop("ReceivedTime")
+        self.go(self.world(A3=FakeItem(f, stage1=False)))
+        self.assertIn("A3 body", self.txt("one"))
+
+    def test_eid_only_rejects_unreadable_subject_but_accepts_good_item(self):
+        self.ids(self.tid["three"])
+        for item, expect in ((self.no_item("C2"), False), (self.twin("C2"), True)):
+            ns = self.world(C2=None)
+            ns = ResolveNS([], {k: v for k, v in ns.by_id.items()}, eid_only={"C2": item})
+            code, out = self.go(ns)
+            self.assertEqual(code, 0, out)
+            self.assertEqual("C2 body" in self.txt("three"), expect)
+        f = dict(self.world().by_id[("C2", EXP_SID)]._f)
+        f.pop("ReceivedTime")
+        ns = self.world(C2=None)
+        ns = ResolveNS([], dict(ns.by_id), eid_only={"C2": FakeItem(f, stage1=False)})
+        __import__("shutil").rmtree(self.text_dir)          # 前の実行の結果と混ざらないように（取得数が減る再実行は .partial に書かれるため）
+        self.go(ns)
+        self.assertNotIn("C2 body", self.txt("three"))                             # 時刻が読めない EntryIDのみ取得は不採用
+
+    def test_recorded_id_rejected_when_subject_unreadable_and_file_untouched(self):
+        key = T.mail_resolve_key(EXP_SID, "C2")
+        _wj(self.resolved_file(), {"schema": T.RESOLVED_SCHEMA, "ids": {key: {"eid": "R2", "sid": "SID-R"}}})
+        before = _rb(self.resolved_file())
+        self.ids(self.tid["three"])
+        for item, expect in ((self.no_item("C2"), False), (self.twin("C2"), True)):
+            ns = self.world(C2=None)
+            ns.by_id[("R2", "SID-R")] = item
+            code, out = self.go(ns)
+            self.assertEqual(code, 0, out)
+            self.assertEqual("C2 body" in self.txt("three"), expect)
+        self.assertEqual(_rb(self.resolved_file()), before)
+
+    def test_search_hit_with_wrong_item_is_rejected_and_not_persisted(self):
+        self.ids(self.tid["one"])
+        for bad in ({"drop": "Subject"}, {"ReceivedTime": dt(4, 20)}, {"Subject": "Totally other subject text"}):
+            ns = self.fallback_world()
+            for k, it in list(ns.by_id.items()):
+                f = dict(self.twin("A2")._f)
+                f["Body"] = "WRONG-BODY"
+                if "drop" in bad:
+                    f.pop(bad["drop"])
+                else:
+                    f.update(bad)
+                ns.by_id[k] = FakeItem(f, stage1=False)
+            code, out = self.go(ns)
+            self.assertEqual(code, 0, (bad, out))
+            self.assertNotIn("WRONG-BODY", self.txt("one"))
+            self.assertIn("開けなかった通数: 3通", self.txt("one"))
+            self.assertFalse(os.path.exists(self.resolved_file()), bad)             # 不採用のIDを記録しない
+        ns = self.fallback_world()                                                   # 正しいものは記録される（対照）
+        self.go(ns)
+        self.assertEqual(len(_rj(self.resolved_file())["ids"]), 3)
+
+    def fallback_world(self, extra=(), skip_ids=()):
+        return TestExportThreads.fallback_world(self, extra, skip_ids)
+
+    # --- 6: エラー経路でも秘匿・続行 ---
+    def test_body_exception_continues_and_logs_no_secrets(self):
+        f = dict(self.world().by_id[("A3", EXP_SID)]._f)
+        bad = FakeItem(f, raises={"Body": ValueError(SECRET_ERR + SECRET)}, stage1=False)
+        self.ids(self.tid["one"], self.tid["two"])
+        code, out = self.go(self.world(A3=bad))
+        self.assertEqual(code, 0, out)
+        self.assertIn("開けなかった通数: 1通", self.txt("one"))
+        self.assertIn("B1 body", self.txt("two"))
+        text = self.logs(out)
+        for b in (SECRET, SECRET_ERR, "Sato Pm", "Owner Taro", "A3 body"):
+            self.assertNotIn(b, text)
+        self.assertIn("ValueError", text)                                           # 種別だけは出る
+
+    def test_mismatch_and_open_errors_do_not_leak(self):
+        wrong = self.twin("A3", Subject=f"{SECRET} different", Body="WRONG BODY", SenderName="Leak Name")
+        self.ids(self.tid["one"])
+        code, out = self.go(self.world(A3=wrong, A2=None))
+        self.assertEqual(code, 0, out)
+        text = self.logs(out)
+        for b in (SECRET, SECRET_ERR, "WRONG BODY", "Leak Name", "Sato Pm", "Owner Taro"):
+            self.assertNotIn(b, text)
+        self.assertNotIn("WRONG BODY", self.txt("one"))
+
+    # --- 入出力の失敗 ---
+    def test_ids_file_size_limit(self):
+        import unittest.mock as mock
+        self.ids(self.tid["one"])
+        with mock.patch.object(T, "EXPORT_IDS_MAX_BYTES", 5):
+            code, out = self.go(self.world())
+        self.assertEqual((code, self.pc.init), (2, 0))
+        self.assertFalse(os.path.exists(self.text_dir))
+        self.ids(*([self.tid["one"]] * 3))
+        with mock.patch.object(T, "EXPORT_IDS_MAX_BYTES", os.path.getsize(self.ids_path)):
+            self.assertEqual(self.go(self.world())[0], 0)                           # ちょうど上限は読める
+
+    def test_output_folder_creation_failure(self):
+        import unittest.mock as mock
+        orig = os.makedirs
+
+        def mk(path, *a, **k):
+            if os.path.basename(str(path)) == "thread_text":
+                raise PermissionError(SECRET_ERR)
+            return orig(path, *a, **k)
+        self.ids(self.tid["one"])
+        with mock.patch.object(os, "makedirs", mk):
+            code, out = self.go(self.world())
+        self.assertEqual(code, 2)
+        self.assertNotIn(SECRET_ERR, self.logs(out))
+        self.assertIn("出力フォルダを作れません", out)
+        self.assertFalse(glob.glob(os.path.join(self.out, "thread_text_*.zip")))
+
+    def test_write_failure_continues_and_returns_error_code(self):
+        import unittest.mock as mock
+        import zipfile
+        orig = T._write_export_file
+
+        def w(path, text):
+            if self.tid["one"] in path:
+                raise OSError(SECRET_ERR)
+            return orig(path, text)
+        self.ids(self.tid["one"], self.tid["two"])
+        with mock.patch.object(T, "_write_export_file", w):
+            code, out = self.go(self.world())
+        self.assertEqual(code, 1, out)
+        self.assertEqual(os.listdir(self.text_dir), [self.tid["two"] + ".txt"])
+        self.assertNotIn(SECRET_ERR, self.logs(out))
+        with zipfile.ZipFile(glob.glob(os.path.join(self.out, "thread_text_*.zip"))[0]) as zf:
+            self.assertEqual(zf.namelist(), [self.tid["two"] + ".txt"])
+
+    # --- テーマ無し ---
+    def test_no_theme_uses_default_exclusions_and_period(self):
+        paths = self.paths()
+        _wj(T.folder_cache_path(paths, 2, "S1", "\\削除済みアイテム"),
+            cache("S1", 2, "\\削除済みアイテム", [rec("Z1", "Deleted only thread", "2024-04-10T09:00:00", "Zed", "Owner Taro", cid="EEEE5555")],
+                  sid=EXP_SID))
+        _wj(T.folder_cache_path(paths, 3, "S1", "\\Old"),
+            cache("S1", 3, "\\Old", [rec("Z2", "Ancient thread subject", "2020-01-10T09:00:00", "Zed", "Owner Taro", cid="FFFF6666")],
+                  sid=EXP_SID))
+        zt, zo = T.thread_id_of("c:EEEE5555"), T.thread_id_of("c:FFFF6666")
+        self.ids(self.tid["two"], zt, zo)
+        argv = ["--theme", os.path.join(self.tmp.name, "nothing.json"), "--data-dir", self.data, "--output-dir", self.out,
+                "--export-threads", self.ids_path]
+        code, out = run_main(argv, fake_com(self.world())[0])
+        self.assertEqual(code, 0, out)
+        self.assertIn("既定の除外設定・期間", out)
+        self.assertEqual(os.listdir(self.text_dir), [self.tid["two"] + ".txt"])     # 削除済み・既定期間(2023-07〜)外は対象外
+        self.assertIn("見つからずスキップ 2件", out)
+
+
+class TestExportReview2(ExportBase):
+    """再レビュー反映: 既存ファイルの保護・item.To/CCの代替・アドレス非出力・Bodyが文字列でない場合 ほか"""
+
+    def mutated(self, key, **over):
+        f = dict(self.world().by_id[(key, EXP_SID)]._f)
+        f.update(over)
+        return FakeItem(f, stage1=False)
+
+    def all_fail_world(self):
+        return ResolveNS([], {})
+
+    def test_all_failed_rerun_does_not_replace_existing_file(self):
+        self.ids(self.tid["one"])
+        self.assertEqual(self.go(self.world())[0], 0)
+        good = _rd(os.path.join(self.text_dir, self.tid["one"] + ".txt"))
+        self.assertIn("取得できた通数: 3通", good)
+        code, out = self.go(self.all_fail_world())                                # 全件失敗（ok=0）の再実行
+        self.assertEqual(code, 0, out)
+        self.assertEqual(_rd(os.path.join(self.text_dir, self.tid["one"] + ".txt")), good)
+        part = _rd(os.path.join(self.text_dir, self.tid["one"] + ".partial.txt"))
+        self.assertIn("取得できた通数: 0通 / 開けなかった通数: 3通", part)
+        self.assertEqual(glob.glob(os.path.join(self.text_dir, "*.bak_*")), [])
+        code, out = self.go(self.all_fail_world())                                # .partial が既にあれば .bak に退避してから書く
+        self.assertEqual(len(glob.glob(os.path.join(self.text_dir, self.tid["one"] + ".partial.txt.bak_*"))), 1)
+        self.assertEqual(_rd(os.path.join(self.text_dir, self.tid["one"] + ".txt")), good)
+
+    def test_rerun_with_fewer_ok_mails_goes_to_partial_but_equal_or_more_replaces(self):
+        import zipfile
+        self.ids(self.tid["one"])
+        self.go(self.world())
+        full = _rd(os.path.join(self.text_dir, self.tid["one"] + ".txt"))
+        self.go(self.world(A3=None))                                               # 3通 → 2通に減った
+        self.assertEqual(_rd(os.path.join(self.text_dir, self.tid["one"] + ".txt")), full)
+        self.assertIn("取得できた通数: 2通", _rd(os.path.join(self.text_dir, self.tid["one"] + ".partial.txt")))
+        zips = sorted(glob.glob(os.path.join(self.out, "thread_text_*.zip")))
+        with zipfile.ZipFile(zips[-1]) as zf:
+            self.assertEqual(zf.namelist(), [self.tid["one"] + ".partial.txt"])
+        self.go(self.world())                                                      # 同数(3通)なら .bak 退避して置き換え
+        self.assertEqual(len(glob.glob(os.path.join(self.text_dir, self.tid["one"] + ".txt.bak_*"))), 1)
+
+    def test_existing_file_with_unparsable_header_is_backed_up_when_ok_positive(self):
+        os.makedirs(self.text_dir)
+        _wr(os.path.join(self.text_dir, self.tid["one"] + ".txt"), "hand edited file")
+        self.ids(self.tid["one"])
+        self.go(self.world())
+        self.assertEqual(len(glob.glob(os.path.join(self.text_dir, self.tid["one"] + ".txt.bak_*"))), 1)
+        self.assertEqual(os.path.exists(os.path.join(self.text_dir, self.tid["one"] + ".partial.txt")), False)
+
+    def test_interrupt_during_replace_leaves_no_tmp_and_restores_original(self):
+        import unittest.mock as mock
+        os.makedirs(self.text_dir)
+        path = os.path.join(self.text_dir, "abcd1234.txt")
+        _wr(path, "ORIGINAL")
+        real = os.replace
+        calls = []
+
+        def rep(a, b):
+            calls.append((a, b))
+            if len(calls) == 2:                          # 退避の後、新ファイルを置く直前に Ctrl+C
+                raise KeyboardInterrupt()
+            return real(a, b)
+        with mock.patch.object(os, "replace", rep):
+            with self.assertRaises(KeyboardInterrupt):
+                T.save_export_thread(self.text_dir, "abcd1234", "NEW", False, "20260101_000000", 3)
+        self.assertEqual(_rd(path), "ORIGINAL")                                    # 元のファイルは戻っている
+        self.assertEqual(glob.glob(os.path.join(self.text_dir, "*.tmp")), [])
+        # 書き込み中の失敗でも .tmp を残さない
+        with mock.patch.object(T, "_write_export_file", lambda p, t: (_wr(p, "half"), (_ for _ in ()).throw(OSError("x")))):
+            with self.assertRaises(OSError):
+                T.save_export_thread(self.text_dir, "abcd1234", "NEW", False, "20260101_000000", 3)
+        self.assertEqual(glob.glob(os.path.join(self.text_dir, "*.tmp")), [])
+        self.assertEqual(_rd(path), "ORIGINAL")
+
+    def test_email_addresses_are_not_written(self):
+        w = self.world(A2=self.mutated("A2", SenderEmailAddress="leak@example.com", SenderEmailType="SMTP",
+                                       PropertyAccessor=FakePA({T.PR_SENDER_SMTP: "leak@example.com"}),
+                                       Recipients=FakeRecipients([("Owner Taro", "leak2@example.com", 1)])))
+        self.ids(self.tid["one"])
+        self.go(w)
+        text = self.txt("one")
+        self.assertNotIn("@", text)
+        self.assertNotIn("leak", text)
+        self.assertIn("送信者: Owner Taro", text)
+
+    def test_to_cc_fallbacks_item_strings_then_cache(self):
+        self.ids(self.tid["one"])
+        no_recips = FakeRecipients([])
+        w = self.world(A2=self.mutated("A2", Recipients=no_recips, To="Fallback To; Other To", CC="Fallback Cc"))
+        self.go(w)
+        text = self.txt("one")
+        self.assertIn("宛先(To): Fallback To; Other To", text)
+        self.assertIn("CC: Fallback Cc", text)
+        f = dict(self.world().by_id[("A1", EXP_SID)]._f)
+        f.pop("Recipients")                                                        # Recipients が読めず item.To も無い → キャッシュの To
+        shutil_rm = __import__("shutil").rmtree
+        shutil_rm(self.text_dir)
+        self.go(self.world(A1=FakeItem(f, stage1=False)))
+        t2 = self.txt("one")
+        a1 = t2[t2.index("[3]"):]
+        self.assertIn("宛先(To): Owner Taro", a1)                                  # キャッシュ(rec A1 の to)
+        self.assertIn("CC: (なし)", a1)
+
+    def test_body_not_a_string_is_a_failed_mail_and_run_continues(self):
+        for bad in (None, 123, b"bytes"):
+            shutil = __import__("shutil")
+            if os.path.isdir(self.text_dir):
+                shutil.rmtree(self.text_dir)
+            self.ids(self.tid["one"], self.tid["two"])
+            code, out = self.go(self.world(A3=self.mutated("A3", Body=bad)))
+            self.assertEqual(code, 0, (bad, out))
+            self.assertIn("取得できた通数: 2通 / 開けなかった通数: 1通", self.txt("one"))
+            self.assertIn("B1 body", self.txt("two"))
+
+    def test_broken_theme_logs_default_period_and_ignored_scan_options(self):
+        self.ids(self.tid["two"])
+        bad_theme = os.path.join(self.tmp.name, "broken.json")
+        _wr(bad_theme, "{ not json")
+        argv = ["--theme", bad_theme, "--data-dir", self.data, "--output-dir", self.out, "--export-threads", self.ids_path]
+        code, out = run_main(argv, fake_com(self.world())[0])
+        self.assertEqual(code, 0, out)
+        self.assertIn("既定の除外設定・期間（2023-07〜2026-09）", out)
+        self.assertIn("2026-10以降", out)
+        self.assertNotIn("{ not json", out)
+        for extra in (("--scan-mode", "table"), ("--table-time", "utc"), ("--table-chunk", "100"), ("--probe-folder", "x"),
+                      ("--probe-limit", "5"), ("--mask-names",)):
+            code, out = run_main(argv + list(extra), fake_com(self.world())[0])
+            self.assertEqual(code, 0, extra)
+
+    def test_rejected_count_is_logged_with_pilot_advice(self):
+        self.ids(self.tid["one"])
+        code, out = self.go(self.world(A3=self.mutated("A3", ReceivedTime=dt(4, 11, 10, 0))))
+        self.assertIn("不採用 1通", out)
+        self.assertIn("数スレッドで試走", out)
+        code, out = self.go(self.world())
+        self.assertIn("不採用 0通", out)
+        self.assertNotIn("試走", out)
 
 
 if __name__ == "__main__":
