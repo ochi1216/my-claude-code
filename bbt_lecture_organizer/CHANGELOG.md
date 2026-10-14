@@ -9,6 +9,65 @@ Gemini AI で要約HTMLレポートを自動生成するツール。
 
 ---
 
+## VERSION 20260817_02
+
+**Tcl_AsyncDelete 対策（予防的措置・効果は未確認）**
+
+`BBT_lecture_script_getter_20260817_01.py` の実行中に
+`Tcl_AsyncDelete: async handler deleted by the wrong thread` でプロセスが強制終了した
+（`[1/29]` のトランスクリプト抽出開始直後）。これは Tkinter のオブジェクトが、作成したスレッドとは
+別のスレッドで解放されたときに出るエラーで、Python プロセスごと落ちる。
+
+### 追加・修正
+
+- 閉じ済みダイアログ（モード選択・スキャン進捗）の循環参照の残骸を、**ワーカースレッドが動く前に
+  メインスレッドで `gc.collect()` して回収する**。計5行の追加（`import gc` 含む）。
+  - `SimpleIntegrator.run()` … `ModeSelectionGUI().show()` の直後
+  - `SimpleIntegrator._run_new()` … `_show_scan_progress()` の直後
+  - `SimpleIntegrator._run_search_mode()` … `_show_scan_progress()` の直後
+  - `ContentSelectionGUI._on_execute()` … ワーカースレッド起動の直前
+- `gc.collect()` は**呼び出し側（関数から戻った後）**に置く必要がある。関数内の `mainloop()` 直後では
+  ローカル変数が生きているため回収されない（最小再現で確認済み: 関数内は落ちる／呼び出し側は落ちない）。
+
+### 変更した関数
+
+| 関数 | 変更内容 |
+|---|---|
+| `SimpleIntegrator.run` | `gc.collect()` を1行追加 |
+| `SimpleIntegrator._run_new` | `gc.collect()` を1行追加 |
+| `SimpleIntegrator._run_search_mode` | `gc.collect()` を1行追加 |
+| `ContentSelectionGUI._on_execute` | `gc.collect()` を1行追加 |
+
+それ以外の既存関数106個は1バイトも変更していない（AST＋MD5で検証済み）。
+
+### ⚠️ 原因は未確認です（重要）
+
+- 最小再現では、「閉じたダイアログの残骸があり、ワーカースレッドでGCが走る」と同じエラーで落ちる
+  ことを確認した。一方、**本物の `run()` → `_run_new()` を実際のtkinter（Xvfb）で動かした検証では、
+  旧版 `20260817_01` でも落ちなかった**。ワーカー開始時点で残骸は 0 件で、コンテンツ一覧の画面を
+  作る間にメインスレッドの自動GCが先に片付けていた。ワーカーでの自動GC待ちを10回、処理中に
+  ウィンドウを閉じるケースも試したが、いずれも再現しなかった。
+- したがって、本リビジョンは**今回の強制終了を直すと確認できたものではない**。仕組み上の
+  リスクを下げる予防的措置であり、無害であること（既存テスト77項目合格・変更は上記4関数のみ）
+  だけを確認している。
+- 旧版 `20260804_01` からスレッド構造は変わっておらず、プロキシ化（`20260817_01`）が原因とする
+  根拠も見つかっていない。
+
+### 次の一手（未実施・要承認）
+
+`faulthandler.enable()` を `__main__` に入れると、Cレベルの強制終了（SIGABRT）時にも
+**全スレッドのPythonトレースバックがログに残る**。次に落ちたときに、どのスレッドのどの行で
+起きたかが分かる。
+
+### 変更ファイル
+
+| ファイル | 内容 |
+|---|---|
+| `BBT_lecture_script_getter_20260817_02.py` | 新リビジョン |
+| `BBT_lecture_script_getter_20260817_01.py` | 旧リビジョン（変更なし・保持） |
+
+---
+
 ## VERSION 20260817_01
 
 **Gemini API のプロキシ化（旧SDK `google.generativeai` からの移行）**

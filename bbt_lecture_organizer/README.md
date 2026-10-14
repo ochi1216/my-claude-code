@@ -3,7 +3,7 @@
 BBT757 eラーニングプラットフォームから講義動画のトランスクリプトを抽出し、
 Gemini AI で要約して HTML レポートを生成するツール。
 
-- 最新版: `BBT_lecture_script_getter_20260817_01.py`
+- 最新版: `BBT_lecture_script_getter_20260817_02.py`
 - 実行環境: Windows PC、Python 3系
 - ローカル配置: `C:\Users\nx023836\Documents\PythonScripts\bbt\`
 
@@ -30,7 +30,7 @@ C:\Users\nx023836\Documents\PythonScripts\
 ├── common\
 │   └── gemini_client.py          ← 共通モジュール（全ツール共有）
 └── bbt\
-    └── BBT_lecture_script_getter_20260817_01.py
+    └── BBT_lecture_script_getter_20260817_02.py
 ```
 
 本ツールは `..\common` → `..\..\common` の順に自動探索します。
@@ -73,7 +73,7 @@ Debug Port    : 9222
 ## 実行
 
 ```
-python BBT_lecture_script_getter_20260817_01.py
+python BBT_lecture_script_getter_20260817_02.py
 ```
 
 同フォルダに `execution_log.log` が自動生成されます（実行のたびに上書き）。
@@ -129,7 +129,8 @@ python test_gemini_proxy_20260817_01.py
 
 | ファイル | 内容 |
 |---|---|
-| `BBT_lecture_script_getter_20260817_01.py` | 最新版（Geminiプロキシ化） |
+| `BBT_lecture_script_getter_20260817_02.py` | 最新版（Tcl_AsyncDelete 予防措置。効果は未確認） |
+| `BBT_lecture_script_getter_20260817_01.py` | Geminiプロキシ化 |
 | `BBT_lecture_script_getter_20260804_01.py` | 旧版（直接 `google.generativeai` 呼び出し） |
 
 ## 関連資料
