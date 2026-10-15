@@ -1,0 +1,22 @@
+{
+  "_comment": "Gate B: Teams「アダプティブ カードを投稿して応答を待機する」(PostCardAndWaitForResponse)が返す応答の実測値(2026-09-01)。個人メール・GUIDはプレースホルダに置換済み。フロー内では body('TM_Post_CheckIn_Card') で参照する。",
+  "_note_comment_field": "カードのInput.Text(id=comment)は、空欄のまま送信すると data に現れない。参照時は null 安全に扱うこと。",
+
+  "responseTime": "2026-09-01T05:36:29.6999685Z",
+  "responder": {
+    "objectId": "00000000-0000-0000-0000-000000000000",
+    "tenantId": "00000000-0000-0000-0000-000000000000",
+    "email": "user01@example.com",
+    "userPrincipalName": "user01@example.com",
+    "displayName": "テスト太郎"
+  },
+  "submitActionId": "回答を送信",
+  "messageId": "0000000000000",
+  "messageLink": "https://teams.microsoft.com/l/message/<CHAT_ID>/<MESSAGE_ID>?context=%7B%22contextType%22:%22chat%22%7D",
+  "data": {
+    "responseCode": "1",
+    "eventId": "EQ-20260901-053553-NARA",
+    "employeeId": "emp99",
+    "schemaRevision": "poc_async_01"
+  }
+}

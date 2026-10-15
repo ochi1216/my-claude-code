@@ -92,14 +92,17 @@ AST比較を実行した結果:
 
 ## 2. 参照資料（推測で書かず、必ず実物を読むこと）
 
-- **最優先**: `my-claude-code` の `ppt_translator/ppt_translation_20260812_01.py`
-  … 移行後の完成形。**シムは L69〜L263。ここから丸ごとコピーしてよい。**
+- **最優先**: `my-claude-code` の `ppt_translator/ppt_translation_20260911_01.py`
+  … 移行後の完成形（＋出力ファイル名の短縮まで入った最新版）。
+  **シムは L90〜L283。ここから丸ごとコピーしてよい。**
+  `LANGUAGE_SUFFIX_MAP` / `lang_to_suffix()` も同じファイルから持ってくる（§5-6）。
   Wordツールとは「run単位で書式を保持する」設計思想が同じで、しかも**同じコードの子孫**なので、
   5ツールの中で**いちばん近い前例**。
 - `my-claude-code` の `ppt_translator/ppt_translation_20260309_03.py` … 移行前。差分の取り方の参考。
-- `my-claude-code` の `ppt_translator/tests/test_ppt_translation_20260812_01.py`
-  … 95項目のテスト。**新規に書き起こさずコピーして差分を当てるのが速い**（§8）。
-- `my-claude-code` の `ppt_translator/CHANGELOG.md` の `[20260812_01]` … 記載フォーマットの見本。
+- `my-claude-code` の `ppt_translator/tests/test_ppt_translation_20260911_01.py`
+  … 106項目のテスト。**新規に書き起こさずコピーして差分を当てるのが速い**（§8）。
+- `my-claude-code` の `ppt_translator/CHANGELOG.md` の `[20260812_01]`（プロキシ移行）と
+  `[20260911_01]`（出力ファイル名の短縮）… 記載フォーマットの見本。
 - `my-claude-code` の `ppt_translator/run_ppt_translator.bat` … 起動用batのひな形。
 - 全体設計: `gemini-common-tools` リポジトリの `GEMINI_MIGRATION_HANDOVER.md`
 - 共通モジュール本体: 同リポジトリの `gemini_client.py`。公開リポジトリなので匿名cloneで取得できる:
@@ -263,7 +266,7 @@ PPT版は `raise ValueError("Empty response from API")` してリトライへ回
 **Word版はリトライ機構が無いので、その場で原文を返して終わる**（＝そのバッチは翻訳されない）。
 
 シムに `.parts` を持たせれば、空応答のとき `[]` が返るので、**この「空なら原文を返す」という
-既存の挙動がそのまま保たれる**。`ppt_translation_20260812_01.py` の `_CommonGeminiResponse` は
+既存の挙動がそのまま保たれる**。`ppt_translation_20260911_01.py` の `_CommonGeminiResponse` は
 既にこの対応が入っている。
 
 **ここでPPT版のリトライ挙動に「揃えたく」なるが、やらないこと（§0-2・スコープ外）。**
@@ -304,6 +307,56 @@ Word版は元々タイムアウトを指定していない（`request_options` �
 **そのバッチは即座に原文のまま返る**（PPT版なら3回リトライして拾えていた）。
 これは移行で新たに生じるリスクではなく元からの構造だが、実機で「最初の10項目だけ英語のまま」
 という症状が出たらこれを疑う。**気になるならリトライ追加を別作業として提案する**（§12）。
+
+### 5-6. 【2026-09-11 追加】出力ファイル名の言語コードを2文字へ短縮する（スコープ内）
+
+**ユーザー依頼により、出力ファイル名のルールが変わった。** 移行と一緒にこれも行うこと。
+
+```
+旧: 資料_gemini_japanese.docx / 資料_gemini_english.docx / 資料_gemini_chinese.docx
+新: 資料_ja.docx            / 資料_en.docx            / 資料_cn.docx
+```
+
+`ppt_translation_20260911_01.py` で同じ変更を実施済みなので、**そこからそのまま持ってくればよい**
+（`LANGUAGE_SUFFIX_MAP` と `lang_to_suffix()`。`translate_word_document_thread` の直前に置く）。
+
+```python
+LANGUAGE_SUFFIX_MAP = {
+    "Japanese": "ja",
+    "English": "en",
+    "Chinese Simplified": "cn",
+    "Korean": "ko",
+}
+
+
+def lang_to_suffix(target_language):
+    """出力ファイル名の末尾に付ける2文字言語コードを返す（例: Japanese -> ja）。"""
+    if target_language in LANGUAGE_SUFFIX_MAP:
+        return LANGUAGE_SUFFIX_MAP[target_language]
+    return target_language.strip()[:2].lower()
+```
+
+`translate_word_document_thread`（**L257-258**）の置換:
+
+```python
+        # 旧: lang_code = target_language.split()[0].lower()
+        #     output_path = os.path.splitext(file_path)[0] + f"_gemini_{lang_code}.docx"
+        lang_suffix = lang_to_suffix(target_language)
+        output_path = os.path.splitext(file_path)[0] + f"_{lang_suffix}.docx"
+```
+
+**注意点:**
+
+- **中国語簡体字は `cn`（ユーザー指定）。** `pdf_translator` は同じ言語に `zh`（ISO 639-1）、
+  `excel_translation` は日本語に `jp` を使っており、ツール間で綴りが揃っていない。
+  **word は `ppt` に合わせて `cn` にすること。**
+- この変更で `translate_word_document_thread` のハッシュも変わる。§8 のAST比較で
+  「未変更」に並ぶ関数は **10個**になり、**変更は4つ**
+  （`check_dependencies` / `init_gemini` / `translate_batch_gemini` /
+  `translate_word_document_thread`）、**新規は `lang_to_suffix` 1つ**になる。
+  CHANGELOGにはその数字で書くこと。
+- 出力ファイル名が変わることは、README・CHANGELOG・納品メッセージに**必ず申し送る**
+  （旧版で作った `_gemini_japanese.docx` は消えないので、別ファイルが増える形になる）。
 
 ---
 
@@ -369,6 +422,7 @@ goto :warn_no_credentials
 - 「最初のバッチだけ遅い」のは仕様であること
 - **既知の制限**（§9-(6) の一覧。特に「ヘッダー/フッター・脚注・テキストボックスは翻訳対象外」は
   ユーザーが実機で気づきやすいので必ず書く）
+- **出力ファイル名が `_ja.docx` 形式になったこと**（§5-6）
 
 ### (4) `CHANGELOG.md`
 
@@ -376,12 +430,13 @@ goto :warn_no_credentials
 合わせる。新規作成になる場合、**元ファイルには履歴 docstring が無い**ので、`[20260306_01]` の
 エントリは「移行前の最終版」として、コードから読み取れる仕様（run単位の書式保持翻訳、
 段落＋表を対象、10件バッチ×最大3並列、出力は `_gemini_japanese.docx`）を簡潔に書けばよい。
+新版のエントリには、Geminiプロキシ対応と**出力ファイル名の短縮（§5-6）の両方**を書く。
 
 ---
 
 ## 7. シム実装
 
-**`ppt_translator/ppt_translation_20260812_01.py` の L69〜L263 をそのままコピーする。**
+**`ppt_translator/ppt_translation_20260911_01.py` の L90〜L283 をそのままコピーする。**
 `word_translation` に必要な要素（`.parts` / `safetySettings` / 上位ディレクトリ探索）は
 すべて入っており、変更は不要。
 
@@ -439,7 +494,7 @@ PythonScripts\
 ## 8. テスト方法（Windows / 実API 非依存で検証する）
 
 偽の `gemini_client` を **対象モジュールのロード前に** `sys.modules` へ注入して payload を捕捉する。
-**`ppt_translator/tests/test_ppt_translation_20260812_01.py`（95項目）がそのまま雛形になる。
+**`ppt_translator/tests/test_ppt_translation_20260911_01.py`（106項目）がそのまま雛形になる。
 新規に書き起こさずコピーして差分を当てるのが速い。**
 
 `ppt_translation` と `word_translation` は「**run 単位で書式を保持して翻訳する**」という
@@ -468,7 +523,8 @@ PPT版のテストをコピーしたあと、**word版のシグネチャ差に�
   代わりに「**空応答・通信失敗のとき、リトライせず1回で原文を返す**」ことをテストする
   （＝既存挙動が保たれている証明になる）
 - `translate_ppt_document_thread` → `translate_word_document_thread`
-- 出力ファイル名 `_gemini_japanese.pptx` → `_gemini_japanese.docx`
+- 出力ファイル名 `_ja.pptx` → `_ja.docx`。`lang_to_suffix` のテスト（`Japanese`→`ja` / `English`→`en` / `Chinese Simplified`→`cn` / 未知の言語のフォールバック）と、
+  言語ごとに実際に翻訳して出力名を確かめるテストは、**PPT版の 20260911_01 のテストからコピーできる**
 
 ### 検証すべき項目
 
@@ -614,9 +670,8 @@ UI表示と実際のモデルが食い違う silent failure の原因になる�
   初めてエラーになる（L298-303 で保存時のみ捕捉）。読み込み元のチェックも無い。
 - `select_file`（L321）… `filetypes` に `*.doc` が含まれているが、**`python-docx` は旧形式 `.doc` を
   開けない**ため、選ぶとエラーになる。
-- 出力ファイル名（L257-258）… `target_language.split()[0].lower()` を使うため
-  `_gemini_japanese.docx` になる（`pdf_translator` の `_ja.pdf` のような2文字コードではない）。
-  **統一したくなるが、既存の出力名が変わるとユーザーの運用に影響するので、依頼が無い限り変えない。**
+- ~~出力ファイル名…依頼が無い限り変えない~~ → **2026-09-11 にユーザー依頼で方針が変わった。
+  §5-6 を参照し、2文字コードへ短縮すること（スコープ内）。**
 - ヘッダー/フッター・脚注・テキストボックスが翻訳対象外（§8）。
 - 素の `except:`（L205 / L244 / L248）。
 

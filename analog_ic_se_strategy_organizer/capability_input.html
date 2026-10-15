@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>自社ケイパビリティ入力 - analog_ic_se_strategy_organizer</title>
+<style>
+:root {
+  --bg: #f8f9fa; --card: #ffffff; --ink: #2d3748; --muted: #718096;
+  --line: #e2e8f0; --accent: #3182ce; --accent-bg: #ebf8ff;
+  --owned: #22543d; --owned-bg: #c6f6d5;
+  --partial: #7b341e; --partial-bg: #feebc8;
+  --none: #4a5568; --none-bg: #edf2f7;
+  --lic: #44337a; --lic-bg: #e9d8fd;
+}
+* { box-sizing: border-box; }
+body { font-family: "Segoe UI","Hiragino Sans","Meiryo",sans-serif; background: var(--bg);
+       color: var(--ink); margin: 0; padding: 20px 16px 120px; line-height: 1.6; }
+.container { max-width: 960px; margin: 0 auto; }
+h1 { font-size: 1.5rem; margin: 0 0 6px; }
+.lead { color: var(--muted); font-size: 0.9rem; margin: 0 0 20px; }
+.card { background: var(--card); border-radius: 8px; padding: 20px; margin-bottom: 18px;
+        box-shadow: 0 2px 5px rgba(0,0,0,.07); border-top: 4px solid var(--accent); }
+.card h2 { font-size: 1.15rem; margin: 0 0 4px; }
+.card .hint { color: var(--muted); font-size: 0.85rem; margin: 0 0 16px; }
+.note-box { background: var(--accent-bg); border-left: 4px solid var(--accent);
+            padding: 12px 14px; border-radius: 4px; font-size: 0.9rem; margin-bottom: 18px; }
+label { display: block; font-weight: 600; font-size: 0.9rem; margin: 14px 0 5px; }
+input[type=text], input[type=number], textarea, select {
+  width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 5px;
+  font: inherit; font-size: 0.92rem; background: #fff; }
+textarea { min-height: 62px; resize: vertical; }
+.row { display: flex; gap: 14px; flex-wrap: wrap; }
+.row > div { flex: 1 1 190px; }
+.checks { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.checks label { display: inline-flex; align-items: center; gap: 6px; font-weight: 400;
+  margin: 0; padding: 6px 12px; border: 1px solid var(--line); border-radius: 16px;
+  background: #fff; cursor: pointer; font-size: 0.88rem; }
+.checks label:has(input:checked) { background: var(--accent-bg); border-color: var(--accent);
+  color: #1a4971; font-weight: 600; }
+table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+th, td { border-bottom: 1px solid var(--line); padding: 7px 8px; text-align: left; }
+th { background: #f7fafc; font-size: 0.82rem; color: var(--muted); font-weight: 600; }
+td.blk { width: 42%; }
+.grp { background: #f7fafc; font-weight: 700; font-size: 0.85rem; color: var(--ink); }
+.opts { display: flex; gap: 6px; flex-wrap: wrap; }
+.opts label { display: inline-flex; align-items: center; gap: 4px; font-weight: 400; margin: 0;
+  padding: 3px 9px; border-radius: 12px; border: 1px solid var(--line); cursor: pointer;
+  font-size: 0.82rem; background: #fff; white-space: nowrap; }
+.opts label input { margin: 0; }
+.opts label.o-owned:has(input:checked)   { background: var(--owned-bg);   color: var(--owned);   border-color: var(--owned);   font-weight: 700; }
+.opts label.o-partial:has(input:checked) { background: var(--partial-bg); color: var(--partial); border-color: var(--partial); font-weight: 700; }
+.opts label.o-none:has(input:checked)    { background: var(--none-bg);    color: var(--none);    border-color: #a0aec0;        font-weight: 700; }
+.opts label.o-lic:has(input:checked)     { background: var(--lic-bg);     color: var(--lic);     border-color: var(--lic);     font-weight: 700; }
+.summary { display: flex; gap: 10px; flex-wrap: wrap; margin: 14px 0 0; }
+.pill { padding: 5px 12px; border-radius: 14px; font-size: 0.85rem; font-weight: 700; }
+.p-owned { background: var(--owned-bg); color: var(--owned); }
+.p-partial { background: var(--partial-bg); color: var(--partial); }
+.p-none { background: var(--none-bg); color: var(--none); }
+.p-lic { background: var(--lic-bg); color: var(--lic); }
+.bar { position: fixed; left: 0; right: 0; bottom: 0; background: #fff; border-top: 1px solid var(--line);
+       padding: 12px 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+       box-shadow: 0 -2px 8px rgba(0,0,0,.06); z-index: 10; }
+.bar .spacer { flex: 1 1 auto; }
+button { font: inherit; font-size: 0.9rem; font-weight: 600; padding: 9px 16px; border-radius: 6px;
+         border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
+button.sec { background: #fff; color: var(--accent); }
+button:hover { filter: brightness(1.07); }
+.status { color: var(--muted); font-size: 0.85rem; }
+.emph { color: #b7791f; font-weight: 700; }
+@media (max-width: 620px) {
+  td.blk { width: auto; display: block; border-bottom: none; padding-bottom: 0; font-weight: 600; }
+  td.val { display: block; padding-top: 4px; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>自社ケイパビリティ入力</h1>
+<p class="lead">analog_ic_se_strategy_organizer が、製品コンセプトの「実現性」と「IP再利用価値」を判定するための土台データです。</p>
+
+<div class="note-box">
+<strong>使い方</strong><br>
+1. 下記に回答し、最下部の「JSONを保存」を押す<br>
+2. ダウンロードされた <code>own_capability.json</code> を <code>analog_ic_se_strategy_organizer/config/</code> に置く<br>
+3. 次回以降は「JSONを読み込む」で前回の回答を復元して更新できる<br><br>
+<strong>「無し」が並ぶことに意味があります。</strong>何を持っていないかが確定して初めて、ツールは「この提案は既存資産の延長か、新規投資が要るか」を機械的に仕分けできます。回路ブロックは既定値を「無し」にしてあるので、<span class="emph">あるものだけ変更</span>すれば完了します。
+</div>
+
+<!-- 基本情報 -->
+<div class="card">
+  <h2>基本情報</h2>
+  <p class="hint">どの設計拠点の能力を記述しているかを明示します（拠点ごとに開発キャパが異なるため）。</p>
+  <div class="row">
+    <div><label for="site">設計拠点</label>
+      <input type="text" id="site" placeholder="例: Japan"></div>
+    <div><label for="author">記入者</label>
+      <input type="text" id="author" placeholder="例: 越智"></div>
+    <div><label for="updated">更新日</label>
+      <input type="text" id="updated" placeholder="YYYY-MM-DD"></div>
+  </div>
+</div>
+
+<!-- プロセス -->
+<div class="card">
+  <h2>プロセス</h2>
+  <p class="hint">ファウンドリ利用の場合、プロセス性能は競合も調達可能なため差別化要因になりません。ここでは「何が作れるか」の上限を記録します。</p>
+
+  <label>製造モデル</label>
+  <div class="checks" id="proc_model">
+    <label><input type="radio" name="proc_model" value="foundry" checked> ファウンドリ</label>
+    <label><input type="radio" name="proc_model" value="internal"> 自社Fab</label>
+    <label><input type="radio" name="proc_model" value="hybrid"> 併用</label>
+  </div>
+
+  <label for="foundries">ファウンドリ名（任意・複数はカンマ区切り）</label>
+  <input type="text" id="foundries" placeholder="記入したくない場合は空欄でも可">
+
+  <label>アクセスできるプロセス種別</label>
+  <div class="checks" id="proc_tech"></div>
+
+  <label>対応できる耐圧帯</label>
+  <div class="checks" id="proc_volt"></div>
+
+  <label for="proc_note">補足（制約・条件など）</label>
+  <textarea id="proc_note" placeholder="例: 60V超はプロセス調達から必要。特定用途のみ交渉可能。"></textarea>
+</div>
+
+<!-- 回路ブロック -->
+<div class="card">
+  <h2>回路ブロック資産</h2>
+  <p class="hint">再利用できる設計資産の有無。<strong>既定は全て「無し」</strong>です。該当するものだけ変更してください。</p>
+  <table id="blocks"></table>
+  <div class="summary" id="blk_summary"></div>
+  <label for="blk_note">補足</label>
+  <textarea id="blk_note" placeholder="例: ゲートドライバはディスクリート向けの実績のみで、IC内蔵としては未実証。"></textarea>
+</div>
+
+<!-- パッケージ -->
+<div class="card">
+  <h2>パッケージ・実装</h2>
+  <p class="hint">ファウンドリ利用でプロセスが差別化にならない以上、パッケージと実装は数少ない差別化余地になり得ます。</p>
+  <label>使用できるパッケージ</label>
+  <div class="checks" id="pkg_types"></div>
+  <label for="pkg_note">補足（熱抵抗・面積の制約など）</label>
+  <textarea id="pkg_note"></textarea>
+</div>
+
+<!-- 品質・認定 -->
+<div class="card">
+  <h2>品質・認定</h2>
+  <p class="hint">車載を狙えるかどうかを決定づけます。</p>
+  <div class="row">
+    <div>
+      <label for="aecq">AEC-Q100</label>
+      <select id="aecq">
+        <option value="none">未対応</option>
+        <option value="grade3">Grade 3 (-40〜85℃)</option>
+        <option value="grade2">Grade 2 (-40〜105℃)</option>
+        <option value="grade1">Grade 1 (-40〜125℃)</option>
+        <option value="grade0">Grade 0 (-40〜150℃)</option>
+      </select>
+    </div>
+    <div>
+      <label for="iso26262">機能安全 (ISO 26262)</label>
+      <select id="iso26262">
+        <option value="none">未対応</option>
+        <option value="qm">QM対応のみ</option>
+        <option value="asil_b">ASIL-B相当</option>
+        <option value="asil_d">ASIL-D相当</option>
+      </select>
+    </div>
+  </div>
+  <label for="qual_note">補足（実績・取得予定など）</label>
+  <textarea id="qual_note"></textarea>
+</div>
+
+<!-- 開発キャパ -->
+<div class="card" style="border-top-color:#d69e2e;">
+  <h2>開発キャパシティ</h2>
+  <p class="hint"><span class="emph">本フォームで最も重要な項目です。</span>年間に撃てる本数が、ツールの出力を「提案の羅列」から「枠の配分」へ変えます。</p>
+  <div class="row">
+    <div><label for="cap_year">年間の新規開発本数</label>
+      <input type="number" id="cap_year" min="0" step="1" placeholder="例: 3"></div>
+    <div><label for="cap_months">1製品あたりの開発期間（月）</label>
+      <input type="number" id="cap_months" min="0" step="1" placeholder="例: 18"></div>
+  </div>
+  <div class="row">
+    <div><label for="cap_designers">アナログ設計者数（概数）</label>
+      <input type="number" id="cap_designers" min="0" step="1"></div>
+    <div><label for="cap_parallel">同時並行できる案件数</label>
+      <input type="number" id="cap_parallel" min="0" step="1"></div>
+  </div>
+  <label for="cap_note">補足</label>
+  <textarea id="cap_note" placeholder="例: 3本のうち1本は既存品の派生で埋まる想定。"></textarea>
+</div>
+
+<!-- コスト -->
+<div class="card">
+  <h2>コスト構造</h2>
+  <p class="hint">競合の実勢価格に対して戦えるかの判定に使います。</p>
+  <label>狙えるASP帯（複数選択可）</label>
+  <div class="checks" id="cost_asp"></div>
+  <div class="row">
+    <div><label for="cost_die">許容ダイサイズの目安（mm²）</label>
+      <input type="text" id="cost_die" placeholder="例: 2.0"></div>
+    <div><label for="cost_lot">最小量産ロット・数量の制約</label>
+      <input type="text" id="cost_lot" placeholder="例: 年間100万個以上でないと合わない"></div>
+  </div>
+  <label for="cost_note">補足（マスク費用の制約など）</label>
+  <textarea id="cost_note"></textarea>
+</div>
+
+<!-- 方針 -->
+<div class="card">
+  <h2>戦略方針</h2>
+  <p class="hint">コンセプト評価時の前提として使います。</p>
+  <label>狙う市場（複数選択可）</label>
+  <div class="checks" id="pol_market"></div>
+  <label for="pol_reuse">IP再利用の重視度</label>
+  <select id="pol_reuse">
+    <option value="critical">最重視（1本目が次の資産を作ることを条件にする）</option>
+    <option value="high">重視する</option>
+    <option value="normal">考慮する</option>
+    <option value="low">重視しない</option>
+  </select>
+  <label for="pol_note">補足（避けたい領域・経営からの制約など）</label>
+  <textarea id="pol_note"></textarea>
+</div>
+
+</div>
+
+<div class="bar">
+  <button id="btn_save">JSONを保存</button>
+  <button class="sec" id="btn_load">JSONを読み込む</button>
+  <input type="file" id="file_in" accept=".json,application/json" style="display:none">
+  <button class="sec" id="btn_reset">初期化</button>
+  <span class="spacer"></span>
+  <span class="status" id="status">config/own_capability.json として保存してください</span>
+</div>
+
+<script>
+// ------------------------------------------------------------------
+// 選択肢の定義
+// ------------------------------------------------------------------
+const PROC_TECH = [
+  ["bcd", "BCD"], ["cmos", "CMOS"], ["bicmos", "BiCMOS"], ["bipolar", "Bipolar"],
+  ["hv_cmos", "高耐圧CMOS"], ["si_mosfet", "Si MOSFET (ディスクリート)"],
+  ["gan", "GaN"], ["sic", "SiC"]
+];
+const PROC_VOLT = [
+  ["to_20v", "〜20V"], ["to_40v", "〜40V"], ["to_60v", "〜60V"],
+  ["to_100v", "〜100V"], ["to_200v", "〜200V"], ["over_200v", "200V超"]
+];
+const PKG_TYPES = [
+  ["sot", "SOT-23系 小型"], ["qfn_dfn", "QFN / DFN"], ["so_soic", "SO / SOIC"],
+  ["power_pkg", "パワーパッケージ (クリップボンド等)"], ["wlcsp", "WLCSP"],
+  ["module", "モジュール"]
+];
+const COST_ASP = [
+  ["lt_0_3", "〜0.3 USD"], ["0_3_1", "0.3〜1 USD"], ["1_3", "1〜3 USD"],
+  ["3_10", "3〜10 USD"], ["over_10", "10 USD超"]
+];
+const POL_MARKET = [
+  ["automotive", "車載"], ["industrial", "産業用"], ["computing", "コンピューティング / サーバー"],
+  ["mobile", "モバイル / ポータブル"], ["consumer", "コンシューマ"], ["infra", "インフラ / 通信"]
+];
+
+// 回路ブロック（グループ → ブロック一覧）
+const BLOCK_GROUPS = [
+  ["基準・バイアス系", [
+    ["bandgap", "バンドギャップ基準電圧源"],
+    ["oscillator", "発振器 / クロック"],
+    ["uvlo_por", "UVLO / パワーオンリセット"],
+    ["soft_start", "ソフトスタート"]
+  ]],
+  ["増幅・比較系", [
+    ["error_amp", "エラーアンプ / OTA"],
+    ["comparator", "コンパレータ"],
+    ["current_sense", "電流検出アンプ"]
+  ]],
+  ["駆動系", [
+    ["gate_drv_ls", "ゲートドライバ（ローサイド）"],
+    ["gate_drv_hs", "ゲートドライバ（ハイサイド / ブートストラップ）"],
+    ["charge_pump", "チャージポンプ"],
+    ["level_shifter", "高耐圧レベルシフタ"]
+  ]],
+  ["保護系", [
+    ["ocp", "過電流保護 (OCP)"],
+    ["tsd", "過熱保護 (TSD / OTP)"],
+    ["reverse_block", "逆流検出・逆電流ブロック"],
+    ["esd_hv", "ESD保護（高耐圧対応）"]
+  ]],
+  ["制御・デジタル系", [
+    ["pwm_logic", "PWM制御ロジック"],
+    ["digital_if", "I2C / SPI デジタルインターフェース"],
+    ["adc_monitor", "モニタ用ADC"],
+    ["nvm", "不揮発メモリ (OTP / EEPROM)"]
+  ]]
+];
+
+const BLOCK_STATES = [
+  ["owned",     "保有",       "o-owned"],
+  ["partial",   "一部あり",   "o-partial"],
+  ["none",      "無し",       "o-none"],
+  ["licensable","ライセンス可","o-lic"]
+];
+
+// ------------------------------------------------------------------
+// 描画
+// ------------------------------------------------------------------
+function renderChecks(containerId, items, name) {
+  const el = document.getElementById(containerId);
+  el.innerHTML = items.map(([v, label]) =>
+    `<label><input type="checkbox" name="${name}" value="${v}"> ${label}</label>`
+  ).join("");
+}
+
+function renderBlocks() {
+  const rows = [];
+  rows.push("<tr><th>回路ブロック</th><th>保有状況</th></tr>");
+  for (const [group, blocks] of BLOCK_GROUPS) {
+    rows.push(`<tr><td class="grp" colspan="2">${group}</td></tr>`);
+    for (const [key, label] of blocks) {
+      const opts = BLOCK_STATES.map(([v, txt, cls]) =>
+        `<label class="${cls}"><input type="radio" name="blk_${key}" value="${v}"` +
+        `${v === "none" ? " checked" : ""}> ${txt}</label>`
+      ).join("");
+      rows.push(`<tr><td class="blk">${label}</td><td class="val"><div class="opts">${opts}</div></td></tr>`);
+    }
+  }
+  document.getElementById("blocks").innerHTML = rows.join("");
+  document.getElementById("blocks").addEventListener("change", updateSummary);
+  updateSummary();
+}
+
+function updateSummary() {
+  const counts = { owned: 0, partial: 0, none: 0, licensable: 0 };
+  for (const [, blocks] of BLOCK_GROUPS) {
+    for (const [key] of blocks) {
+      const sel = document.querySelector(`input[name="blk_${key}"]:checked`);
+      if (sel) counts[sel.value] = (counts[sel.value] || 0) + 1;
+    }
+  }
+  document.getElementById("blk_summary").innerHTML =
+    `<span class="pill p-owned">保有 ${counts.owned}</span>` +
+    `<span class="pill p-partial">一部あり ${counts.partial}</span>` +
+    `<span class="pill p-lic">ライセンス可 ${counts.licensable}</span>` +
+    `<span class="pill p-none">無し ${counts.none}</span>`;
+  saveLocal();
+}
+
+// ------------------------------------------------------------------
+// 収集 / 復元
+// ------------------------------------------------------------------
+function getChecked(name) {
+  return Array.from(document.querySelectorAll(`input[name="${name}"]:checked`)).map(e => e.value);
+}
+function val(id) { return (document.getElementById(id).value || "").trim(); }
+function num(id) {
+  const v = val(id);
+  return v === "" ? null : Number(v);
+}
+
+function collect() {
+  const blocks = {};
+  for (const [, bs] of BLOCK_GROUPS) {
+    for (const [key] of bs) {
+      const sel = document.querySelector(`input[name="blk_${key}"]:checked`);
+      blocks[key] = sel ? sel.value : "none";
+    }
+  }
+  const radio = document.querySelector('input[name="proc_model"]:checked');
+  return {
+    schema_version: 1,
+    site: val("site"),
+    author: val("author"),
+    updated_at: val("updated"),
+    process: {
+      model: radio ? radio.value : "foundry",
+      foundries: val("foundries") ? val("foundries").split(",").map(s => s.trim()).filter(Boolean) : [],
+      technologies: getChecked("proc_tech"),
+      voltage_ranges: getChecked("proc_volt"),
+      note: val("proc_note")
+    },
+    circuit_blocks: blocks,
+    circuit_blocks_note: val("blk_note"),
+    packaging: { types: getChecked("pkg_types"), note: val("pkg_note") },
+    qualification: { aec_q100: val("aecq"), iso26262: val("iso26262"), note: val("qual_note") },
+    capacity: {
+      new_products_per_year: num("cap_year"),
+      development_months: num("cap_months"),
+      analog_designers: num("cap_designers"),
+      parallel_projects: num("cap_parallel"),
+      note: val("cap_note")
+    },
+    cost: {
+      target_asp_bands: getChecked("cost_asp"),
+      max_die_size_mm2: val("cost_die"),
+      volume_constraint: val("cost_lot"),
+      note: val("cost_note")
+    },
+    policy: {
+      target_markets: getChecked("pol_market"),
+      ip_reuse_priority: val("pol_reuse"),
+      note: val("pol_note")
+    }
+  };
+}
+
+function setChecked(name, values) {
+  const set = new Set(values || []);
+  document.querySelectorAll(`input[name="${name}"]`).forEach(e => { e.checked = set.has(e.value); });
+}
+function setVal(id, v) { if (v !== undefined && v !== null) document.getElementById(id).value = v; }
+
+function restore(data) {
+  if (!data || typeof data !== "object") return;
+  setVal("site", data.site); setVal("author", data.author); setVal("updated", data.updated_at);
+  const p = data.process || {};
+  const r = document.querySelector(`input[name="proc_model"][value="${p.model || "foundry"}"]`);
+  if (r) r.checked = true;
+  setVal("foundries", (p.foundries || []).join(", "));
+  setChecked("proc_tech", p.technologies); setChecked("proc_volt", p.voltage_ranges);
+  setVal("proc_note", p.note);
+
+  const blocks = data.circuit_blocks || {};
+  for (const [, bs] of BLOCK_GROUPS) {
+    for (const [key] of bs) {
+      const v = blocks[key] || "none";
+      const el = document.querySelector(`input[name="blk_${key}"][value="${v}"]`);
+      if (el) el.checked = true;
+    }
+  }
+  setVal("blk_note", data.circuit_blocks_note);
+
+  const pk = data.packaging || {};
+  setChecked("pkg_types", pk.types); setVal("pkg_note", pk.note);
+  const q = data.qualification || {};
+  setVal("aecq", q.aec_q100); setVal("iso26262", q.iso26262); setVal("qual_note", q.note);
+  const c = data.capacity || {};
+  setVal("cap_year", c.new_products_per_year); setVal("cap_months", c.development_months);
+  setVal("cap_designers", c.analog_designers); setVal("cap_parallel", c.parallel_projects);
+  setVal("cap_note", c.note);
+  const co = data.cost || {};
+  setChecked("cost_asp", co.target_asp_bands); setVal("cost_die", co.max_die_size_mm2);
+  setVal("cost_lot", co.volume_constraint); setVal("cost_note", co.note);
+  const po = data.policy || {};
+  setChecked("pol_market", po.target_markets); setVal("pol_reuse", po.ip_reuse_priority);
+  setVal("pol_note", po.note);
+  updateSummary();
+}
+
+// ------------------------------------------------------------------
+// 保存 / 読み込み
+// ------------------------------------------------------------------
+const LS_KEY = "own_capability_draft_v1";
+
+function saveLocal() {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(collect())); } catch (e) { /* file://等で不可の場合は無視 */ }
+}
+function loadLocal() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (raw) { restore(JSON.parse(raw)); setStatus("前回の入力内容を復元しました（未保存の下書き）"); }
+  } catch (e) { /* 無視 */ }
+}
+function setStatus(msg) { document.getElementById("status").textContent = msg; }
+
+document.getElementById("btn_save").addEventListener("click", () => {
+  const data = collect();
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "own_capability.json";
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  setStatus("保存しました。config/own_capability.json に置いてください");
+});
+
+document.getElementById("btn_load").addEventListener("click", () => document.getElementById("file_in").click());
+document.getElementById("file_in").addEventListener("change", ev => {
+  const f = ev.target.files && ev.target.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try { restore(JSON.parse(reader.result)); setStatus(`${f.name} を読み込みました`); }
+    catch (e) { setStatus("読み込み失敗: JSONとして解釈できません"); }
+  };
+  reader.readAsText(f);
+  ev.target.value = "";
+});
+
+document.getElementById("btn_reset").addEventListener("click", () => {
+  if (!confirm("入力内容を初期化します。よろしいですか。")) return;
+  try { localStorage.removeItem(LS_KEY); } catch (e) {}
+  location.reload();
+});
+
+// ------------------------------------------------------------------
+// 初期化
+// ------------------------------------------------------------------
+renderChecks("proc_tech", PROC_TECH, "proc_tech");
+renderChecks("proc_volt", PROC_VOLT, "proc_volt");
+renderChecks("pkg_types", PKG_TYPES, "pkg_types");
+renderChecks("cost_asp", COST_ASP, "cost_asp");
+renderChecks("pol_market", POL_MARKET, "pol_market");
+renderBlocks();
+document.getElementById("updated").value = new Date().toISOString().slice(0, 10);
+document.addEventListener("change", saveLocal);
+document.addEventListener("input", saveLocal);
+loadLocal();
+</script>
+</body>
+</html>

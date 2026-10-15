@@ -1,0 +1,169 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-07-16",
+  "note": "カテゴリキーは越智さん提供のExcel（analog_power_semiconductor_companies_global_2026.xlsx）にある9つの製品カテゴリ列と1対1で対応させている。type は number|int|range|string|bool|list のいずれか。",
+  "categories": {
+    "dc_dc_pmic": {
+      "label": "DC-DC / PMIC",
+      "excel_column": "DC-DC / PMIC",
+      "parameters": [
+        {"key": "topology", "label": "トポロジ", "unit": "", "type": "string", "note": "Buck/Boost/Buck-Boost/SEPIC/多相等"},
+        {"key": "input_voltage_range", "label": "入力電圧範囲", "unit": "V", "type": "range"},
+        {"key": "output_voltage_range", "label": "出力電圧範囲", "unit": "V", "type": "range"},
+        {"key": "num_outputs", "label": "出力レール数", "unit": "ch", "type": "int"},
+        {"key": "max_output_current", "label": "最大出力電流", "unit": "A", "type": "number"},
+        {"key": "peak_efficiency", "label": "ピーク効率", "unit": "%", "type": "number"},
+        {"key": "switching_frequency", "label": "スイッチング周波数", "unit": "MHz", "type": "number"},
+        {"key": "quiescent_current", "label": "静止電流 (Iq)", "unit": "µA", "type": "number"},
+        {"key": "control_scheme", "label": "制御方式", "unit": "", "type": "string", "note": "電圧モード/電流モード/COT等"},
+        {"key": "integrated_fet", "label": "FET内蔵", "unit": "", "type": "bool"},
+        {"key": "protection_features", "label": "保護機能", "unit": "", "type": "list"},
+        {"key": "package", "label": "パッケージ", "unit": "", "type": "string"},
+        {"key": "temp_grade", "label": "動作温度グレード", "unit": "℃", "type": "string"},
+        {"key": "aec_q100", "label": "AEC-Q100認証", "unit": "", "type": "bool"},
+        {"key": "price_1ku_usd", "label": "参考単価(1000個時)", "unit": "USD", "type": "number"}
+      ]
+    },
+    "ldo": {
+      "label": "LDO",
+      "excel_column": "LDO",
+      "parameters": [
+        {"key": "input_voltage_range", "label": "入力電圧範囲", "unit": "V", "type": "range"},
+        {"key": "output_voltage_range", "label": "出力電圧範囲", "unit": "V", "type": "range"},
+        {"key": "dropout_voltage", "label": "ドロップアウト電圧(最大負荷時)", "unit": "mV", "type": "number"},
+        {"key": "max_output_current", "label": "最大出力電流", "unit": "mA", "type": "number"},
+        {"key": "quiescent_current", "label": "静止電流 (Iq)", "unit": "µA", "type": "number"},
+        {"key": "psrr", "label": "電源電圧除去比 (PSRR @1kHz)", "unit": "dB", "type": "number"},
+        {"key": "output_noise", "label": "出力ノイズ (10Hz-100kHz)", "unit": "µVrms", "type": "number"},
+        {"key": "output_accuracy", "label": "出力電圧精度", "unit": "%", "type": "number"},
+        {"key": "package", "label": "パッケージ", "unit": "", "type": "string"},
+        {"key": "temp_grade", "label": "動作温度グレード", "unit": "℃", "type": "string"},
+        {"key": "aec_q100", "label": "AEC-Q100認証", "unit": "", "type": "bool"},
+        {"key": "price_1ku_usd", "label": "参考単価(1000個時)", "unit": "USD", "type": "number"}
+      ]
+    },
+    "led_driver": {
+      "label": "LEDドライバー",
+      "excel_column": "LEDドライバー",
+      "parameters": [
+        {"key": "topology", "label": "トポロジ", "unit": "", "type": "string", "note": "Buck/Boost/Charge Pump/Linear等"},
+        {"key": "input_voltage_range", "label": "入力電圧範囲", "unit": "V", "type": "range"},
+        {"key": "output_current_range", "label": "出力電流範囲", "unit": "mA", "type": "range"},
+        {"key": "num_channels", "label": "チャンネル数", "unit": "ch", "type": "int"},
+        {"key": "dimming_method", "label": "調光方式", "unit": "", "type": "string", "note": "PWM/アナログ/I2C等"},
+        {"key": "dimming_ratio", "label": "調光比", "unit": "", "type": "string", "note": "例: 10000:1"},
+        {"key": "switching_frequency", "label": "スイッチング周波数", "unit": "MHz", "type": "number"},
+        {"key": "efficiency", "label": "効率", "unit": "%", "type": "number"},
+        {"key": "protection_features", "label": "保護機能", "unit": "", "type": "list", "note": "LEDオープン/ショート検出等"},
+        {"key": "package", "label": "パッケージ", "unit": "", "type": "string"},
+        {"key": "temp_grade", "label": "動作温度グレード", "unit": "℃", "type": "string"},
+        {"key": "aec_q100", "label": "AEC-Q100認証", "unit": "", "type": "bool"},
+        {"key": "price_1ku_usd", "label": "参考単価(1000個時)", "unit": "USD", "type": "number"}
+      ]
+    },
+    "ac_dc": {
+      "label": "AC-DC",
+      "excel_column": "AC-DC",
+      "parameters": [
+        {"key": "topology", "label": "トポロジ", "unit": "", "type": "string", "note": "フライバック/準共振/LLC/PFC+フライバック等"},
+        {"key": "input_voltage_range", "label": "入力電圧範囲", "unit": "VAC", "type": "range"},
+        {"key": "output_power", "label": "定格出力電力", "unit": "W", "type": "number"},
+        {"key": "standby_power", "label": "待機時消費電力", "unit": "mW", "type": "number"},
+        {"key": "switching_frequency", "label": "スイッチング周波数", "unit": "kHz", "type": "number"},
+        {"key": "integrated_fet", "label": "FET内蔵", "unit": "", "type": "bool"},
+        {"key": "pfc_included", "label": "PFC内蔵", "unit": "", "type": "bool"},
+        {"key": "peak_efficiency", "label": "ピーク効率", "unit": "%", "type": "number"},
+        {"key": "protection_features", "label": "保護機能", "unit": "", "type": "list"},
+        {"key": "safety_certifications", "label": "安全規格認証", "unit": "", "type": "list", "note": "UL/CE/CCC等"},
+        {"key": "package", "label": "パッケージ", "unit": "", "type": "string"},
+        {"key": "price_1ku_usd", "label": "参考単価(1000個時)", "unit": "USD", "type": "number"}
+      ]
+    },
+    "gate_driver": {
+      "label": "ゲートドライバー",
+      "excel_column": "ゲートドライバー",
+      "parameters": [
+        {"key": "channel_config", "label": "チャンネル構成", "unit": "", "type": "string", "note": "ハイサイド/ローサイド/ハーフブリッジ/フルブリッジ等"},
+        {"key": "max_drive_voltage", "label": "最大駆動電圧", "unit": "V", "type": "number"},
+        {"key": "peak_source_sink_current", "label": "ピーク吐き出し/吸い込み電流", "unit": "A", "type": "number"},
+        {"key": "propagation_delay", "label": "伝搬遅延", "unit": "ns", "type": "number"},
+        {"key": "isolation_type", "label": "絶縁方式", "unit": "", "type": "string", "note": "非絶縁/容量絶縁/磁気絶縁/光絶縁等"},
+        {"key": "isolation_voltage", "label": "絶縁耐圧", "unit": "kVrms", "type": "number"},
+        {"key": "switching_frequency_max", "label": "最大スイッチング周波数", "unit": "MHz", "type": "number"},
+        {"key": "uvlo_threshold", "label": "UVLO閾値", "unit": "V", "type": "number"},
+        {"key": "package", "label": "パッケージ", "unit": "", "type": "string"},
+        {"key": "temp_grade", "label": "動作温度グレード", "unit": "℃", "type": "string"},
+        {"key": "aec_q100", "label": "AEC-Q100認証", "unit": "", "type": "bool"},
+        {"key": "price_1ku_usd", "label": "参考単価(1000個時)", "unit": "USD", "type": "number"}
+      ]
+    },
+    "load_switch_efuse": {
+      "label": "ロードスイッチ / eFuse",
+      "excel_column": "ロードスイッチ / eFuse",
+      "parameters": [
+        {"key": "input_voltage_range", "label": "入力電圧範囲", "unit": "V", "type": "range"},
+        {"key": "max_continuous_current", "label": "最大連続電流", "unit": "A", "type": "number"},
+        {"key": "on_resistance", "label": "オン抵抗 (Ron)", "unit": "mΩ", "type": "number"},
+        {"key": "current_limit_accuracy", "label": "電流制限精度", "unit": "%", "type": "number"},
+        {"key": "response_time", "label": "保護応答時間", "unit": "µs", "type": "number"},
+        {"key": "protection_features", "label": "保護機能", "unit": "", "type": "list", "note": "OCP/OVP/UVLO/熱保護等"},
+        {"key": "reverse_current_blocking", "label": "逆電流遮断機能", "unit": "", "type": "bool"},
+        {"key": "package", "label": "パッケージ", "unit": "", "type": "string"},
+        {"key": "temp_grade", "label": "動作温度グレード", "unit": "℃", "type": "string"},
+        {"key": "aec_q100", "label": "AEC-Q100認証", "unit": "", "type": "bool"},
+        {"key": "price_1ku_usd", "label": "参考単価(1000個時)", "unit": "USD", "type": "number"}
+      ]
+    },
+    "ideal_diode_oring": {
+      "label": "アイデアルダイオード / ORing",
+      "excel_column": "アイデアルダイオード / ORing",
+      "parameters": [
+        {"key": "input_voltage_range", "label": "入力電圧範囲", "unit": "V", "type": "range"},
+        {"key": "max_forward_current", "label": "最大順方向電流", "unit": "A", "type": "number"},
+        {"key": "forward_voltage_drop", "label": "順方向電圧降下", "unit": "mV", "type": "number"},
+        {"key": "num_channels_oring", "label": "ORingチャンネル数", "unit": "ch", "type": "int"},
+        {"key": "response_time", "label": "遮断応答時間", "unit": "µs", "type": "number"},
+        {"key": "reverse_leakage_current", "label": "逆漏れ電流", "unit": "µA", "type": "number"},
+        {"key": "package", "label": "パッケージ", "unit": "", "type": "string"},
+        {"key": "temp_grade", "label": "動作温度グレード", "unit": "℃", "type": "string"},
+        {"key": "aec_q100", "label": "AEC-Q100認証", "unit": "", "type": "bool"},
+        {"key": "price_1ku_usd", "label": "参考単価(1000個時)", "unit": "USD", "type": "number"}
+      ]
+    },
+    "gan_power": {
+      "label": "GaNパワーIC / デバイス",
+      "excel_column": "GaNパワーIC / デバイス",
+      "parameters": [
+        {"key": "device_type", "label": "デバイス種別", "unit": "", "type": "string", "note": "E-mode GaN FET単体/ドライバ統合IC等"},
+        {"key": "breakdown_voltage", "label": "耐圧 (BVdss)", "unit": "V", "type": "number"},
+        {"key": "rds_on", "label": "オン抵抗 (Rds(on))", "unit": "mΩ", "type": "number"},
+        {"key": "max_drain_current", "label": "最大ドレイン電流", "unit": "A", "type": "number"},
+        {"key": "gate_charge", "label": "ゲート電荷 (Qg)", "unit": "nC", "type": "number"},
+        {"key": "switching_frequency_max", "label": "最大スイッチング周波数", "unit": "MHz", "type": "number"},
+        {"key": "gate_driver_integrated", "label": "ゲートドライバー内蔵", "unit": "", "type": "bool"},
+        {"key": "package", "label": "パッケージ", "unit": "", "type": "string"},
+        {"key": "temp_grade", "label": "動作温度グレード", "unit": "℃", "type": "string"},
+        {"key": "price_1ku_usd", "label": "参考単価(1000個時)", "unit": "USD", "type": "number"}
+      ]
+    },
+    "power_discrete_module": {
+      "label": "パワーディスクリート / モジュール",
+      "excel_column": "パワーディスクリート / モジュール",
+      "parameters": [
+        {"key": "device_type", "label": "デバイス種別", "unit": "", "type": "string", "note": "MOSFET/IGBT/ダイオード/パワーモジュール等"},
+        {"key": "voltage_rating", "label": "定格電圧", "unit": "V", "type": "number"},
+        {"key": "current_rating", "label": "定格電流", "unit": "A", "type": "number"},
+        {"key": "on_resistance_or_vce_sat", "label": "オン抵抗 or Vce(sat)", "unit": "mΩ or V", "type": "string"},
+        {"key": "thermal_resistance", "label": "熱抵抗 (Rth(j-c))", "unit": "℃/W", "type": "number"},
+        {"key": "package", "label": "パッケージ", "unit": "", "type": "string"},
+        {"key": "temp_grade", "label": "動作温度グレード", "unit": "℃", "type": "string"},
+        {"key": "aec_q100", "label": "AEC-Q101/Q100認証", "unit": "", "type": "bool"},
+        {"key": "price_1ku_usd", "label": "参考単価(1000個時)", "unit": "USD", "type": "number"}
+      ]
+    }
+  },
+  "cross_cutting_attributes": [
+    {"key": "automotive_capable", "label": "車載対応", "type": "enum", "values": ["primary", "limited", "none"],
+     "note": "製品カテゴリではなく横断的な属性。competitors_db.jsonの automotive_capable と同じ3値。"}
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "_comment": "R19 Portalサイトのクイックリンク一覧。実データは実際のサイトURLを含むためGitにコミットしないこと（.gitignoreで除外済み）。このファイルはスキーマ例のみ。",
+  "site": "PSBGRD",
+  "site_url": "https://contoso.sharepoint.com/sites/PSBGRD",
+  "retrieved_at": "2026-05-14 15:17:05 JST",
+  "source": "graph_api_beta",
+  "quick_links": [
+    {
+      "title": "サンプルリンク",
+      "url": "https://contoso.sharepoint.com/sites/PSBGRD/SitePages/Home.aspx",
+      "icon": "link",
+      "description": "",
+      "order": 1
+    }
+  ],
+  "total_count": 1
+}

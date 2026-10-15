@@ -2,3 +2,4 @@ msal>=1.24
 requests>=2.31
 flask>=3.0
 openpyxl>=3.1
+pdfplumber>=0.11

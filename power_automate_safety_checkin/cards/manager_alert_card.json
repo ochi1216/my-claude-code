@@ -1,0 +1,32 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.4",
+  "body": [
+    {
+      "type": "TextBlock",
+      "text": "${TestPrefix}被災報告",
+      "weight": "Bolder",
+      "size": "Large",
+      "color": "Attention",
+      "wrap": true
+    },
+    {
+      "type": "TextBlock",
+      "text": "以下のスタッフから「被災」の回答がありました。状況を確認してください。",
+      "wrap": true
+    },
+    {
+      "type": "FactSet",
+      "facts": [
+        { "title": "氏名", "value": "${EmployeeName}" },
+        { "title": "社員ID", "value": "${EmployeeID}" },
+        { "title": "拠点", "value": "${SiteName}" },
+        { "title": "安否", "value": "${SafetyStatus}" },
+        { "title": "出社可否", "value": "${WorkStatus}" },
+        { "title": "コメント", "value": "${Comment}" },
+        { "title": "Event ID", "value": "${EventID}" }
+      ]
+    }
+  ]
+}

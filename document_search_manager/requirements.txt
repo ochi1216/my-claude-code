@@ -1,0 +1,37 @@
+msal>=1.24
+requests>=2.31
+flask>=3.0
+openpyxl>=3.1
+
+# 検索結果の要約機能（対応形式: .docx / .pptx / .xlsx / .xlsm / .pdf）で本文抽出に使用。
+# 未インストールでも他の機能（検索・出力・ダウンロード等）には影響しないが、
+# 「要約」ボタンを押すと分かりやすいエラーメッセージで案内される。
+# xlsx/xlsmの抽出は上のopenpyxl（Excel出力機能で既に必須）をそのまま使うため、
+# 追加インストールは不要（xlsmはファイル形式自体がxlsxと同じ）。
+python-docx>=1.1
+python-pptx>=0.6.21
+
+# .pdf の本文抽出に使用（v20260910_02で対応形式に追加）。
+# 社内の pdf_translator で既に使用しており、会社PCには導入済みの想定。
+# 未インストールの場合、pdf以外の要約は従来どおり動き、pdfの要約だけが
+# エラーメッセージで案内される。しおり（目次）があれば章の見出しとして使う。
+# 文字情報を持たないスキャンPDFは本文を取り出せない（OCRは対象外）。
+PyMuPDF>=1.23
+
+# Gemini API呼び出しは共通モジュール gemini_client.py
+# （PythonScripts\common\gemini_client.py、word_translator等と共用）経由。
+# gemini_client.py 自体がrequestsを使うため、上記requestsの導入で足りる
+# （追加インストールは不要）。環境変数 GEMINI_API_KEY または GEMINI_PROXY_URL
+# のいずれかを設定しておく必要がある（README参照）。
+
+# playwright は「Enoviaにログイン」ボタン（Cookie取得用のEdge起動）でのみ使う
+# 任意の依存。未インストールでも他の機能（SharePoint/Nexus検索、Enoviaの
+# 検索そのもの、config.jsonへのCookie手貼り運用）には影響しない。
+# 会社PCでは導入済み（pip install playwright, 2026-09-04確認）。
+# playwright>=1.40
+
+# 会社のネットワーク（SSLインスペクション）環境で、Enoviaへの通信が
+# SSLCertVerificationError（unable to get local issuer certificate）に
+# なる場合に必要。WindowsのOS証明書ストアをPythonにも使わせる。
+# 会社PCで導入・動作確認済み（2026-09-04）。コード変更は不要。
+# pip-system-certs
