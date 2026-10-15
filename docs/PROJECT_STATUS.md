@@ -5,6 +5,51 @@
 
 ---
 
+# BBT レクチャーオーガナイザー開発
+
+## 1. Project Overview
+
+* プロジェクト名: BBT レクチャーオーガナイザー開発（BBTサマリ）
+* 目的: BBT757 eラーニングから講義動画のトランスクリプトを取得し、Gemini で要約した HTML レポートを自動生成する。
+* 利用者: 越智さん本人。実行環境は Windows＋Chrome（リモートデバッグ）＋Selenium＋tkinter。
+* S01 で Gemini API のプロキシ対応を行った。次の S02 で**自宅PCの `ochi1216/home-pc-workspace` へ移管**する。
+* 自宅PCのクローン: `C:\Users\ochi1\OneDrive\ドキュメント\PythonScripts\home-pc-workspace`。出力先の Summary は**クローンの外**の `C:\Users\ochi1\OneDrive\ドキュメント\PythonScripts\Summary`。
+
+## 2. Repository Structure
+
+* `bbt_lecture_organizer/`
+  * `BBT_lecture_script_getter_20260817_03.py`: 最新版（約3,590行）。PR #26 で取り込み待ち
+  * `…_20260817_02.py` / `_01.py` / `20260804_01.py`: 旧リビジョン（削除しない）
+  * `CHANGELOG.md` / `README.md` / `requirements.txt` / `TOOLSHEET_bbt_lecture_organizer.md`
+  * `test_gemini_proxy_20260817_01.py`: Gemini 関連の検証（77〜79項目）
+  * **`HANDOVER_S02_home_pc_migration.md`: S02 用の自己完結した引継ぎ資料（まずこれを読む）**
+
+## 3. Current Functions
+
+* 3モード: 最新コンテンツ一覧／検索結果一覧／開いているタブ。要約済みの管理と、10分未満の動画除外あり。
+* Gemini 呼び出しは `GeminiAutomator` に集約。**旧SDK互換シム**が `gemini_client.generate_advanced()` を呼ぶ。
+* `gemini_client` は「まず直接→失敗したら自宅PCプロキシ」。失敗の記録は `common\.gemini_direct_disabled_until` で全ツール共有。
+
+## 4. Confirmed Specifications
+
+* プロキシ化は旧SDK互換シムで行い、`GeminiAutomator` の要約ロジックと3種のプロンプトは無変更。
+* `GEMINI_API_KEY` と `GEMINI_PROXY_URL` の**どちらか一方があれば**起動する。
+* `gemini_client.py` は `..\common` → `..\..\common` の順に探索。`GEMINI_COMMON_DIR` で上書き可。
+
+## 5. Current Status
+
+* 最新: `…_20260817_03.py`。Gemini 関連の検証は合格（偽 `gemini_client` 注入）。
+* PR #26（`claude/bbt-gemini-proxy-yjyjoi` → `main`）が未マージ。含むのは `_02`・`_03`、S02 用の引継ぎ資料、`.gitignore` の追記、本 `docs/` の追記。
+
+## 6. Open Items
+
+* **`Tcl_AsyncDelete` による強制終了の原因は未特定。** 本物のコード経路では旧版でも再現せず、`_02` の効果も未確認。`_03` の `crash_traceback.log` で次回に特定する。
+* プロキシ経由で Gemini の応答が返るところは、実機で未確認。
+* **会社PC固有の絶対パスが6箇所**（行番号は `HANDOVER_S02_home_pc_migration.md` 4節）。別PCでそのまま動かすと誤った場所へ出力される。
+* 要約履歴 `bbt_summary_history.json`（375件）は Git の外。移管で移さないと全件を再要約する。
+
+---
+
 # Outlook オーガナイザー開発
 
 ## 1. Project Overview
