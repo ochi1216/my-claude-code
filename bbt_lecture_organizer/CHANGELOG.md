@@ -9,6 +9,58 @@ Gemini AI で要約HTMLレポートを自動生成するツール。
 
 ---
 
+## VERSION 20260817_03
+
+**強制終了時の診断ログ（faulthandler）を追加**
+
+`20260817_01` で起きた `Tcl_AsyncDelete: async handler deleted by the wrong thread` による
+強制終了は、原因が未確認のままである（`20260817_02` の項を参照）。次に起きたときに
+**どのスレッドのどの行で起きたか**を特定できるよう、診断ログを追加した。
+
+### 追加
+
+- `if __name__ == "__main__":` ブロックに `faulthandler.enable()` を追加（約15行）。
+  Cレベルの強制終了（SIGABRT・SIGSEGV 等。Tcl_AsyncDelete も含む）が起きたとき、
+  **全スレッドのPythonトレースバック**を `crash_traceback.log`（スクリプトと同じフォルダ）に書き出す。
+  - `sys.stderr` は `DualLogger` に差し替え済みで `fileno` を持たないため、
+    `faulthandler` には実ファイルを明示的に渡している。
+  - 追記モード。起動のたびに `===== 起動 日時 / VERSION 20260817_03 =====` の見出し行が1行入る。
+    **落ちなければ見出し行だけが並ぶ**（正常）。
+  - ログファイルを開けない場合は警告を出して処理を続行する（本処理は止めない）。
+- 関数の変更はなし（`__main__` ブロックのみ）。
+
+### 検証
+
+- 実際に `Tcl_AsyncDelete` で落ちる状況（Xvfb＋実tkinter）を作り、**ファイルから取り出した本物の
+  ブロックを実行**して、`crash_traceback.log` に落ちたスレッド・`Garbage-collecting` の状態・
+  呼び出し元の行が残ることを確認した。
+- ログファイルを開けない場合に警告のみで続行することを確認した。
+- 既存テスト 77 項目合格（実物の `gemini_client.py` を使う2項目はこの環境に無くスキップ）。
+
+### 落ちたときの見方
+
+`crash_traceback.log` の末尾に、次のような記録が残る。
+
+```
+Fatal Python error: Aborted
+
+Current thread 0x... (most recent call first):     ← 落ちたスレッド
+  Garbage-collecting                                ← GC中だった場合に出る
+  File "...", line N in <関数名>                    ← その時の呼び出し元
+Thread 0x... (most recent call first):              ← 他のスレッド（メインスレッド等）
+```
+
+**この内容を共有してもらえれば原因を特定できる。**
+
+### 変更ファイル
+
+| ファイル | 内容 |
+|---|---|
+| `BBT_lecture_script_getter_20260817_03.py` | 新リビジョン |
+| `BBT_lecture_script_getter_20260817_02.py` / `_01.py` | 旧リビジョン（変更なし・保持） |
+
+---
+
 ## VERSION 20260817_02
 
 **Tcl_AsyncDelete 対策（予防的措置・効果は未確認）**
