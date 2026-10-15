@@ -3,6 +3,11 @@ __pycache__/
 venv/
 .venv/
 
+# bbt_lecture_organizer: 実行時に生成されるログ。講義タイトル等が入りうるためコミットしない。
+# crash_traceback.log は 20260817_03 の faulthandler が出力する。
+bbt_lecture_organizer/execution_log.log
+bbt_lecture_organizer/crash_traceback.log
+
 # SharePoint連携ツールのローカル設定・認証キャッシュ
 po_database_organizer/config.json
 po_database_organizer/token_cache.json
