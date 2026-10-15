@@ -8,6 +8,61 @@
 
 ---
 
+# BBT レクチャーオーガナイザー開発
+
+## Session Index
+
+| Session | Title | Date | Status | Main Files |
+| ------- | ----- | ---- | ------ | ---------- |
+| S01 | BBT レクチャーオーガナイザー開発 S01 - Gemini API プロキシ化 | 2026-08-17〜2026-10-15 | 完了（PR #26 は未マージ） | bbt_lecture_organizer/BBT_lecture_script_getter_20260817_03.py, bbt_lecture_organizer/HANDOVER_S02_home_pc_migration.md |
+
+## S01 - Gemini API プロキシ化
+
+### Purpose
+
+* 会社PCから Gemini API への直接アクセスが遮断されたため、共通モジュール `gemini_client.py` 経由の呼び出しへ移行する。
+* 本ツールは旧SDK `google.generativeai` を使っており、既存5ツールの新SDK向けシムは流用できなかった。
+
+### Work Completed
+
+* **`_20260817_01`（main にマージ済み）**: 旧SDK互換シムを追加し、`genai` 名前空間ごと差し替えた。既存99関数のうち98は1バイトも変更なし。
+  * `generation_config` が snake_case の素の dict だった。そのままだと `responseMimeType` が載らず、JSON モードが黙って無効化されるため camelCase 変換を実装した。
+  * `GEMINI_API_KEY` 必須チェックを廃止した。呼び出し元が `try` の外にあり、プロキシ専用構成だと要約が1件も走らずに停止するため。
+* **`_20260817_02`（PR #26）**: Tcl_AsyncDelete の予防措置として `gc.collect()` を4箇所に追加した。**効果は未確認。**
+* **`_20260817_03`（PR #26）**: `faulthandler` を追加し、強制終了時に全スレッドのトレースバックを `crash_traceback.log` へ出す。
+* 併せて `.gitignore` に `crash_traceback.log` と `execution_log.log` を追加した（実行時に生成され、講義タイトル等が入りうるため）。
+
+### Decisions
+
+* 移行方式は旧SDK互換シム（新SDK `google.genai` への書き換えはしない）。
+* 「直接接続の復活お知らせ」は入れない（複数ツールで同日に重複通知する未決事項があるため）。
+* 納品はリポジトリに `bbt_lecture_organizer/` を新設して行う。
+
+### Findings
+
+* 猶予期間は `GEMINI_RETRY_DIRECT_AFTER_SECONDS`（現在 86400＝24時間）。**最初の失敗時刻から24時間固定**で、延長されない。全ツールで共有される。
+* **遮断以外のエラー（429・400 等）でも24時間プロキシ固定になる**（`gemini_client` の仕様上の弱点）。
+* `Tcl_AsyncDelete` は、最小再現では同じエラーで落ちたが、本物の `run()`→`_run_new()` を実tkinter（Xvfb）で動かすと旧版でも再現しなかった。ワーカー開始時点で、閉じたダイアログの残骸は0件だった。**原因は未特定。**
+
+### Tests
+
+* 偽 `gemini_client` 注入のテストで、payload・レスポンス契約・認証ガード・共通モジュール未配置時のエラー・実物 `gemini_client.py` でのパス解決・HTML生成までの回帰を検証し、すべて合格。
+* **未確認**: プロキシ経由で実際に応答が返るところ、`crash_traceback.log` の実機での生成、Tcl_AsyncDelete の根本原因。
+
+### Open Items
+
+* PR #26 の取り込み。
+* Tcl_AsyncDelete の原因特定（`crash_traceback.log` 待ち）。
+* S02 で自宅PCへ移管する。会社PC固有パス6箇所と履歴ファイルの扱いが課題。
+* 越智さんの回答で確定: 移管先は `home-pc-workspace`、自宅PCのクローンと Summary の場所（`PROJECT_STATUS.md` 参照）。
+
+### Next Session
+
+* 次回: `BBT レクチャーオーガナイザー S02 自宅PC移管`（`ochi1216/home-pc-workspace` で作業）。
+* 引継ぎは `bbt_lecture_organizer/HANDOVER_S02_home_pc_migration.md`。
+
+---
+
 # Outlook オーガナイザー開発
 
 ## Session Index

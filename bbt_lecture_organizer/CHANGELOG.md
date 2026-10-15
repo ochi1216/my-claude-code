@@ -9,6 +9,117 @@ Gemini AI で要約HTMLレポートを自動生成するツール。
 
 ---
 
+## VERSION 20260817_03
+
+**強制終了時の診断ログ（faulthandler）を追加**
+
+`20260817_01` で起きた `Tcl_AsyncDelete: async handler deleted by the wrong thread` による
+強制終了は、原因が未確認のままである（`20260817_02` の項を参照）。次に起きたときに
+**どのスレッドのどの行で起きたか**を特定できるよう、診断ログを追加した。
+
+### 追加
+
+- `if __name__ == "__main__":` ブロックに `faulthandler.enable()` を追加（約15行）。
+  Cレベルの強制終了（SIGABRT・SIGSEGV 等。Tcl_AsyncDelete も含む）が起きたとき、
+  **全スレッドのPythonトレースバック**を `crash_traceback.log`（スクリプトと同じフォルダ）に書き出す。
+  - `sys.stderr` は `DualLogger` に差し替え済みで `fileno` を持たないため、
+    `faulthandler` には実ファイルを明示的に渡している。
+  - 追記モード。起動のたびに `===== 起動 日時 / VERSION 20260817_03 =====` の見出し行が1行入る。
+    **落ちなければ見出し行だけが並ぶ**（正常）。
+  - ログファイルを開けない場合は警告を出して処理を続行する（本処理は止めない）。
+- 関数の変更はなし（`__main__` ブロックのみ）。
+
+### 検証
+
+- 実際に `Tcl_AsyncDelete` で落ちる状況（Xvfb＋実tkinter）を作り、**ファイルから取り出した本物の
+  ブロックを実行**して、`crash_traceback.log` に落ちたスレッド・`Garbage-collecting` の状態・
+  呼び出し元の行が残ることを確認した。
+- ログファイルを開けない場合に警告のみで続行することを確認した。
+- 既存テスト 77 項目合格（実物の `gemini_client.py` を使う2項目はこの環境に無くスキップ）。
+
+### 落ちたときの見方
+
+`crash_traceback.log` の末尾に、次のような記録が残る。
+
+```
+Fatal Python error: Aborted
+
+Current thread 0x... (most recent call first):     ← 落ちたスレッド
+  Garbage-collecting                                ← GC中だった場合に出る
+  File "...", line N in <関数名>                    ← その時の呼び出し元
+Thread 0x... (most recent call first):              ← 他のスレッド（メインスレッド等）
+```
+
+**この内容を共有してもらえれば原因を特定できる。**
+
+### 変更ファイル
+
+| ファイル | 内容 |
+|---|---|
+| `BBT_lecture_script_getter_20260817_03.py` | 新リビジョン |
+| `BBT_lecture_script_getter_20260817_02.py` / `_01.py` | 旧リビジョン（変更なし・保持） |
+
+---
+
+## VERSION 20260817_02
+
+**Tcl_AsyncDelete 対策（予防的措置・効果は未確認）**
+
+`BBT_lecture_script_getter_20260817_01.py` の実行中に
+`Tcl_AsyncDelete: async handler deleted by the wrong thread` でプロセスが強制終了した
+（`[1/29]` のトランスクリプト抽出開始直後）。これは Tkinter のオブジェクトが、作成したスレッドとは
+別のスレッドで解放されたときに出るエラーで、Python プロセスごと落ちる。
+
+### 追加・修正
+
+- 閉じ済みダイアログ（モード選択・スキャン進捗）の循環参照の残骸を、**ワーカースレッドが動く前に
+  メインスレッドで `gc.collect()` して回収する**。計5行の追加（`import gc` 含む）。
+  - `SimpleIntegrator.run()` … `ModeSelectionGUI().show()` の直後
+  - `SimpleIntegrator._run_new()` … `_show_scan_progress()` の直後
+  - `SimpleIntegrator._run_search_mode()` … `_show_scan_progress()` の直後
+  - `ContentSelectionGUI._on_execute()` … ワーカースレッド起動の直前
+- `gc.collect()` は**呼び出し側（関数から戻った後）**に置く必要がある。関数内の `mainloop()` 直後では
+  ローカル変数が生きているため回収されない（最小再現で確認済み: 関数内は落ちる／呼び出し側は落ちない）。
+
+### 変更した関数
+
+| 関数 | 変更内容 |
+|---|---|
+| `SimpleIntegrator.run` | `gc.collect()` を1行追加 |
+| `SimpleIntegrator._run_new` | `gc.collect()` を1行追加 |
+| `SimpleIntegrator._run_search_mode` | `gc.collect()` を1行追加 |
+| `ContentSelectionGUI._on_execute` | `gc.collect()` を1行追加 |
+
+それ以外の既存関数106個は1バイトも変更していない（AST＋MD5で検証済み）。
+
+### ⚠️ 原因は未確認です（重要）
+
+- 最小再現では、「閉じたダイアログの残骸があり、ワーカースレッドでGCが走る」と同じエラーで落ちる
+  ことを確認した。一方、**本物の `run()` → `_run_new()` を実際のtkinter（Xvfb）で動かした検証では、
+  旧版 `20260817_01` でも落ちなかった**。ワーカー開始時点で残骸は 0 件で、コンテンツ一覧の画面を
+  作る間にメインスレッドの自動GCが先に片付けていた。ワーカーでの自動GC待ちを10回、処理中に
+  ウィンドウを閉じるケースも試したが、いずれも再現しなかった。
+- したがって、本リビジョンは**今回の強制終了を直すと確認できたものではない**。仕組み上の
+  リスクを下げる予防的措置であり、無害であること（既存テスト77項目合格・変更は上記4関数のみ）
+  だけを確認している。
+- 旧版 `20260804_01` からスレッド構造は変わっておらず、プロキシ化（`20260817_01`）が原因とする
+  根拠も見つかっていない。
+
+### 次の一手（未実施・要承認）
+
+`faulthandler.enable()` を `__main__` に入れると、Cレベルの強制終了（SIGABRT）時にも
+**全スレッドのPythonトレースバックがログに残る**。次に落ちたときに、どのスレッドのどの行で
+起きたかが分かる。
+
+### 変更ファイル
+
+| ファイル | 内容 |
+|---|---|
+| `BBT_lecture_script_getter_20260817_02.py` | 新リビジョン |
+| `BBT_lecture_script_getter_20260817_01.py` | 旧リビジョン（変更なし・保持） |
+
+---
+
 ## VERSION 20260817_01
 
 **Gemini API のプロキシ化（旧SDK `google.generativeai` からの移行）**

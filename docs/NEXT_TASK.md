@@ -5,6 +5,79 @@
 
 ---
 
+# BBT レクチャーオーガナイザー開発
+
+## Session Management
+
+* Project Name: BBT レクチャーオーガナイザー開発
+* Previous Session: S01 - Gemini API プロキシ化
+* Next Session Number: S02
+* Recommended Session Title: BBT レクチャーオーガナイザー S02 自宅PC移管
+* **作業リポジトリ: `ochi1216/home-pc-workspace`（`my-claude-code` ではない）**
+* 自宅PCのクローン: `C:\Users\ochi1\OneDrive\ドキュメント\PythonScripts\home-pc-workspace`
+* 自宅PCの Summary（クローンの外）: `C:\Users\ochi1\OneDrive\ドキュメント\PythonScripts\Summary`
+* 自宅PCのパスには日本語（`ドキュメント`）が入る。文字コードに注意する。
+
+## Objective
+
+* BBT レクチャーオーガナイザーを会社PCの `my-claude-code` から、自宅PCの `home-pc-workspace` へ移管する。
+* 会社PC固有の絶対パス（6箇所）を外部化し、自宅PCで正しく動く状態にする。
+
+## Background
+
+* **詳細は `bbt_lecture_organizer/HANDOVER_S02_home_pc_migration.md` を読むこと。** 自己完結で書いてある。
+* 前例: RSS Organizer を 2026-08-13 に同じ手順で移管した（`docs/PROJECT_STATUS.md` の「RSS オーガナイザー開発（移管済み）」）。
+* 前例の教訓: 会社PCの絶対パスが残ると、`os.makedirs` が誤った場所へ黙って出力する。
+
+## Scope
+
+### Files That May Be Changed
+
+* 移管先 `home-pc-workspace` 側の新フォルダ（フォルダ名は確認事項 Q3）
+* `my-claude-code` 側は「移管済み」の注記のみ（RSS の前例に倣う）
+
+### Files That Must Not Be Changed
+
+* `my-claude-code/bbt_lecture_organizer/` の既存リビジョン（削除・上書き禁止）
+* 移管と無関係なツール一式
+
+## Task
+
+1. 移管先の `CLAUDE.md` と `docs/` を読む。
+2. 資料8節の残りの質問（Q3〜Q10。Q1・Q2は回答済み）を一括で確認する。
+3. 3フェーズ（設計提案→監査→実装）で進める。承認前にコードを生成しない。
+
+## Completion Criteria
+
+* 自宅PCで起動し、要約履歴を引き継いだ状態で要約まで通ること（実機確認は越智さん）。
+* 会社PC固有パスが残っていないこと。
+
+## Known Risks
+
+* 会社PCのコードを自宅PCで直接動かすと、誤った場所へ出力される。
+* 要約履歴 `bbt_summary_history.json`（375件）を移さないと全件を再要約する。
+* Chrome のデバッグ用プロファイルが新規だと BBT に再ログインが必要。
+* `Tcl_AsyncDelete` が自宅PCでも出るかは未確認。
+
+## Open Questions
+
+* 資料8節のQ3〜Q10（フォルダ名、バージョン管理方式、二重運用、履歴の引継ぎ、Gemini の呼び出し方式、Tcl_AsyncDelete の扱い、Chrome パス、PR #26 の扱い）。
+
+## Start Prompt
+
+```
+BBT レクチャーオーガナイザー S02 自宅PC移管 を始めます。
+
+まず、移管先リポジトリ（ochi1216/home-pc-workspace）の CLAUDE.md と docs/ を読んでください。
+次に、添付の HANDOVER_S02_home_pc_migration.md を最後まで読み、8節の質問（Q3〜Q10。Q1・Q2は回答済み）を
+一括で私に確認してください。推測で進めないでください。
+
+進め方は3フェーズ厳守です。Phase1（設計提案）ではコードを生成しません。
+「●３．承認します」と明示するまで、コードを生成しないでください。
+```
+
+---
+
 # Outlook オーガナイザー開発
 
 ## Session Management
