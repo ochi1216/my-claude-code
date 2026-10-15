@@ -49,6 +49,19 @@
 3. **`_03` の `crash_traceback.log` が実機で作られることは未確認。**
 4. 実機（Windows＋Chrome＋Selenium）での動作確認は、Claude Code の環境からはできない。
 
+## 3.5 確定事項（2026-10-15 越智さん回答）
+
+| 項目 | 確定内容 |
+|---|---|
+| 移管先リポジトリ名 | **`home-pc-workspace`**（`workplace` は誤記） |
+| 自宅PCのクローンフォルダ | `C:\Users\ochi1\OneDrive\ドキュメント\PythonScripts\home-pc-workspace` |
+| 自宅PCの Summary フォルダ | `C:\Users\ochi1\OneDrive\ドキュメント\PythonScripts\Summary`（クローンの**外**にある兄弟フォルダ） |
+| 自宅PCのユーザー名 | `ochi1`（会社PCは `nx023836`） |
+
+- 初期の依頼文にあった「自宅PCのクローン＝`C:\Users\nx023836\…\my-claude-code`」は誤記だった。`nx023836\…\my-claude-code` は**会社PC側**のクローン。
+- 自宅PCは OneDrive 配下のため、**パスに日本語（`ドキュメント`）を含む。** 文字コードとエスケープに注意する。
+- Summary がクローンの外にあるので、**出力先はリポジトリ外の絶対パス（または設定）で持つ必要がある。**
+
 ## 4. 会社PC固有パス（`…_20260817_03.py` の行番号）
 
 | 行 | 対象 | 現在値（会社PC） | 自宅PCでの扱い |
@@ -57,8 +70,8 @@
 | L2867 | `SimpleIntegrator.CHROME_PATH` | `C:\Program Files (x86)\Google\Chrome\Application\chrome.exe` | **自宅PCの実パスは未確認** |
 | L2868 | `CHROME_USER_DATA_DIR` | `C:\Users\nx023836\AppData\Local\ChromeDebugProfile9222` | 要決定。**新しいプロファイルなら BBT に再ログインが必要** |
 | L2877 | `output_dirs[0]` | `C:\Users\nx023836\Documents\PythonScripts\bbt\bbt_lecture_summary` | 要決定 |
-| L2878 | `output_dirs[1]` | `C:\Users\nx023836\Nexperia\My Private - Documents\Summary` | **ユーザー指定: 自宅PCの `C:\Users\ochi1\OneDrive\ドキュメント\PythonScripts\home-pc-workspace` に相当** |
-| L3487 | 資料PDFの移動先 `target_dir` | 同上（Summary） | 同上 |
+| L2878 | `output_dirs[1]` | `C:\Users\nx023836\Nexperia\My Private - Documents\Summary` | **確定: 自宅PCの `C:\Users\ochi1\OneDrive\ドキュメント\PythonScripts\Summary`**（クローン `home-pc-workspace` の外、兄弟フォルダ） |
+| L3487 | 資料PDFの移動先 `target_dir` | 同上（Summary） | **確定: 同上**（`…\PythonScripts\Summary`） |
 
 - 該当なし（移植可能）: L321 と L3486 の `~\Downloads` は `expanduser` なので問題ない。
 - `CHROME_DEBUG_PORT = 9222` は共通。
@@ -102,8 +115,8 @@
 
 | # | 質問 | 背景 |
 |---|---|---|
-| Q1 | 移管先は `home-pc-workspace` で正しいか | 依頼文に `home-pc-workplace` と `home-pc-workspace` が混在。前例（RSS）は `ochi1216/home-pc-workspace` |
-| Q2 | 自宅PCのクローンフォルダの実パスは | 依頼文は `C:\Users\nx023836\Documents\PythonScripts\my-claude-code` だが、`nx023836` は会社PCのユーザー名（自宅は `ochi1`）。Summary の移管先 `C:\Users\ochi1\OneDrive\ドキュメント\PythonScripts\home-pc-workspace` がクローン自体かも要確認 |
+| ~~Q1~~ | ~~移管先は `home-pc-workspace` か~~ | **回答済み: `home-pc-workspace`（3.5節）** |
+| ~~Q2~~ | ~~自宅PCのクローンの実パスは~~ | **回答済み: `C:\Users\ochi1\OneDrive\ドキュメント\PythonScripts\home-pc-workspace`。Summary は別フォルダ `…\PythonScripts\Summary`（3.5節）** |
 | Q3 | 移管先のフォルダ名は | RSS の前例は `rss-organizer/`（ハイフン）。`bbt-lecture-organizer/` か |
 | Q4 | バージョン管理は | RSS は固定ファイル名＋Git に移行した。BBT も同様か、`_yyyymmdd_NN` を続けるか |
 | Q5 | 会社PCでも使い続けるか | 続けるなら `my-claude-code` 側の扱いと、5節の A/B 判断に影響 |
@@ -116,7 +129,7 @@
 ## 9. 作業の進め方（推奨）
 
 1. 移管先の `CLAUDE.md` と `docs/` を読む。RSS の移管記録（`rss-organizer/docs/PROJECT_STATUS.md`）を前例として確認する。
-2. 8節の質問を一括で確認する。
+2. 8節の残りの質問（Q3〜Q10）を一括で確認する。
 3. **Phase1**: 移管先の構成案（フォルダ・パスの外部化方式・履歴の置き場・Gemini の A/B）を提示する。
 4. **Phase2**: 4節の6箇所と `os.makedirs` 3箇所のリスクを監査し、承認を得る。
 5. **Phase3**: 実装。**パスの外部化は、スクリプト位置基準か設定ファイルかを承認後に決める。**
@@ -136,7 +149,7 @@
 BBT レクチャーオーガナイザー S02 自宅PC移管 を始めます。
 
 まず、移管先リポジトリ（ochi1216/home-pc-workspace）の CLAUDE.md と docs/ を読んでください。
-次に、添付の HANDOVER_S02_home_pc_migration.md を最後まで読み、8節の質問（Q1〜Q10）を
+次に、添付の HANDOVER_S02_home_pc_migration.md を最後まで読み、8節の質問（Q3〜Q10。Q1・Q2は回答済み）を
 一括で私に確認してください。推測で進めないでください。
 
 進め方は3フェーズ厳守です。Phase1（設計提案）ではコードを生成しません。
@@ -145,6 +158,8 @@ BBT レクチャーオーガナイザー S02 自宅PC移管 を始めます。
 前提:
 - 対象ツール: BBT レクチャーオーガナイザー（BBT_lecture_script_getter_20260817_03.py）
 - 会社PCの絶対パスが6箇所あります（資料4節）。自宅PCでそのまま動かさないでください。
+- 自宅PCのクローンは C:\Users\ochi1\OneDrive\ドキュメント\PythonScripts\home-pc-workspace、
+  Summary は C:\Users\ochi1\OneDrive\ドキュメント\PythonScripts\Summary です（資料3.5節）。
 - 要約履歴 bbt_summary_history.json（375件）は Git の外にあります。
 - 実機（Windows＋Chrome＋Selenium）の動作確認は私が行います。
 ```
